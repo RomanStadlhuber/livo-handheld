@@ -22,6 +22,11 @@ tags
 
 # from https://github.com/github/gitignore/blob/main/ROS.gitignore
 
+# data and rosbags
+/data
+/bags
+*.bag
+
 devel/
 logs/
 build/
