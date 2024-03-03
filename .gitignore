@@ -23,8 +23,8 @@ tags
 # from https://github.com/github/gitignore/blob/main/ROS.gitignore
 
 # data and rosbags
-/data
-/bags
+data/
+bags/
 *.bag
 
 devel/
