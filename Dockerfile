@@ -53,7 +53,7 @@ RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
 RUN chmod +x /catkin_ws/src/nxp_precision_9dof/scripts/*.py && \
     pip install -r /catkin_ws/src/nxp_precision_9dof/requirements.txt
 FROM base as development
-WORKDIR catkin_ws/src
+WORKDIR /catkin_ws/src
 RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc
 RUN echo "source /catkin_ws/devel/setup.bash" >> /root/.bashrc
 RUN apt-get update && apt-get install -y -q ros-noetic-rqt-image-view
