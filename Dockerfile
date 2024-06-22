@@ -35,14 +35,15 @@ RUN git clone https://github.com/RomanStadlhuber/nxp_precision_9dof.git
 # install MID360 support (from https://github.com/RomanStadlhuber/mid360_docker/blob/main/Dockerfile)
 # install Livox-SDK2 which is a dependency for the ROS driver
 WORKDIR /install
-RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git && cd ./Livox-SDK2 && \
+COPY 3rd/Livox-SDK2 /install/Livox-SDK2
+RUN cd /install/Livox-SDK2 && \
     mkdir build && cd build && cmake .. && make -j && make install
 # make VTK (https://docs.vtk.org/en/latest/index.html) symlink to version-less folder
 RUN ln -s /usr/bin/vtk7 /usr/bin/vtk
 # install mid360 driver
 WORKDIR /catkin_ws/src
 # clone the driver repo
-RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
+COPY 3rd/livox_ros_driver2 /catkin_ws/src/livox_ros_driver2
 RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && /catkin_ws/src/livox_ros_driver2/build.sh ROS1"
 # build the ROS workspace
 WORKDIR /catkin_ws
