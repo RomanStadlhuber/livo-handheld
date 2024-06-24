@@ -1,6 +1,4 @@
 import subprocess
-import rospy
-import rospkg
 import os
 import time
 from datetime import datetime
@@ -39,10 +37,6 @@ class Interfaces:
         self.lidar_launched = False
         # start roscore so nodes can be launched
         self.__start_roscore()
-        # refer to
-        # https://wiki.ros.org/roslaunch/API%20Usage
-        # for python based usage of roslaunch
-        rospy.init_node(name="livo_webinterface", anonymous=False)
         self.devices_started = False
         self.rosbag_record = None
 
