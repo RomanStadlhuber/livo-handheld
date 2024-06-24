@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
+{% from 'bootstrap5/form.html' import render_form %}
 
 {% block content %}
-<h1> Recorder </h1>
-<p> hullo, hullo ? </p>
+<h2>Start Recording</h2>
+{{ render_form(form) }}
 {% endblock %}

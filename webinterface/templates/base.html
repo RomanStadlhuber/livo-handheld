@@ -5,7 +5,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Bootstrap-Flask Demo Application</title>
+    <title>LiDAR Inertial Camera Recorder Webapp</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
     {{ bootstrap.load_css() }}
     <style>
@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4" data-bs-theme="dark">
         <div class="container">
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"
                 aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,8 +38,9 @@
         </div>
         </div>
     </nav>
-    
+
     <main class="container">
+        <h1> LiDAR Inertial Camera Recorder </h1>
         {{ render_messages(container=False, dismissible=True, dismiss_animate=True) }}
         {% block content %}{% endblock %}
     </main>

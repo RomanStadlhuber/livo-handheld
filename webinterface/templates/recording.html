@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% from 'bootstrap5/form.html' import render_form %}
+
+{% block content %}
+<p>Current Recording</p>
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th scope="col">Property</th>
+            <th scope="col">Value/Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <th scope="row">Camera Node</th>
+            <td>{{ status.camera }}</td>
+        </tr>
+        <tr>
+            <th scope="row">LiDAR+IMU Node</th>
+            <td>{{ status.lidar }}</td>
+        </tr>
+        <tr>
+            <th scope="row">Recording folder</th>
+            <td>{{ status.basepath }}</td>
+        </tr>
+        <tr>
+            <th scope="row">Recording filename</th>
+            <td>{{ status.filename }}</td>
+        </tr>
+    </tbody>
+</table>
+{{ render_form(form) }}
+{% endblock %}

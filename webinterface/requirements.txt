@@ -1,1 +1,3 @@
 bootstrap-flask
+flask-wtf
+PyYAML
