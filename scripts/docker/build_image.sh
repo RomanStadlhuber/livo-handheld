@@ -1,2 +1,3 @@
 #!/bin/bash
-docker build -t livo .
+# build only up to and including development stage
+docker build --target development -t livo .

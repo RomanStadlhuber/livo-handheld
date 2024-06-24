@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
-    <node pkg="rospy_tutorials" type="talker" name="talker_cam"/>
+    <include file="$(find livo_runner)/launch/camera_uncalibrated.launch"/>
 </launch>

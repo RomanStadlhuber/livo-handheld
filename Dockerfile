@@ -60,6 +60,13 @@ RUN echo "source /catkin_ws/devel/setup.bash" >> /root/.bashrc
 RUN apt-get update && apt-get install -y -q ros-noetic-rqt-image-view
 # copy neovim configuration file
 COPY init.vim /root/.config/nvim/init.vim
-
 # optionally, use a deployment stage (e.g. for usage via docker-compose)
-# FROM development as deploy
+FROM development as deploy
+# install livo_runner node
+WORKDIR /catkin_ws
+COPY livo_runner /catkin_ws/src/livo_runner
+RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
+# install webinterface
+COPY webinterface /install/webinterface
+RUN pip install -r /install/webinterface/requirements.txt
+ENTRYPOINT /bin/bash /install/webinterface/docker-entrypoint.sh
