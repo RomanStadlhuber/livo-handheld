@@ -46,6 +46,24 @@ This stackexchange post is quite a nice representation as far as the setup goes:
 
 </details>
 
+## Usage
+
+### Setup the Container
+
+Run
+
+```bash
+./scripts/docker/prod.sh
+```
+to perform the deployment build, which will also setup the web-application used to interface and configure the container to start on reboot.
+
+### Record Data
+
+Connect an external storage devie to the raspberry pi and make sure it is automatically mounted in either of `/media` or `/mnt`.
+Find the IP of the device and connect to `<ip>:5000`, then follow the instructions on the webapp.
+
+## Develompent
+
 ### Build and Run the Container
 
 The `Dockerfile` is found in the root of this repository. Run
