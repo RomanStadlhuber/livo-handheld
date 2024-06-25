@@ -2,6 +2,8 @@ import subprocess
 import os
 import time
 from datetime import datetime
+import psutil
+import pathlib
 
 
 class Interfaces:
@@ -9,12 +11,27 @@ class Interfaces:
     @staticmethod
     def get_storage_devices():
         """Get a list of external devices that can be used to store recorded data."""
-        # https://stackoverflow.com/questions/12672981/python-os-independent-list-of-available-storage-devices
-        # listdrives = subprocess.Popen("mount", shell=True, stdout=subprocess.PIPE)
-        # listdrivesout, err = listdrives.communicate()
-        # for idx, drive in enumerate(filter(None, listdrivesout)):
-        #     listdrivesout[idx] = drive.split()[2]
-        return ["/media/ext/mock1", "/media/ext/mock2", "/home/roman/testbags"]
+        # locations where we allow for external media
+        media_roots = ["media", "mnt"]
+        # the external media that we found
+        media_dirs = []
+        # find all disk partitions and use their mountpoints to identify external drives
+        parts = psutil.disk_partitions()
+        # try to identify if a partitions is an external drive
+        for p in parts:
+                path = pathlib.Path(p.mountpoint)
+                if len(path.parents) > 1:
+                        # name of all parent directories
+                        pdir = [x.name for x in path.parents]
+                        # needs to unpack at least two elements!
+                        *_, root, _ = pdir
+                        # check if 2nd root directory is in allowed media dirs
+                        if root in media_roots:
+                                # print(f"{path.name} is media!")
+                                media_dirs.append(str(path.resolve()))
+        # print("found the following media directories:")	
+        return media_dirs
+
 
     @staticmethod
     def get_active_bags(storage):
@@ -113,3 +130,7 @@ class Interfaces:
             self.lidar_launched = True
         except Exception as e:
             print(f"Failed to launch LiDAR: {str(e)}")
+
+
+if __name__ == "__main__":
+    print(Interfaces.get_storage_devices())

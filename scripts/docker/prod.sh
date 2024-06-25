@@ -10,6 +10,8 @@ docker run \
 --privileged \
 --network host \
 -v /dev:/dev \
+-v /mnt:/mnt \
+-v /media:/media \
 --name livo-prod \
 --restart always \
 livo:deploy
