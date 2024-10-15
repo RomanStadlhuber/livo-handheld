@@ -42,7 +42,7 @@ class Interfaces:
         return [f"storage/mock1.bag", f"storage/mock2.bag"]
 
     pkg_livo = "livo_runner"
-    launchfile_cam = "camera.launch"
+    launchfile_cam = "camera_imu.launch"
     launchfile_lidar = "lidar.launch"
 
     def __init__(self) -> None:
