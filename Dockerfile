@@ -1,4 +1,4 @@
-FROM arm32v7/ros:noetic-perception-focal as base
+FROM arm32v7/ros:noetic-perception-focal AS base
 ENV DEBIAN_FRONTEND noninteractive
 
 # install locales
@@ -50,10 +50,10 @@ WORKDIR /catkin_ws
 # install some dependencies that are required to build
 RUN apt-get update && apt-get install -y -q ros-noetic-diagnostic-updater
 # build and set up all packages (IMU and camera)
-RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make" 
+RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make -DCMAKE_BUILD_TYPE=Release" 
 RUN chmod +x /catkin_ws/src/nxp_precision_9dof/scripts/*.py && \
     pip install -r /catkin_ws/src/nxp_precision_9dof/requirements.txt
-FROM base as development
+FROM base AS development
 WORKDIR /catkin_ws/src
 RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc
 RUN echo "source /catkin_ws/devel/setup.bash" >> /root/.bashrc
@@ -61,11 +61,11 @@ RUN apt-get update && apt-get install -y -q ros-noetic-rqt-image-view
 # copy neovim configuration file
 COPY init.vim /root/.config/nvim/init.vim
 # optionally, use a deployment stage (e.g. for usage via docker-compose)
-FROM development as deploy
+FROM development AS deploy
 # install livo_runner node
 WORKDIR /catkin_ws
 COPY livo_runner /catkin_ws/src/livo_runner
-RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
+RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make -DCMAKE_BUILD_TYPE=Release"
 # install webinterface
 COPY webinterface /install/webinterface
 RUN pip install -r /install/webinterface/requirements.txt
