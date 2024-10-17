@@ -4,12 +4,15 @@ import time
 from datetime import datetime
 import psutil
 import pathlib
+import rospy
+import roslaunch
+from typing import List
 
 
 class Interfaces:
 
     @staticmethod
-    def get_storage_devices():
+    def get_storage_devices() -> List[str]:
         """Get a list of external devices that can be used to store recorded data."""
         # locations where we allow for external media
         media_roots = ["media", "mnt"]
@@ -38,12 +41,31 @@ class Interfaces:
         return [f"storage/mock3.active.bag"]
 
     @staticmethod
-    def get_bags(storage):
-        return [f"storage/mock1.bag", f"storage/mock2.bag"]
+    def get_bags(storage_location: str) -> List[str]:
+        """List all previously recorded rosbags in storage_location.
+        
+        Currently, functionality only returns the names without further info."""
+        recorded_bags = [
+                    x.name for x in pathlib.Path(storage_location).iterdir()
+                    if ".bag" in x.suffixes
+                    and ".active" not in x.suffixes
+                ]
+        return recorded_bags
+        
 
     pkg_livo = "livo_runner"
     launchfile_cam = "camera_imu.launch"
     launchfile_lidar = "lidar.launch"
+
+    @staticmethod
+    def rospack_find(package_name:str) -> str:
+        """Find the absolute path to a ROS package."""
+        # https://stackoverflow.com/a/1724723
+        for root, dirs, files in os.walk(path):
+            if package_name in dirs:
+                return os.path.join(root, name)
+        print(f"ERROR: Interfaces unable to find rospack '{package_name}'")
+        raise FileNotFoundError(f"Unable to find rospack '{package_name}'")
 
     def __init__(self) -> None:
         # initialize launch handles as None so I don't have to check the attr exists
@@ -56,6 +78,16 @@ class Interfaces:
         self.__start_roscore()
         self.devices_started = False
         self.rosbag_record = None
+        # initialize roslaunch API node
+        # (see: https://wiki.ros.org/roslaunch/API%20Usage)
+        # NOTE: implementation delayed until additional MVP features work
+        """rospy.init_node("launcher_node", anonymous=True)
+        self.roslaunch_uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+        roslaunch.configure_logging(self.roslaunch_uuid)
+        # roslaunch instances for cam+imu and LiDAR
+        self.roslaunch_cam_imu = None
+        self.roslaunch_lidar = None"""
+
 
     def start_device_nodes(self):
         if not self.devices_started:
@@ -79,11 +111,16 @@ class Interfaces:
         self.rosbag_record = subprocess.Popen(cmd)
         return bag_name
 
+    @property
+    def is_recording(self):
+        return self.rosbag_record is not None
+
     def stop_recording(self):
         if self.rosbag_record is None:
             print("recording subprocess unavailable!!")
         try:
             self.rosbag_record.terminate()
+            self.rosbag_record = None
         except Exception as e:
             print(f"Failed to stop recording: {e}")
 

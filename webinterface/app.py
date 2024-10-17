@@ -42,6 +42,7 @@ class StopRecordingForm(FlaskForm):
     submit = SubmitField(label="Stop Recording")
 
 
+
 @app.route("/index")
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -54,7 +55,11 @@ def index():
                 filename=request.form.get("recording_name"),
             )
         )
-    return render_template("index.html", form=form, interfaces=interfaces)
+    # pick selected or first (= default) storage location
+    rosbag_storage_location = request.form.get("storage_location") or Interfaces.get_storage_devices()[0]
+    # get list of recordings in that storage location
+    bag_list = interfaces.get_bags(rosbag_storage_location)
+    return render_template("index.html", form=form, interfaces=interfaces, rosbags=bag_list)
 
 
 @app.route("/record", methods=["GET", "POST"])

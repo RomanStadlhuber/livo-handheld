@@ -4,4 +4,22 @@
 {% block content %}
 <h2>Start Recording</h2>
 {{ render_form(form) }}
+<h2>Recordings List</h2>
+    {% if rosbags %}
+    <ul class="list-group">
+        {% for bagname in rosbags %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ bagname }}
+            <!-- <span class="badge bg-primary rounded-pill">14</span> -->
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+        <div class="card border-info mb-3" style="max-width: 20rem;">
+            <div class="card-header">Information</div>
+            <div class="card-body">
+                <h4 class="card-title">No recordings available</h4>
+                <p class="card-text">Create some recordings and have them listed here.</p>
+        </div>
+    {% endif %}
 {% endblock %}
