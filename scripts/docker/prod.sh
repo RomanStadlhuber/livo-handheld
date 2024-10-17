@@ -9,6 +9,8 @@ docker container rm --force livo-prod
 docker run \
 --privileged \
 --network host \
+-e PUID=$(id -u) \
+-e PGID=$(id -g) \
 -v /dev:/dev \
 -v /mnt:/mnt \
 -v /media:/media \
