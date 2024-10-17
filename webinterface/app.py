@@ -67,9 +67,13 @@ def index():
             )
         )
     # pick selected or first (= default) storage location
-    rosbag_storage_location = request.form.get("storage_location") or Interfaces.get_storage_devices()[0]
+    rosbag_storage_location = request.form.get("storage_location")
+    if rosbag_storage_location is None:
+        available_devices = interfaces.get_storage_devices()
+        if len(available_devices) > 0:
+            rosbag_storage_location = available_devices[0]
     # get list of recordings in that storage location
-    bag_list = interfaces.get_bags(rosbag_storage_location)
+    bag_list = interfaces.get_bags(rosbag_storage_location) if rosbag_storage_location else None
     return render_template("index.html", form=form, interfaces=interfaces, rosbags=bag_list)
 
 
