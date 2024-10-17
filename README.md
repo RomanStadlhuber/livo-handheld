@@ -46,6 +46,11 @@ This stackexchange post is quite a nice representation as far as the setup goes:
 
 </details>
 
+### Configure automatic USB mounting
+
+Automatic mounting is required for the software to be able to detect external drives when run in "headless mode".
+Follow the instructions in this [GitHub gist](https://gist.github.com/zebrajaeger/168341df88abb6caaea5a029a2117925).
+
 ## Usage
 
 ### Setup the Container
