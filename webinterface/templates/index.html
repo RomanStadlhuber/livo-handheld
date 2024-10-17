@@ -7,10 +7,12 @@
 <h2>Recordings List</h2>
     {% if rosbags %}
     <ul class="list-group">
-        {% for bagname in rosbags %}
+        {% for name_and_size in rosbags %}
         <li class="list-group-item d-flex justify-content-between align-items-center">
-            {{ bagname }}
-            <!-- <span class="badge bg-primary rounded-pill">14</span> -->
+            {{ name_and_size[0] }}
+            <span class="badge bg-primary rounded-pill">
+                {{ name_and_size[1] }}
+            </span>
         </li>
         {% endfor %}
     </ul>
@@ -19,7 +21,10 @@
             <div class="card-header">Information</div>
             <div class="card-body">
                 <h4 class="card-title">No recordings available</h4>
-                <p class="card-text">Create some recordings and have them listed here.</p>
+                <p class="card-text">
+                Create some recordings and have them listed here.
+                If recordings are not shown immediately, wait a short time, then refresh the page.
+                </p>
         </div>
     {% endif %}
 {% endblock %}

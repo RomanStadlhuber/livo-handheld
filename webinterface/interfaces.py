@@ -7,7 +7,7 @@ import pathlib
 import rospy
 import roslaunch
 from typing import List
-
+import numpy as np
 
 class Interfaces:
 
@@ -46,7 +46,11 @@ class Interfaces:
         
         Currently, functionality only returns the names without further info."""
         recorded_bags = [
-                    x.name for x in pathlib.Path(storage_location).iterdir()
+                    (
+                        x.name, 
+                        Interfaces.__str_filesize(os.path.getsize(str(x)))
+                    )
+                    for x in pathlib.Path(storage_location).iterdir()
                     if ".bag" in x.suffixes
                     and ".active" not in x.suffixes
                 ]
@@ -87,6 +91,19 @@ class Interfaces:
         # roslaunch instances for cam+imu and LiDAR
         self.roslaunch_cam_imu = None
         self.roslaunch_lidar = None"""
+
+    @staticmethod
+    def __str_filesize(size_bytes) -> str:
+        """Convert the size form os.path.getsize to human-readable filesize.
+
+        Code obtained from https://stackoverflow.com/a/14822210"""
+        if size_bytes == 0:
+            return "0B"
+        size_name = size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+        i = int(np.floor(np.emath.logn(x=size_bytes, n=1024)))
+        p = np.power(1024, i)
+        s = np.round(size_bytes / p, decimals=2)
+        return "%s %s" % (s, size_name[i])
 
 
     def start_device_nodes(self):
