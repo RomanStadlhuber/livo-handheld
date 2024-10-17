@@ -4,6 +4,7 @@ from wtforms import SelectField, StringField, SubmitField, FileField
 from wtforms.validators import DataRequired, Optional, Regexp
 from flask_bootstrap import Bootstrap5
 from interfaces import Interfaces
+from state import State
 import re
 
 app = Flask(__name__)
@@ -17,7 +18,8 @@ bootstrap = Bootstrap5(app)
 
 # instance to attach to interfaces
 interfaces = Interfaces()
-
+# recorder state management
+state = State()
 
 class StartRecordingForm(FlaskForm):
     storage_location = SelectField(
@@ -46,6 +48,15 @@ class StopRecordingForm(FlaskForm):
 @app.route("/index")
 @app.route("/", methods=["GET", "POST"])
 def index():
+    # if there's currently an active recording, redirect to rec. page
+    if state.currently_recording:
+        return redirect(
+            url_for(
+                "record",
+                basepath=state.recording_basepath,
+                filename=state.recording_filename,
+            )
+        )
     form = StartRecordingForm()
     if form.validate_on_submit():
         return redirect(
@@ -64,25 +75,43 @@ def index():
 
 @app.route("/record", methods=["GET", "POST"])
 def record():
-    basepath = request.args.get("basepath")
-    filename = request.args.get("filename")
     form = StopRecordingForm()
     if form.validate_on_submit():
         interfaces.stop_recording()
         # TODO: do we really need to stop device nodes?
         interfaces.stop_device_nodes()
+        state.set_recording_stopped()
         return redirect("/")
-
-    devices = interfaces.start_device_nodes()
-    bagname = interfaces.start_recording(basepath, filename)
-    status = dict(
-        camera="Running" if devices["camera"] else "Unavailable",
-        lidar="Running" if devices["lidar"] else "Unavailable",
-        basepath=basepath,
-        filename=bagname,
-    )
-    print(status)
-    return render_template("recording.html", form=form, status=status)
+    # resume active recording
+    if state.currently_recording:
+        status = dict(
+            camera="Running" if state.cam_imu_running else "Unavailable",
+            lidar="Running" if state.lidar_running else "Unavailable",
+            basepath=state.recording_basepath,
+            filename=state.recording_filename
+        )
+        print("::: resuming currently active recording :::")
+        print(status)
+        return render_template("recording.html", form=form, status=status)
+    # start new recording
+    else:
+        basepath = request.args.get("basepath")
+        filename = request.args.get("filename")
+        devices = interfaces.start_device_nodes()
+        bagname = interfaces.start_recording(basepath, filename)
+        state.set_recording_path(basepath, bagname)
+        state.set_devices_running(
+                cam_imu=devices["camera"],
+                lidar=devices["lidar"],
+            )
+        status = dict(
+            camera="Running" if devices["camera"] else "Unavailable",
+            lidar="Running" if devices["lidar"] else "Unavailable",
+            basepath=basepath,
+            filename=bagname,
+        )
+        print(status)
+        return render_template("recording.html", form=form, status=status)
 
 
 if __name__ == "__main__":
