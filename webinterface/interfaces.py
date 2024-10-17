@@ -45,6 +45,8 @@ class Interfaces:
         """List all previously recorded rosbags in storage_location.
         
         Currently, functionality only returns the names without further info."""
+        if storage_location is None or not pathlib.Path(storage_location).exists():
+            return []
         recorded_bags = [
                     (
                         x.name, 
@@ -120,10 +122,17 @@ class Interfaces:
     def start_recording(self, base_path, filename):
         bag_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         bag_name = f"{bag_name}.bag"
-        cmd = ["rosbag", "record", "-a"]
+        cmd = ["rosbag", "record", "-b 1024"]
         if filename is not None and len(filename) > 0:
             bag_name = f"{filename}_{bag_name}"
             cmd.extend(["-o", f"{base_path}/{filename}"])
+        cmd.extend([
+            "/raspicam_node/image",
+            "/imu_raw",
+            "/livox/lidar",
+            "/livox/imu",
+            "/clock"
+        ])
         print(f"""Recording bag from '{("").join(cmd)}'""")
         self.rosbag_record = subprocess.Popen(cmd)
         return bag_name
