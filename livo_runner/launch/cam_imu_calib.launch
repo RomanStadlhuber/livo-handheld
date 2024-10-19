@@ -1,6 +1,6 @@
 <launch>
     <!-- launch the camera driver (without calibration file) -->
-    <include file="$(find livo_runner)/launch/camera_uncalibrated.launch"/>
+    <include file="$(find livo_runner)/launch/camera_image_compressed.launch"/>
         <!-- launch the IMU driver --> 
     <include file="$(find nxp_precision_9dof)/launch/imu.launch"/>
 </launch>

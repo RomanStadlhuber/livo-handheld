@@ -99,6 +99,8 @@ Please read this **important note** on the ROS message formats used.
 In order to save recording space and allow for larger-scale recordings, `rosbag record` will only subscribe to `/image/compressed`.
 When playing back the recorded bags, use the `image_transport` packages `republish` node for decompression (as is done e.g. in LVI-SAM ([example](https://github.com/TixiaoShan/LVI-SAM/blob/master/launch/include/module_sam.launch#L21)).
 
+> **NOTE:** it seems that because of the compressed images, `rosbag-record` will require a few minutes to perform buffering after the recording is over!
+
 ##### LiDAR Point-Cloud Format
 
 The Livox ROS-Driver defines a [Custom Message Format](3rd/livox_ros_driver2/msg/CustomMsg.msg) which includes the start-time of the scan as well as time-offsets of individual points.

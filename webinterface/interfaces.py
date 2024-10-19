@@ -47,15 +47,17 @@ class Interfaces:
         Currently, functionality only returns the names without further info."""
         if storage_location is None or not pathlib.Path(storage_location).exists():
             return []
-        recorded_bags = [
-                    (
-                        x.name, 
-                        Interfaces.__str_filesize(os.path.getsize(str(x)))
-                    )
-                    for x in pathlib.Path(storage_location).iterdir()
-                    if ".bag" in x.suffixes
-                    and ".active" not in x.suffixes
-                ]
+        recorded_bags = []
+        for x in pathlib.Path(storage_location).iterdir():
+            if x.is_file() and ".bag" in x.suffixes:
+                filename = x.name
+                filesize_str = Interfaces.__str_filesize(os.path.getsize(str(x)))
+                # add buffering note to active bags
+                # doing this because buffering takes a while for compressed images
+                if ".active" in x.suffixes:
+                    filesize_str += " (buffering..)"
+                recorded_bags.append((filename, filesize_str))
+
         return recorded_bags
         
 
@@ -122,7 +124,7 @@ class Interfaces:
     def start_recording(self, base_path, filename):
         bag_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         bag_name = f"{bag_name}.bag"
-        cmd = ["rosbag", "record", "-b 2048"]
+        cmd = ["rosbag", "record", "--buffsize=2048"]
         if filename is not None and len(filename) > 0:
             bag_name = f"{filename}_{bag_name}"
             cmd.extend(["-o", f"{base_path}/{filename}"])
@@ -135,7 +137,7 @@ class Interfaces:
         ])
         # NOTE: when running the bag, decompress with image_transport republish
         # see: https://github.com/TixiaoShan/LVI-SAM/blob/master/launch/include/module_sam.launch#L21
-        print(f"""Recording bag from '{("").join(cmd)}'""")
+        print(f"""Recording bag from '{(" ").join(cmd)}'""")
         self.rosbag_record = subprocess.Popen(cmd)
         return bag_name
 
