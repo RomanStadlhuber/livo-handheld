@@ -51,7 +51,7 @@ This stackexchange post is quite a nice representation as far as the setup goes:
 Automatic mounting is required for the software to be able to detect external drives when run in "headless mode".
 Follow the instructions in this [GitHub gist](https://gist.github.com/michalpelka/82d44a21c29f34ee5320c349f8bbf683).
 
-> **NOTE:** It is imperative that you build `usbmount` [from source]().
+> **NOTE:** It is imperative that you build `usbmount` [from source](https://github.com/rbrito/usbmount).
 > 
 > If the file `/etc/usbmount/usbmount.conf` does not exist after the installation, populate it from the source as well, e.g. using
 > ```bash
@@ -83,14 +83,29 @@ Run
 ```bash
 ./scripts/docker/prod.sh
 ```
-to perform the deployment build, which will also setup the web-application used to interface and configure the container to start on reboot.
+to perform the deployment build, which will also setup the web-application used to interface and configure the container to start on system boot.
 
 ### Record Data
 
 Connect an external storage devie to the raspberry pi and make sure it is automatically mounted in either of `/media` or `/mnt`.
 Find the IP of the device and connect to `<ip>:5000`, then follow the instructions on the webapp.
 
-## Develompent
+#### A Note on Data Formats
+
+Please read this **important note** on the ROS message formats used.
+
+##### Camera Image Messages
+
+In order to save recording space and allow for larger-scale recordings, `rosbag record` will only subscribe to `/image/compressed`.
+When playing back the recorded bags, use the `image_transport` packages `republish` node for decompression (as is done e.g. in LVI-SAM ([example](https://github.com/TixiaoShan/LVI-SAM/blob/master/launch/include/module_sam.launch#L21)).
+
+##### LiDAR Point-Cloud Format
+
+The Livox ROS-Driver defines a [Custom Message Format](3rd/livox_ros_driver2/msg/CustomMsg.msg) which includes the start-time of the scan as well as time-offsets of individual points.
+Although this message type cannot be shown in RViz, it provides the benefit of allowing for time-accurate deskewing of the 3D scan.
+Therefore, the [LiDAR launch file](livo_runner/launch/msg_mid360.launch) is configured to use `xfer_format:=1`.
+
+## Development
 
 ### Build and Run the Container
 

@@ -122,17 +122,19 @@ class Interfaces:
     def start_recording(self, base_path, filename):
         bag_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         bag_name = f"{bag_name}.bag"
-        cmd = ["rosbag", "record", "-b 1024"]
+        cmd = ["rosbag", "record", "-b 2048"]
         if filename is not None and len(filename) > 0:
             bag_name = f"{filename}_{bag_name}"
             cmd.extend(["-o", f"{base_path}/{filename}"])
         cmd.extend([
-            "/raspicam_node/image",
+            "/image/compressed", # record only compressed to save space
             "/imu_raw",
             "/livox/lidar",
             "/livox/imu",
             "/clock"
         ])
+        # NOTE: when running the bag, decompress with image_transport republish
+        # see: https://github.com/TixiaoShan/LVI-SAM/blob/master/launch/include/module_sam.launch#L21
         print(f"""Recording bag from '{("").join(cmd)}'""")
         self.rosbag_record = subprocess.Popen(cmd)
         return bag_name
