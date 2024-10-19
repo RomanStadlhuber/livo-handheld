@@ -35,7 +35,7 @@ metric 300
 interface wlan0
 metric 200
 ```
-**note** that the [ `metric` is important](https://raspberrypi.stackexchange.com/a/87967) for this to work.
+> **NOTE:** the [ `metric` is important](https://raspberrypi.stackexchange.com/a/87967) for this to work.
 
 <details> <summary>If this does not work, you might have to take additional measures.</summary>
 
@@ -49,7 +49,30 @@ This stackexchange post is quite a nice representation as far as the setup goes:
 ### Configure automatic USB mounting
 
 Automatic mounting is required for the software to be able to detect external drives when run in "headless mode".
-Follow the instructions in this [GitHub gist](https://gist.github.com/zebrajaeger/168341df88abb6caaea5a029a2117925).
+Follow the instructions in this [GitHub gist](https://gist.github.com/michalpelka/82d44a21c29f34ee5320c349f8bbf683).
+
+> **NOTE:** It is imperative that you build `usbmount` [from source]().
+> 
+> If the file `/etc/usbmount/usbmount.conf` does not exist after the installation, populate it from the source as well, e.g. using
+> ```bash
+> wget https://raw.githubusercontent.com/rbrito/usbmount/refs/heads/master/usbmount.conf -O /etc/usbmount/usbmount.conf
+> ```
+
+<details><summary>Handling USB drive insertion</summary>
+
+Before running the commands that restart the `udevd` service, make sure that the USB drive
+ - is not plugged in at that time
+ - will not be auto-mounted by the filesystem (in case of GUI-OS)
+
+ > **NOTE:** auto-mounting from the GUI-filesystem and `usbmount` will clash with each other, especially with regards to drive permissions on boot, which is also when the docker container will be started and thus not be able to access the media.
+
+Go to `File Manager > Edit > Preferences > Volume Management` and disable
+ - Mount mountable volumes automatically on program start-up
+ - Mount removable media automatically when they are inserted
+
+After restarting the `udevd` service, you can now insert the drive and it should be auto-mounted to `/media/usb`.
+
+</details>
 
 ## Usage
 
