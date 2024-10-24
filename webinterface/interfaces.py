@@ -10,8 +10,55 @@ from typing import List
 import numpy as np
 import ipaddress
 import json
+import time
+import shutil
+from multiprocessing import Process
+
+
+def copy_finished_recordings(base_path: str):
+    """Process target to wait for recordings to finish.
+
+    Copies all finished recordings to the desired `base_path`.
+    """
+    tmp = pathlib.Path("/tmp")
+    # loop until all bags are copied or time expires
+    while True:
+        # all rosbag files
+        bagfiles = [
+                x for x in tmp.iterdir()
+                if x.is_file()
+                and ".bag" in x.suffixes
+            ]
+        # bags that are still being recorded/buffered
+        active_bags = [x for x in bagfiles if ".active" in x.suffixes]
+        # bags that finished recording
+        finished_bags = [x for x in bagfiles if ".active" not in x.suffixes]
+        # loop until there are no active bag files
+        if len(active_bags) == 0 and len(finished_bags) == 0:
+            # done
+            return
+        elif len(finished_bags) != 0:
+            # copy all finished recordings to desired directory
+            for bagfile in finished_bags:
+                print(f"::: moving finished recording {str(bagfile)} to storage device {base_path}:::")
+                # TODO: maybe use rsync instead?
+                source = str(bagfile)
+                # name during transfer
+                target_buf = os.path.join(base_path, bagfile.name + ".active")
+                # name during transfer (".active" makes the front-end indicate that it's buffering)
+                target_fin = os.path.join(base_path, bagfile.name)
+                # transfer file from /tmp to storage device
+                shutil.move(source, target_buf)
+                # when transfer is done, rename back to original name
+                os.rename(target_buf, target_fin)
+                print("::: done copying recording :::")
+
+        # short delay
+        time.sleep(0.1) # [sec]
+
 
 class Interfaces:
+    """Class to interface with the processes involved in creating recordings."""
 
     @staticmethod
     def get_storage_devices() -> List[str]:
@@ -88,6 +135,8 @@ class Interfaces:
         self.__start_roscore()
         self.devices_started = False
         self.rosbag_record = None
+        # placeholder for the base-path used to store finished recordings
+        self.recording_base_path = None
         # initialize roslaunch API node
         # (see: https://wiki.ros.org/roslaunch/API%20Usage)
         # NOTE: implementation delayed until additional MVP features work
@@ -124,12 +173,20 @@ class Interfaces:
         return dict(lidar=self.lidar_launched, camera=self.cam_launched)
 
     def start_recording(self, base_path, filename):
+        # store base_path of new recording, which is required when stopping the recording process
+        self.recording_base_path = base_path
         bag_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         bag_name = f"{bag_name}.bag"
         cmd = ["rosbag", "record", "--buffsize=2048"]
         if filename is not None and len(filename) > 0:
             bag_name = f"{filename}_{bag_name}"
-            cmd.extend(["-o", f"{base_path}/{filename}"])
+            # NOTE: writing bag onto the host filesystem is faster
+            # compared to writing on external storage devices
+            # when recording LiDAR data, external devices require
+            # time intensive buffering
+            # this will record on the host, with a separate process
+            # querying for completed bags and copying them to "base_path"
+            cmd.extend(["-o", f"/tmp/{filename}"])
         cmd.extend([
             "/image/compressed", # record only compressed to save space
             "/imu_raw",
@@ -153,6 +210,13 @@ class Interfaces:
         try:
             self.rosbag_record.terminate()
             self.rosbag_record = None
+            # start a separate process that will copy finished recordings to the storage device
+            if self.recording_base_path is not None:
+                print("::: staring rosbag copy waiting process :::")
+                p = Process(target=copy_finished_recordings, args=(self.recording_base_path,))
+                p.start()
+            # reset base_path buffer until next recording
+            self.recording_base_path = None
         except Exception as e:
             print(f"Failed to stop recording: {e}")
 
@@ -216,8 +280,6 @@ class Interfaces:
             self.lidar_launched = True
         except Exception as e:
             print(f"Failed to launch LiDAR: {str(e)}")
-
-
 
 if __name__ == "__main__":
     print(Interfaces.get_storage_devices())
