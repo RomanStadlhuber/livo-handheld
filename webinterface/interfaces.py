@@ -8,6 +8,8 @@ import rospy
 import roslaunch
 from typing import List
 import numpy as np
+import ipaddress
+import json
 
 class Interfaces:
 
@@ -69,9 +71,9 @@ class Interfaces:
     def rospack_find(package_name:str) -> str:
         """Find the absolute path to a ROS package."""
         # https://stackoverflow.com/a/1724723
-        for root, dirs, files in os.walk(path):
+        for root, dirs, files in os.walk("/catkin_ws"):
             if package_name in dirs:
-                return os.path.join(root, name)
+                return os.path.join(root, package_name)
         print(f"ERROR: Interfaces unable to find rospack '{package_name}'")
         raise FileNotFoundError(f"Unable to find rospack '{package_name}'")
 
@@ -164,11 +166,25 @@ class Interfaces:
             self.lidar_launched = False
             self.devices_started = False
 
-    def __check_lidar_available(self, ip_lidar: str = "192.168.1.125"):
-        """checks if the LiDAR can be reached over the network"""
-        # TODO: this will not not work, replace it!
-        response = os.system(f"ping -c 1 {ip_lidar}")
-        return response != 0
+
+    def __check_lidar_available(self) -> bool:
+        # path to the JSON config file containing the LiDAR IP address
+        try:
+            config_path = os.path.join(
+                    Interfaces.rospack_find("livo_runner"),
+                    "config/MID360_config.json"
+                )
+            with open(config_path) as f:
+                conf = json.load(f)
+                ip_lidar = conf["lidar_configs"][0]["ip"]
+                ip_lidar = ipaddress.ip_address(ip_lidar)
+                network_eth0 = ipaddress.ip_network("192.168.1.0/24")
+                return ip_lidar in network_eth0
+        except Exception as e:
+            print("::: ERROR occurred when trying to find LiDAR availability :::")
+            print(e)
+            return False
+
 
     def __check_ros_available(self):
         response = os.system("rosnode list")
@@ -192,11 +208,15 @@ class Interfaces:
             print(f"failed to launch camera: {str(e)}")
 
     def __roslaunch_lidar(self):
+        if not self.__check_lidar_available():
+            self.lidar_launched = False
+            return
         try:
             self.launch_lidar = subprocess.Popen(["roslaunch", Interfaces.pkg_livo, Interfaces.launchfile_lidar])
             self.lidar_launched = True
         except Exception as e:
             print(f"Failed to launch LiDAR: {str(e)}")
+
 
 
 if __name__ == "__main__":
