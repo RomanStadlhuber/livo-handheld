@@ -6,6 +6,7 @@ docker run \
 --privileged \
 --network host \
 -v /dev:/dev \
+-v /run/udev:/run/udev \
 -e DISPLAY=$DISPLAY \
 -e PUID=$(id -u) \
 -e PGID=$(id -g) \
