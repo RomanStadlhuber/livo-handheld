@@ -1,64 +1,46 @@
-FROM arm64v8/ros:noetic-perception-focal AS base
-ENV DEBIAN_FRONTEND=noninteractive
-
-# install locales
-RUN apt-get update
-RUN apt-get install apt-utils wget locales -y
-
-# Set the locale
-RUN locale-gen en_US.UTF-8
-RUN update-locale LANG=en_US.UTF-8
-
-# set linked library path
-ENV LD_LIBRARY_PATH=/usr/local/lib
-
-# create root catkin workspace
-WORKDIR /catkin_ws
-
-# install utilities
-# NOTE: mesa-utils is for GUI testing
-RUN apt-get update && apt-get install -y -q curl git byobu neovim mesa-utils \
-    python-is-python3 python3-pip python3-venv python3-rpi.gpio ipython3
-# install install sensor drivers
-WORKDIR /catkin_ws/src
-WORKDIR /install
-# add CTU-MRS repo and install their libcamera ROS driver
-COPY scripts/add-libcamera-ros-driver-ppa.sh /install/
-RUN /bin/bash /install/add-libcamera-ros-driver-ppa.sh && \
-    apt-get update && \
-    apt-get install -y -q ros-noetic-libcamera-ros ros-noetic-libcamera-ros-driver
-# install MID360 support (adapted from https://github.com/RomanStadlhuber/mid360_docker/blob/main/Dockerfile)
-# install Livox-SDK2 which is a dependency for the ROS driver
-COPY 3rd/Livox-SDK2 /install/Livox-SDK2
-RUN cd /install/Livox-SDK2 && \
-    mkdir build && cd build && cmake .. && make -j 8 && make install
-# make VTK (https://docs.vtk.org/en/latest/index.html) symlink to version-less folder
-RUN ln -s /usr/bin/vtk7 /usr/bin/vtk
-# install mid360 driver
-WORKDIR /catkin_ws/src
-# clone the driver repo
-COPY 3rd/livox_ros_driver2 /catkin_ws/src/livox_ros_driver2
-RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && /catkin_ws/src/livox_ros_driver2/build.sh ROS1"
-# build the ROS workspace
-WORKDIR /catkin_ws
-# install some dependencies that are required to build
-RUN apt-get update && apt-get install -y -q ros-noetic-diagnostic-updater
-# build and set up all packages
-RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make -DCMAKE_BUILD_TYPE=Release" 
+FROM ros:jazzy AS base
+RUN apt update && apt install -y --no-install-recommends gnupg
+# RUN apt update && apt -y upgrade
+RUN DEBIAN_FRONTEND='noninteractive' apt install -y --no-install-recommends \
+	meson \
+	python3-colcon-meson \
+	ninja-build \
+	pkg-config \
+	libyaml-dev \
+	python3-yaml \
+	python3-ply \
+	python3-jinja2 \
+	libevent-dev \
+	libdrm-dev \
+	libcap-dev \
+	python3-pip \
+	python3-opencv \
+     && apt-get clean \
+     && apt-get autoremove \
+     && rm -rf /var/cache/apt/archives/* \
+     && rm -rf /var/lib/apt/lists/*
+WORKDIR /ros2_ws/src
+# Install libcamera from source
+RUN git clone https://github.com/raspberrypi/libcamera.git && cd libcamera && git checkout 6ddd79b && cd ..
+RUN git clone https://github.com/christianrauch/camera_ros.git
+RUN /bin/bash -c  "source /opt/ros/$ROS_DISTRO/setup.bash && \
+	cd /ros2_ws && \
+	rosdep update && \
+	rosdep install -t exec -y --from-paths src --ignore-src --rosdistro $ROS_DISTRO --skip-keys=libcamera && \
+	colcon build --event-handlers=console_direct+ && \
+	cd /ros2_ws/src"
+# Install kmsxx from source
+RUN git clone https://github.com/tomba/kmsxx.git
+RUN meson setup kmsxx/build kmsxx/
+RUN ninja -C kmsxx/build/ install 
+# Add the new installations to the python path so that picamera2 can find them
+ENV PYTHONPATH $PYTHONPATH/usr/local/lib/aarch64-linux-gnu/python3.10/site-packages:/app/kmsxx/build/py
+# Finally install picamera2 using pip
+RUN pip3 install picamera2
+# Copy the test script to the container
+COPY 3rd/camera_test /ros2/ws/camera_test
+# Set the entry point. You can comment this out to use your own test scripts...
+CMD ["python3", "/ros2_ws/camera_test/main.py"]
 FROM base AS development
 WORKDIR /catkin_ws/src
-RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc
-RUN echo "source /catkin_ws/devel/setup.bash" >> /root/.bashrc
-RUN apt-get update && apt-get install -y -q ros-noetic-rqt-image-view
-# copy neovim configuration file
-COPY init.vim /root/.config/nvim/init.vim
-# optionally, use a deployment stage (e.g. for usage via docker-compose)
-FROM development AS deploy
-# install livo_runner node
-WORKDIR /catkin_ws
-COPY livo_runner /catkin_ws/src/livo_runner
-RUN bash -c "source /opt/ros/noetic/setup.bash && catkin_make -DCMAKE_BUILD_TYPE=Release"
-# install webinterface
-COPY webinterface /install/webinterface
-RUN pip install -r /install/webinterface/requirements.txt
-ENTRYPOINT /bin/bash /install/webinterface/docker-entrypoint.sh
+RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> /root/.bashrc
