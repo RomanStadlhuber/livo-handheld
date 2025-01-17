@@ -20,8 +20,6 @@ This section explains everything needed to set-up the devices and get the ROS no
   - I am using a fisheye lens.
   - You will have to [calibrate the camera and IMU](https://github.com/ethz-asl/kalibr/wiki/camera-imu-calibration) yourself.
 - [Livox MID-360 LiDAR](https://www.livoxtech.com/mid-360)
-- [Adafruit Precision NXP 9-DOF Breakout Board](https://www.adafruit.com/product/3463)
-  - Optional, LiDAR comes with IMU (but it's acceleration is in `[g]`s!)
 
 Additionally, an SD card for booting the Pi, batteries, power converters, power cables, a network cable and a USB stick for storage will be reqiured.
 
@@ -29,10 +27,14 @@ The `.stl` files of the 3D-printed case can be found in the [assets](assets) fol
 
 ### Setup a static IP for EtherNet Connections
 
+> **TODO:** update with links to the instructions I ubed on bookworm
+
 On Raspberry Pi OS this is best done by [modifying `/etc/dhcpcd.conf`](https://www.tomshardware.com/how-to/static-ip-raspberry-pi).
 Follow the instructions in the [`mid360_docker`](https://github.com/RomanStadlhuber/mid360_docker/) README to setup the connection for your device (in the worst case, do some troubleshooting with WireShark, which is also explained there.)
 
 ### Configure WiFi and Ethernet to be used simultaneously
+
+> **TODO:** update with links to the instructions I ubed on bookworm
 
 In my case, it sufficed to do the following in `/etc/dhcpcd.conf`:
 
@@ -64,6 +66,8 @@ This stackexchange post is quite a nice representation as far as the setup goes:
 </details>
 
 ### Configure automatic USB mounting
+
+> **NOTE:** on bookworm seems to work even when booting without GUI after at least one initial automatic mount with GUI.
 
 Automatic mounting is required for the software to be able to detect external drives when run in "headless mode".
 Follow the instructions in this [GitHub gist](https://gist.github.com/michalpelka/82d44a21c29f34ee5320c349f8bbf683).
