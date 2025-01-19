@@ -4,11 +4,12 @@ from launch.actions import DeclareLaunchArgument
 from launch.launch_description import LaunchDescription
 from launch.substitutions import LaunchConfiguration
 
-from launch_ros.actions import ComposableNodeContainer
+from launch_ros.actions import Node, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 from launch_ros.substitutions import FindPackageShare # to find the pkg path
 
 from pathlib import Path
+import os
 
 ################### user configure parameters for ros2 start ###################
 xfer_format   = 1    # 0-Pointcloud2(PointXYZRTL), 1-customized pointcloud format
@@ -74,10 +75,10 @@ def generate_launch_description() -> LaunchDescription:
     )
     # wheter to also run image viewer
     run_imview = False
-    imview_launch_arg = DeclareLaunchArgument(
+    """imview_launch_arg = DeclareLaunchArgument(
         run_imview,
-        default=False
-    )
+        default_value=False
+    )"""
 
     # camera node
     composable_nodes = [
