@@ -22,8 +22,4 @@ setup(
         'console_scripts': [
         ],
     },
-    data_files=[
-        (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*launch.[pxy][yma]*')))
-
-    ]
 )
