@@ -1,11 +1,11 @@
+from __future__ import annotations # python 3.8 compatibility
+
 import subprocess
 import os
 import time
 from datetime import datetime
 import psutil
 import pathlib
-import rospy
-import roslaunch
 from typing import List
 import numpy as np
 import ipaddress
@@ -110,6 +110,58 @@ class Interfaces:
         return recorded_bags
         
 
+    @staticmethod
+    def get_ros2_bags(storage_location: str) -> List[str]:
+        """List all previously recorded rosbags in storage_location.
+        
+        Currently, functionality only returns the names without further info."""
+        if storage_location is None or not pathlib.Path(storage_location).exists():
+            return []
+        recorded_bags = []
+        for x in pathlib.Path(storage_location).iterdir():
+            if Interfaces.__is_ros2_bag(x):
+                filename = x.name
+                filesize_str = Interfaces.__str_filesize(Interfaces.__get_folder_size(x))
+                # add buffering note to active bags
+                # doing this because buffering takes a while for compressed images
+                if not any("metadata" in y.name for y in x.iterdir() if y.is_file()):
+                    filesize_str += " (buffering..)"
+                recorded_bags.append((filename, filesize_str))
+        return recorded_bags
+
+
+    @staticmethod
+    def __is_ros2_bag(pth: pathlib.Path, storage_extensions: list[str] = [".db3", ".mcap"]) -> bool:
+        # cannot be a ros2 bag if it's not a directory
+        if not pth.is_dir():
+            return False
+        # check if directory structure is valid
+        else:
+            files = [x for x in pth.iterdir() if x.is_file()]
+            if not files: # cannot determine if folder is a bag when it's empty
+                return False            
+            elif not any((f.suffix in storage_extensions) for f in files): # need at least one storage file
+                return False
+            # all checks passed
+            else:
+                return True
+
+            
+    @staticmethod
+    def __get_file_size(x: str) -> int:
+        """Get the size of a file in bytes. Does not apply to folders!"""
+        return os.path.getsize(str(x))
+
+    @staticmethod
+    def __get_folder_size(pth: pathlib.Path) -> int:
+        """Get the size of a folder in bytes."""
+        # source: https://stackoverflow.com/a/1392549/10493834
+        return sum(f.stat().st_size for f in pth.glob('**/*') if f.is_file())
+            
+
+    pkg_ros2_recorder = "recorder_runner"
+    launchfile_ros2_all = "recording.launch.py"
+    # ROS1 (legacy)
     pkg_livo = "livo_runner"
     launchfile_cam = "camera_imu.launch"
     launchfile_lidar = "lidar.launch"
@@ -124,6 +176,19 @@ class Interfaces:
         print(f"ERROR: Interfaces unable to find rospack '{package_name}'")
         raise FileNotFoundError(f"Unable to find rospack '{package_name}'")
 
+    @staticmethod
+    def ros2_pkg_find(package_name: str) -> str:
+        """Find the absolute path to a ROS package."""
+        # https://stackoverflow.com/a/1724723
+        for root, dirs, files in os.walk("/ros2_ws/src"):
+            if package_name in dirs:
+                return os.path.join(root, package_name)
+        print(f"""ERROR: Interfaces unable to find ros2 pkg '{package_name}'
+    Can you find it using >$ ros2 pkg prefix {package_name}< ?"""
+)
+        raise FileNotFoundError(f"Unable to find ros2 pkg '{package_name}'")
+
+
     def __init__(self) -> None:
         # initialize launch handles as None so I don't have to check the attr exists
         self.launch_lidar = None
@@ -132,20 +197,14 @@ class Interfaces:
         self.cam_launched = False
         self.lidar_launched = False
         # start roscore so nodes can be launched
-        self.__start_roscore()
+        # NOTE: not needed in ROS2 setup
+        # self.__start_roscore()
         self.devices_started = False
         self.rosbag_record = None
         # placeholder for the base-path used to store finished recordings
         self.recording_base_path = None
-        # initialize roslaunch API node
-        # (see: https://wiki.ros.org/roslaunch/API%20Usage)
-        # NOTE: implementation delayed until additional MVP features work
-        """rospy.init_node("launcher_node", anonymous=True)
-        self.roslaunch_uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
-        roslaunch.configure_logging(self.roslaunch_uuid)
-        # roslaunch instances for cam+imu and LiDAR
-        self.roslaunch_cam_imu = None
-        self.roslaunch_lidar = None"""
+        # ROS2 refactoring
+        self.launch_ros2_recorder = None
 
     @staticmethod
     def __str_filesize(size_bytes) -> str:
@@ -165,31 +224,30 @@ class Interfaces:
         if not self.devices_started:
             print("Starting devices.")
             # try to launch the devices
-            self.__roslaunch_camera()
-            self.__roslaunch_lidar()
+            #self.__roslaunch_camera()
+            #self.__roslaunch_lidar()
+            self.__ros2_launch_sensors()
             self.devices_started = True
         # return success listing
         print("Devices started!")
+        # TODO: is there a better way to find out if the lidar was launched?
+        # the camera should always be launched, though
+        self.lidar_launched = self.__check_lidar_available()
+        self.cam_launched = True
         return dict(lidar=self.lidar_launched, camera=self.cam_launched)
 
     def start_recording(self, base_path, filename):
         # store base_path of new recording, which is required when stopping the recording process
         self.recording_base_path = base_path
         bag_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        bag_name = f"{bag_name}.bag"
-        cmd = ["rosbag", "record", "--buffsize=2048"]
+        cmd = ["ros2", "bag" , "record", "-b=2048"]
+        # set full bag filename, if provided
         if filename is not None and len(filename) > 0:
-            bag_name = f"{filename}_{bag_name}"
-            # NOTE: writing bag onto the host filesystem is faster
-            # compared to writing on external storage devices
-            # when recording LiDAR data, external devices require
-            # time intensive buffering
-            # this will record on the host, with a separate process
-            # querying for completed bags and copying them to "base_path"
-            cmd.extend(["-o", f"/tmp/{filename}"])
+            bag_name = f"{filename}"
+        cmd.extend(["-o", f"{base_path}/{bag_name}"])
         cmd.extend([
-            "/image/compressed", # record only compressed to save space
-            "/imu_raw",
+            # "/camera/image_raw"
+            "/camera/image_raw/compressed", # record only compressed to save space
             "/livox/lidar",
             "/livox/imu",
             "/clock"
@@ -210,17 +268,19 @@ class Interfaces:
         try:
             self.rosbag_record.terminate()
             self.rosbag_record = None
-            # start a separate process that will copy finished recordings to the storage device
-            if self.recording_base_path is not None:
-                print("::: staring rosbag copy waiting process :::")
-                p = Process(target=copy_finished_recordings, args=(self.recording_base_path,))
-                p.start()
+            # NOTE: with ROS2, this will be obsolete because the bag is recorded to external storage in splits
+            ## # start a separate process that will copy finished recordings to the storage device
+            ## if self.recording_base_path is not None:
+            ##     print("::: staring rosbag copy waiting process :::")
+            ##     p = Process(target=copy_finished_recordings, args=(self.recording_base_path,))
+            ##     p.start()
             # reset base_path buffer until next recording
             self.recording_base_path = None
         except Exception as e:
             print(f"Failed to stop recording: {e}")
 
     def stop_device_nodes(self):
+        # ROS1 (legacy)
         if self.launch_cam is not None:
             self.launch_cam.terminate()
             self.cam_launched = False
@@ -229,14 +289,18 @@ class Interfaces:
             self.launch_lidar.terminate()
             self.lidar_launched = False
             self.devices_started = False
+        # ROS2
+        if self.launch_ros2_recorder is not None:
+            self.launch_ros2_recorder.terminate()
+            self.lidar_launched = self.cam_launched = self.devices_started = False
 
 
     def __check_lidar_available(self) -> bool:
         # path to the JSON config file containing the LiDAR IP address
         try:
             config_path = os.path.join(
-                    Interfaces.rospack_find("livo_runner"),
-                    "config/MID360_config.json"
+                    Interfaces.ros2_pkg_find(Interfaces.pkg_ros2_recorder),
+                    "launch/MID360_config.json"
                 )
             with open(config_path) as f:
                 conf = json.load(f)
@@ -280,6 +344,14 @@ class Interfaces:
             self.lidar_launched = True
         except Exception as e:
             print(f"Failed to launch LiDAR: {str(e)}")
+
+    def __ros2_launch_sensors(self):
+        try:
+            self.launch_ros2_recorder = subprocess.Popen(["ros2", "launch", Interfaces.pkg_ros2_recorder, Interfaces.launchfile_ros2_all])
+        except Exception as e:
+            print(f"""Failed to launch ROS2 recorder node! Is it installed?
+{str(e)}
+""")
 
 if __name__ == "__main__":
     print(Interfaces.get_storage_devices())

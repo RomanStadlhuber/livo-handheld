@@ -1,3 +1,5 @@
+from __future__ import annotations # python 3.8 compatibility
+
 from flask import Flask, render_template, redirect, url_for, request
 from flask_wtf import FlaskForm
 from wtforms import SelectField, StringField, SubmitField, FileField
@@ -73,7 +75,7 @@ def index():
         if len(available_devices) > 0:
             rosbag_storage_location = available_devices[0]
     # get list of recordings in that storage location
-    bag_list = interfaces.get_bags(rosbag_storage_location) if rosbag_storage_location else None
+    bag_list = interfaces.get_ros2_bags(rosbag_storage_location) if rosbag_storage_location else None
     return render_template("index.html", form=form, interfaces=interfaces, rosbags=bag_list)
 
 
