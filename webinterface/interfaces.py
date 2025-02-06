@@ -240,17 +240,17 @@ class Interfaces:
         # store base_path of new recording, which is required when stopping the recording process
         self.recording_base_path = base_path
         bag_name = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        cmd = ["ros2", "bag" , "record", "-b=2048"]
+        cmd = ["ros2", "bag" , "record", f"-b={int(1e9)}"] 
         # set full bag filename, if provided
         if filename is not None and len(filename) > 0:
             bag_name = f"{filename}"
         cmd.extend(["-o", f"{base_path}/{bag_name}"])
         cmd.extend([
-            # "/camera/image_raw"
+            "/camera/image_raw",
             "/camera/image_raw/compressed", # record only compressed to save space
             "/livox/lidar",
             "/livox/imu",
-            "/clock"
+            # "/clock"
         ])
         # NOTE: when running the bag, decompress with image_transport republish
         # see: https://github.com/TixiaoShan/LVI-SAM/blob/master/launch/include/module_sam.launch#L21
