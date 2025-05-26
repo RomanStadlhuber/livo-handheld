@@ -1,8 +1,8 @@
-from __future__ import annotations # python 3.8 compatibility
+from __future__ import annotations  # python 3.8 compatibility
 
 from flask import Flask, render_template, redirect, url_for, request
 from flask_wtf import FlaskForm
-from wtforms import SelectField, StringField, SubmitField, FileField
+from wtforms import SelectField, StringField, SubmitField
 from wtforms.validators import DataRequired, Optional, Regexp
 from flask_bootstrap import Bootstrap5
 from interfaces import Interfaces
@@ -22,6 +22,7 @@ bootstrap = Bootstrap5(app)
 interfaces = Interfaces()
 # recorder state management
 state = State()
+
 
 class StartRecordingForm(FlaskForm):
     storage_location = SelectField(
@@ -44,7 +45,6 @@ class StartRecordingForm(FlaskForm):
 
 class StopRecordingForm(FlaskForm):
     submit = SubmitField(label="Stop Recording")
-
 
 
 @app.route("/index")
@@ -94,7 +94,7 @@ def record():
             camera="Running" if state.cam_imu_running else "Unavailable",
             lidar="Running" if state.lidar_running else "Unavailable",
             basepath=state.recording_basepath,
-            filename=state.recording_filename
+            filename=state.recording_filename,
         )
         print("::: resuming currently active recording :::")
         print(status)
@@ -107,9 +107,9 @@ def record():
         bagname = interfaces.start_recording(basepath, filename)
         state.set_recording_path(basepath, bagname)
         state.set_devices_running(
-                cam_imu=devices["camera"],
-                lidar=devices["lidar"],
-            )
+            cam_imu=devices["camera"],
+            lidar=devices["lidar"],
+        )
         status = dict(
             camera="Running" if devices["camera"] else "Unavailable",
             lidar="Running" if devices["lidar"] else "Unavailable",
@@ -121,4 +121,4 @@ def record():
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0') # app.run(debug=True)
+    app.run(host="0.0.0.0")  # app.run(debug=True)
