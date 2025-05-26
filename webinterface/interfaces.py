@@ -6,7 +6,6 @@ import time
 from datetime import datetime
 import psutil
 import pathlib
-from typing import List
 import numpy as np
 import ipaddress
 import json
@@ -51,11 +50,29 @@ def copy_finished_recordings(base_path: str):
         time.sleep(0.1)  # [sec]
 
 
+def run_ros2_command(ros2_cmd: list[str], verbose: bool = False) -> subprocess.Popen:
+    """Soruce ROS2 installation and prebuilt-packages before running a `ros2` command."""
+    try:
+        ros2_cmd_str = (" ").join(ros2_cmd)
+        cmd = [
+            "bash",
+            "-c",
+            # source ROS environment and built packages
+            "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && " + ros2_cmd_str,
+        ]
+        if verbose:
+            print(f"Running ROS2 command:\n\t{' '.join(cmd)}")
+        return subprocess.Popen(cmd)
+    except Exception as e:
+        print(f"Failed to run ROS2 command: {e}")
+        raise
+
+
 class Interfaces:
     """Class to interface with the processes involved in creating recordings."""
 
     @staticmethod
-    def get_storage_devices() -> List[str]:
+    def get_storage_devices() -> list[str]:
         """Get a list of external devices that can be used to store recorded data."""
         # locations where we allow for external media
         media_roots = ["media", "mnt"]
@@ -79,7 +96,7 @@ class Interfaces:
         return media_dirs
 
     @staticmethod
-    def get_ros2_bags(storage_location: str) -> List[str]:
+    def get_ros2_bags(storage_location: str) -> list[tuple[str, str]]:
         """List all previously recorded rosbags in storage_location.
 
         Currently, functionality only returns the names without further info."""
@@ -169,7 +186,7 @@ class Interfaces:
         # placeholder for the base-path used to store finished recordings
         self.recording_base_path = None
         # ROS2 refactoring
-        self.launch_ros2_recorder = None
+        self.launch_ros2_recorder: subprocess.Popen | None = None
 
     @staticmethod
     def __str_filesize(size_bytes) -> str:
@@ -190,15 +207,17 @@ class Interfaces:
             # try to launch the devices
             # self.__roslaunch_camera()
             # self.__roslaunch_lidar()
-            self.__ros2_launch_sensors()
-            self.devices_started = True
-        # return success listing
-        print("Devices started!")
-        # TODO: is there a better way to find out if the lidar was launched?
-        # the camera should always be launched, though
-        self.lidar_launched = self.__check_lidar_available()
-        self.cam_launched = True
-        return dict(lidar=self.lidar_launched, camera=self.cam_launched)
+            if self.__ros2_launch_sensors():
+                self.devices_started = True
+                # return success listing
+                print("Devices started!")
+                # TODO: is there a better way to find out if the lidar was launched?
+                # the camera should always be launched, though
+                self.lidar_launched = self.__check_lidar_available()
+                self.cam_launched = True
+                return dict(lidar=self.lidar_launched, camera=self.cam_launched)
+            else:
+                return dict(lidar=False, camera=False)
 
     def start_recording(self, base_path, filename):
         # store base_path of new recording, which is required when stopping the recording process
@@ -220,8 +239,7 @@ class Interfaces:
         )
         # NOTE: when running the bag, decompress with image_transport republish
         # see: https://github.com/TixiaoShan/LVI-SAM/blob/master/launch/include/module_sam.launch#L21
-        print(f"""Recording bag from '{(" ").join(cmd)}'""")
-        self.rosbag_record = subprocess.Popen(cmd)
+        self.rosbag_record = run_ros2_command(cmd, verbose=True)
         return bag_name
 
     @property
@@ -277,17 +295,20 @@ class Interfaces:
             print(e)
             return False
 
-    def __ros2_launch_sensors(self):
+    def __ros2_launch_sensors(self) -> bool:
         try:
-            self.launch_ros2_recorder = subprocess.Popen(
-                ["ros2", "launch", Interfaces.pkg_ros2_recorder, Interfaces.launchfile_ros2_all]
+            self.launch_ros2_recorder = run_ros2_command(
+                ["ros2", "launch", Interfaces.pkg_ros2_recorder, Interfaces.launchfile_ros2_all],
+                verbose=True,
             )
+            return True
         except Exception as e:
             print(
                 f"""Failed to launch ROS2 recorder node! Is it installed?
 {str(e)}
 """
             )
+            return False
 
 
 if __name__ == "__main__":
