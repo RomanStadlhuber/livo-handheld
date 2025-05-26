@@ -26,12 +26,14 @@ class State:
         self._lidar_running = lidar
 
     def set_recording_path(self, base_path: str, filename: str) -> None:
+        print("::: [state] - recording started :::")
         self._storage_location = base_path
         self._active_recording = filename
         self._currently_recording = True
 
     def set_recording_stopped(self) -> None:
         # NOTE: self._storage_location is kept for next recording
+        print("::: [state]: recording stopped :::")
         self._active_recording = None
         self._currently_recording = False
 

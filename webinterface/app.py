@@ -85,7 +85,10 @@ def record():
     if form.validate_on_submit():
         interfaces.stop_recording()
         # TODO: do we really need to stop device nodes?
-        interfaces.stop_device_nodes()
+        try:
+            interfaces.stop_device_nodes()
+        except Exception as _:
+            pass
         state.set_recording_stopped()
         return redirect("/")
     # resume active recording
