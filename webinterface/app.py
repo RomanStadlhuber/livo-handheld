@@ -15,7 +15,7 @@ app.secret_key = "lic"
 # https://bootstrap-flask.readthedocs.io/en/stable/advanced/#bootswatch-themes
 # and
 # https://bootswatch.com/
-app.config["BOOTSTRAP_BOOTSWATCH_THEME"] = "cyborg"
+# app.config["BOOTSTRAP_BOOTSWATCH_THEME"] = "cyborg"
 bootstrap = Bootstrap5(app)
 
 # instance to attach to interfaces
