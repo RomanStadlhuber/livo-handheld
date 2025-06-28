@@ -57,7 +57,7 @@ sudo service nginx restart
 
 and when inside the raspberry pi's hotspot, connect to the webpage using this link
 
-> https://pi4.local
+> http://pi4.local
 
 ## Webinterface Notes
 
