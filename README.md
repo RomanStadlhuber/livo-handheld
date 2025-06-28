@@ -15,6 +15,23 @@
 related: [`pip install` during docker build sometimes fails because of network error](https://github.com/docker/for-win/issues/14667) hints that this problem varies per device and user.
 This [answer on stackoverflow](https://stackoverflow.com/a/51794019) suggested using `--network=host` during the build process as well.
 
+## Creating a WiFi hotspot
+
+I have basically followed [Host a Wi-Fi hotspot with a Raspberry Pi](https://www.raspberrypi.com/tutorials/host-a-hotel-wifi-hotspot/).
+
+And the hotspot that I have used is [TP-Link WN823N](https://www.tp-link.com/de/home-networking/adapter/tl-wn823n/) which is based on the `rtl8xxxu` chipset that is conveniently **supported out of the box on debian based systems**.
+
+<details><summary>Activating the USB-WiFi Hotspot</summary>
+
+Since the raspberry pi 4 comes with a WiFi transmitter, the USB-WiFi module shows up as `wlan1` from `nmcli device`.
+
+I then activated the hotspot with
+
+```bash
+wifi hotspot ssid <hotspot name> password <hotspot password> ifname wlan0
+```
+
+</details>
 
 ## NGINX
 
@@ -34,7 +51,7 @@ server {
 
 then
 
-```
+```bash
 sudo service nginx restart
 ```
 
