@@ -11,10 +11,11 @@ docker run \
 -e PUID=$(id -u) \
 -e PGID=$(id -g) \
 -v /tmp/.X11-unix:/tmp/.X11-unix \
--v $(pwd):/catkin_ws/src/livo \
+-v $(pwd):/ros2_ws/src/livo \
 -v /dev:/dev \
 -v /mnt:/mnt \
 -v /media:/media \
-livo:latest \
+--name livo-dev \
+livo:ros2 \
 bash
 xhost -

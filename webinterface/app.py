@@ -1,6 +1,8 @@
+from __future__ import annotations  # python 3.8 compatibility
+
 from flask import Flask, render_template, redirect, url_for, request
 from flask_wtf import FlaskForm
-from wtforms import SelectField, StringField, SubmitField, FileField
+from wtforms import SelectField, StringField, SubmitField
 from wtforms.validators import DataRequired, Optional, Regexp
 from flask_bootstrap import Bootstrap5
 from interfaces import Interfaces
@@ -13,13 +15,14 @@ app.secret_key = "lic"
 # https://bootstrap-flask.readthedocs.io/en/stable/advanced/#bootswatch-themes
 # and
 # https://bootswatch.com/
-app.config["BOOTSTRAP_BOOTSWATCH_THEME"] = "cyborg"
+# app.config["BOOTSTRAP_BOOTSWATCH_THEME"] = "cyborg"
 bootstrap = Bootstrap5(app)
 
 # instance to attach to interfaces
 interfaces = Interfaces()
 # recorder state management
 state = State()
+
 
 class StartRecordingForm(FlaskForm):
     storage_location = SelectField(
@@ -42,7 +45,6 @@ class StartRecordingForm(FlaskForm):
 
 class StopRecordingForm(FlaskForm):
     submit = SubmitField(label="Stop Recording")
-
 
 
 @app.route("/index")
@@ -73,7 +75,7 @@ def index():
         if len(available_devices) > 0:
             rosbag_storage_location = available_devices[0]
     # get list of recordings in that storage location
-    bag_list = interfaces.get_bags(rosbag_storage_location) if rosbag_storage_location else None
+    bag_list = interfaces.get_ros2_bags(rosbag_storage_location) if rosbag_storage_location else None
     return render_template("index.html", form=form, interfaces=interfaces, rosbags=bag_list)
 
 
@@ -83,7 +85,10 @@ def record():
     if form.validate_on_submit():
         interfaces.stop_recording()
         # TODO: do we really need to stop device nodes?
-        interfaces.stop_device_nodes()
+        try:
+            interfaces.stop_device_nodes()
+        except Exception as _:
+            pass
         state.set_recording_stopped()
         return redirect("/")
     # resume active recording
@@ -92,7 +97,7 @@ def record():
             camera="Running" if state.cam_imu_running else "Unavailable",
             lidar="Running" if state.lidar_running else "Unavailable",
             basepath=state.recording_basepath,
-            filename=state.recording_filename
+            filename=state.recording_filename,
         )
         print("::: resuming currently active recording :::")
         print(status)
@@ -105,9 +110,9 @@ def record():
         bagname = interfaces.start_recording(basepath, filename)
         state.set_recording_path(basepath, bagname)
         state.set_devices_running(
-                cam_imu=devices["camera"],
-                lidar=devices["lidar"],
-            )
+            cam_imu=devices["camera"],
+            lidar=devices["lidar"],
+        )
         status = dict(
             camera="Running" if devices["camera"] else "Unavailable",
             lidar="Running" if devices["lidar"] else "Unavailable",
@@ -119,4 +124,4 @@ def record():
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0') # app.run(debug=True)
+    app.run(host="0.0.0.0")  # app.run(debug=True)

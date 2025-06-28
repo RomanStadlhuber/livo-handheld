@@ -1,0 +1,14 @@
+# this is the dockerfile that is used to create the base image "livo:ros2"
+# which will then be used to create the actual image that is used for development and deployment
+FROM ros:humble AS base
+WORKDIR /install
+# script to install all necessary dependencies
+COPY scripts/docker/installation.sh .
+# neovim config
+COPY init.vim /root/.config/nvim/init.vim
+# NOTE: for some reason, the installation cannot be performed during docker build
+# apt fails to load all repos, even the official ones??
+# that's also the reason why I migrated these steps from the Dockerfile to a bash script..
+# currently, the installation only succeeds in a RUNNING docker container??
+
+# RUN /bin/bash installation.sh
