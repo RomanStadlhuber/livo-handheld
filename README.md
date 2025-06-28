@@ -31,6 +31,10 @@ I then activated the hotspot with
 wifi hotspot ssid <hotspot name> password <hotspot password> ifname wlan0
 ```
 
+#### Manually installing the `rtl8192eu` Chipset Driver
+
+Some more info can be found on this [StackOverflow Thread](https://askubuntu.com/a/1212939)
+
 </details>
 
 ## NGINX
