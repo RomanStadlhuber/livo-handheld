@@ -14,3 +14,38 @@
 
 related: [`pip install` during docker build sometimes fails because of network error](https://github.com/docker/for-win/issues/14667) hints that this problem varies per device and user.
 This [answer on stackoverflow](https://stackoverflow.com/a/51794019) suggested using `--network=host` during the build process as well.
+
+
+## NGINX
+
+Save this as the default NGINX config, assuming `pi4` is the devices hostname (replace otherwise).
+
+```nginx
+# /etc/nginx/sites-available/default
+server {
+        listen 80;
+        server_name pi4.local;
+        location / {
+                # the production server (./scripts/docker/prod.sh)
+                proxy_pass http://127.0.0.1:8000;
+        }
+}
+```
+
+then
+
+```
+sudo service nginx restart
+```
+
+and when inside the raspberry pi's hotspot, connect to the webpage using this link
+
+> https://pi4.local
+
+## Webinterface Notes
+
+When hosting the service via WiFi hotspot, the client may not be able to connect to the internet to load external resources (like `fonts.googleapis.com`).
+
+Therefore, the bootstrap file are stored in `webinterface/static/bootstrap` which are loaded in advance with `wget` from the [bootstrap CDN links](https://www.jsdelivr.com/package/npm/bootstrap).
+
+Currently, I am using `bootstrap@5.3.7`.
