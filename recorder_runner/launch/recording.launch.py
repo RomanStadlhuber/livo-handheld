@@ -27,19 +27,6 @@ user_config_path = str(user_config_path)
 
 ################### user configure parameters for ros2 end #####################
 
-livox_ros2_params = [
-    {"xfer_format": xfer_format},
-    {"multi_topic": multi_topic},
-    {"data_src": data_src},
-    {"publish_freq": publish_freq},
-    {"output_data_type": output_type},
-    {"frame_id": frame_id},
-    {"lvx_file_path": lvx_file_path},
-    {"user_config_path": user_config_path},
-    {"cmdline_input_bd_code": cmdline_bd_code},
-]
-
-
 def generate_launch_description() -> LaunchDescription:
     """
     Generate a launch description with for the camera node and a visualiser.
@@ -114,6 +101,29 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     ### LiDAR node ###
+
+    livox_xfer_format = DeclareLaunchArgument(
+        "lidar_format",
+        default_value="1", # default to LivoxMsg format
+        choices=["0", "1"],
+        description="Transfer-format (xfer_format) of LiDAR data, 0-PointCloud2, 1-LivoxMsg",
+    )
+
+    livox_ros2_params = [
+        # make transfer (xfer) format configurable
+        {"xfer_format": LaunchConfiguration("lidar_format")},
+        {"multi_topic": multi_topic},
+        {"data_src": data_src},
+        {"publish_freq": publish_freq},
+        {"output_data_type": output_type},
+        {"frame_id": frame_id},
+        {"lvx_file_path": lvx_file_path},
+        {"user_config_path": user_config_path},
+        {"cmdline_input_bd_code": cmdline_bd_code},
+    ]
+
+
+
     livox_driver = Node(
         package="livox_ros_driver2",
         executable="livox_ros_driver2_node",
@@ -126,7 +136,9 @@ def generate_launch_description() -> LaunchDescription:
         [
             livox_driver,  # LiDAR
             container,  # camera
-            camera_launch_arg,  # camera args?
-            format_launch_arg,  # camera args?
+            # ros2 launch arguments
+            camera_launch_arg,  # camera
+            format_launch_arg,  # camera
+            livox_xfer_format,  # LiDAR
         ]
     )
