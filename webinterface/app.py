@@ -40,6 +40,12 @@ class StartRecordingForm(FlaskForm):
         ],
         render_kw=dict(placeholder="prefix of the generated rosbag"),
     )
+    lidar_format = SelectField(
+        "LiDAR Format",
+        validators=[DataRequired()],
+        choices=["LivoxMsg", "PointCloud2"],
+        description="LiDAR data format: LivoxMsg provides per-point timing while PointCloud2 visualizable.",
+    )
     submit = SubmitField(label="Start Recording")
 
 
@@ -61,11 +67,20 @@ def index():
         )
     form = StartRecordingForm()
     if form.validate_on_submit():
+        # evaluate lidar format from dropdown selection strings
+        request_lidar_format = 1
+        match(request.form.get("lidar_format", "LivoxMsg")):
+            case "LivoxMsg":
+                request_lidar_format = 1
+            case "PointCloud2":
+                request_lidar_format = 0
+        # start a recording
         return redirect(
             url_for(
                 "record",
                 basepath=request.form.get("storage_location"),
                 filename=request.form.get("recording_name"),
+                lidar_format=request_lidar_format,
             )
         )
     # pick selected or first (= default) storage location
@@ -106,7 +121,14 @@ def record():
     else:
         basepath = request.args.get("basepath")
         filename = request.args.get("filename")
-        devices = interfaces.start_device_nodes()
+        lidar_format = request.args.get("lidar_format", 0)
+        # convert value from str to int if provided, or default to 1=LivoxMsg
+        try:
+            if not isinstance(lidar_format, int):
+                lidar_format = int(lidar_format)
+        except ValueError:
+            lidar_format = 1
+        devices = interfaces.start_device_nodes(lidar_format=lidar_format) # passed in **kwargs
         bagname = interfaces.start_recording(basepath, filename)
         state.set_recording_path(basepath, bagname)
         state.set_devices_running(

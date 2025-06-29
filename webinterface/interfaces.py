@@ -201,13 +201,13 @@ class Interfaces:
         s = np.round(size_bytes / p, decimals=2)
         return "%s %s" % (s, size_name[i])
 
-    def start_device_nodes(self):
+    def start_device_nodes(self, **kwargs) -> dict[str, bool]:
         if not self.devices_started:
             print("Starting devices.")
             # try to launch the devices
             # self.__roslaunch_camera()
             # self.__roslaunch_lidar()
-            if self.__ros2_launch_sensors():
+            if self.__ros2_launch_sensors(kwargs=kwargs):
                 self.devices_started = True
                 # return success listing
                 print("Devices started!")
@@ -295,10 +295,13 @@ class Interfaces:
             print(e)
             return False
 
-    def __ros2_launch_sensors(self) -> bool:
+    def __ros2_launch_sensors(self, **kwargs) -> bool:
         try:
+            lidar_format = kwargs.get("lidar_format", 1)
+            if lidar_format not in [0, 1]: # safeguard against wrong format from caller
+                lidar_format = 1
             self.launch_ros2_recorder = run_ros2_command(
-                ["ros2", "launch", Interfaces.pkg_ros2_recorder, Interfaces.launchfile_ros2_all],
+                ["ros2", "launch", Interfaces.pkg_ros2_recorder, Interfaces.launchfile_ros2_all, f"lidar_format:={lidar_format}"],
                 verbose=True,
             )
             return True
