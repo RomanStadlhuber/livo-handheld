@@ -5,26 +5,26 @@
 <h2>Start Recording</h2>
 {{ render_form(form) }}
 <h2>Recordings List</h2>
-    {% if rosbags %}
-    <ul class="list-group">
-        {% for name_and_size in rosbags %}
-        <li class="list-group-item d-flex justify-content-between align-items-center">
-            {{ name_and_size[0] }}
-            <span class="badge bg-primary rounded-pill">
-                {{ name_and_size[1] }}
-            </span>
-        </li>
-        {% endfor %}
-    </ul>
-    {% else %}
-        <div class="card border-info mb-3" style="max-width: 20rem;">
-            <div class="card-header">Information</div>
-            <div class="card-body">
-                <h4 class="card-title">No recordings available</h4>
-                <p class="card-text">
-                Create some recordings and have them listed here.
-                If recordings are not shown immediately, wait a short time, then refresh the page.
-                </p>
-        </div>
+{% if rosbags %}
+<ul class="list-group">
+    {% for name_and_size in rosbags %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+        {{ name_and_size[0] }}
+        <span class="badge bg-primary rounded-pill">
+            {{ name_and_size[1] }}
+        </span>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="card border-info mb-3" style="max-width: 20rem;">
+    <div class="card-header">Information</div>
+    <div class="card-body">
+        <h4 class="card-title">No recordings available</h4>
+        <p class="card-text">
+            Create some recordings and have them listed here.
+            If recordings are not shown immediately, wait a short time, then refresh the page.
+        </p>
+    </div>
     {% endif %}
-{% endblock %}
+    {% endblock %}
