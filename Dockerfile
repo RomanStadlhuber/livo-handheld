@@ -25,6 +25,8 @@ RUN DEBIAN_FRONTEND='noninteractive' apt-get update && apt-get install -y -q \
 ### Install Libcamera ROS Driver ####
 WORKDIR /ros2_ws/src
 # Install libcamera and the camera_ros node from source
+# NOTE: libcamera needs to be checked out here
+# to be compatible with the meson & ninja versions that can be loaded from this image
 RUN git clone https://github.com/raspberrypi/libcamera.git && \
     cd /ros2_ws/src/libcamera && git checkout 6ddd79b && cd .. && \
     git clone https://github.com/christianrauch/camera_ros.git
