@@ -33,7 +33,7 @@ class StartRecordingForm(FlaskForm):
     )
     recording_name = StringField(
         label="Name of Recording (optional).",
-        description="Note that the '.bag' extension will be applied automatically.",
+        description="ROS2 bags will be stored in a folder with this name.",
         validators=[
             Optional(),
             Regexp(re.compile("^[\w\-. ]+$", re.IGNORECASE), message="Please use a valid filename."),

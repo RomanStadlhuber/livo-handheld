@@ -281,9 +281,8 @@ class Interfaces:
     def __check_lidar_available(self) -> bool:
         # path to the JSON config file containing the LiDAR IP address
         try:
-            config_path = os.path.join(
-                Interfaces.ros2_pkg_find(Interfaces.pkg_ros2_recorder), "launch/MID360_config.json"
-            )
+            # NOTE: should be copied to this location by Dockerfile
+            config_path = "/MID360_config.json"
             with open(config_path) as f:
                 conf = json.load(f)
                 ip_lidar = conf["lidar_configs"][0]["ip"]
