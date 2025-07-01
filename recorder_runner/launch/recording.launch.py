@@ -1,14 +1,10 @@
 from ament_index_python.resources import has_resource
-
 from launch.actions import DeclareLaunchArgument
 from launch.launch_description import LaunchDescription
 from launch.substitutions import LaunchConfiguration
-
 from launch_ros.actions import Node, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
-
 from pathlib import Path
-import os
 
 ################### user configure parameters for ros2 start ###################
 xfer_format = 1  # 0-Pointcloud2(PointXYZRTL), 1-customized pointcloud format
@@ -19,11 +15,10 @@ output_type = 0
 frame_id = "livox_frame"
 lvx_file_path = "/home/livox/livox_test.lvx"
 cmdline_bd_code = "livox0000000001"
-
-cur_path = os.path.split(os.path.realpath(__file__))[0] + "/"
-cur_path = Path(cur_path)
-user_config_path = cur_path / "../launch/MID360_config.json"
-user_config_path = str(user_config_path)
+# NOTE: make sure the Dokcerfile copies it to this location!!
+MID360_CONFIG = "/MID360_config.json"
+assert Path(MID360_CONFIG).exists(), f"Configuration file {MID360_CONFIG} does not exist! "
+user_config_path = MID360_CONFIG
 
 ################### user configure parameters for ros2 end #####################
 
