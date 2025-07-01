@@ -29,6 +29,7 @@ To work on the webinterface, which launches & stops the ROS2 device nodes, the f
 - `source /opt/ros/$ROS_DISTRO/setup.bash`
 - build the `recorder_runner` package with `/ros2/src/livo/recorder_runner/build.sh`
 - go to `/ros2_ws/src/livo/webinterface` and `pip install -r requirements.txt`
+- the total camera + LiDAR driver build time may take up to 15 or 20 minutes
 
 from inside that folder, the development server can then be run with
 
