@@ -46,9 +46,8 @@ WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
 RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl*
-WORKDIR /ros2_ws/src/livox_ros_driver2
-RUN ./build.sh humble
-
+RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
+    cd /ros2_ws/src/livox_ros_driver2 && ./build.sh humble
 
 # change to ROS2 workspace source
 FROM base AS development
