@@ -16,6 +16,6 @@ docker run \
 -v /mnt:/mnt \
 -v /media:/media \
 --name livo-dev \
-livo:ros2 \
+livo:dev \
 bash
 xhost -
