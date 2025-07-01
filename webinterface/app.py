@@ -44,7 +44,7 @@ class StartRecordingForm(FlaskForm):
         "LiDAR Format",
         validators=[DataRequired()],
         choices=["LivoxMsg", "PointCloud2"],
-        description="LiDAR data format: LivoxMsg provides per-point timing while PointCloud2 visualizable.",
+        description="LiDAR data format: LivoxMsg provides per-point timing while PointCloud2 is visualizable.",
     )
     submit = SubmitField(label="Start Recording")
 
