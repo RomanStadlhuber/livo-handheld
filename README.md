@@ -97,8 +97,10 @@ and when inside the raspberry pi's hotspot, connect to the webpage using this li
 
 ## Webinterface Notes
 
+**NOTE**: The flask webserver serves locally saved versions of bootstrap from local sources in `webinterface/static/bootstrap`.
+See also: [bootstrap CDN links](https://www.jsdelivr.com/package/npm/bootstrap)
+
 When hosting the service via WiFi hotspot, the client may not be able to connect to the internet to load external resources (like `fonts.googleapis.com`).
 
-Therefore, the bootstrap file are stored in `webinterface/static/bootstrap` which are loaded in advance with `wget` from the [bootstrap CDN links](https://www.jsdelivr.com/package/npm/bootstrap).
 
 Currently, I am using `bootstrap@5.3.7`.
