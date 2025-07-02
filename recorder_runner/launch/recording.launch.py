@@ -104,19 +104,6 @@ def generate_launch_description() -> LaunchDescription:
         description="Transfer-format (xfer_format) of LiDAR data, 0-PointCloud2, 1-LivoxMsg",
     )
 
-    livox_ros2_params = [
-        # make transfer (xfer) format configurable
-        {"xfer_format": LaunchConfiguration("lidar_format")},
-        {"multi_topic": multi_topic},
-        {"data_src": data_src},
-        {"publish_freq": publish_freq},
-        {"output_data_type": output_type},
-        {"frame_id": frame_id},
-        {"lvx_file_path": lvx_file_path},
-        {"user_config_path": user_config_path},
-        {"cmdline_input_bd_code": cmdline_bd_code},
-    ]
-
 
 
     livox_driver = Node(
@@ -124,7 +111,19 @@ def generate_launch_description() -> LaunchDescription:
         executable="livox_ros_driver2_node",
         name="livox_lidar_publisher",
         output="screen",
-        parameters=livox_ros2_params,
+        parameters=[
+            {
+                "xfer_format": LaunchConfiguration("lidar_format"),
+                "multi_topic": multi_topic,
+                "data_src": data_src,
+                "publish_freq": publish_freq,
+                "output_data_type": output_type,
+                "frame_id": frame_id,
+                "lvx_file_path": lvx_file_path,
+                "user_config_path": user_config_path,
+                "cmdline_input_bd_code": cmdline_bd_code,
+            }
+        ],
     )
 
     return LaunchDescription(

@@ -207,7 +207,7 @@ class Interfaces:
             # try to launch the devices
             # self.__roslaunch_camera()
             # self.__roslaunch_lidar()
-            if self.__ros2_launch_sensors(kwargs=kwargs):
+            if self.__ros2_launch_sensors(**kwargs):
                 self.devices_started = True
                 # return success listing
                 print("Devices started!")
@@ -298,6 +298,7 @@ class Interfaces:
         try:
             lidar_format = kwargs.get("lidar_format", 1)
             if lidar_format not in [0, 1]: # safeguard against wrong format from caller
+                print(f"WARNING: safe-guarding lidar_format from {lidar_format} to 1!!")
                 lidar_format = 1
             self.launch_ros2_recorder = run_ros2_command(
                 ["ros2", "launch", Interfaces.pkg_ros2_recorder, Interfaces.launchfile_ros2_all, f"lidar_format:={lidar_format}"],
