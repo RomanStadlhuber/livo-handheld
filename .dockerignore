@@ -5,6 +5,8 @@
 
 .vscode/
 
+README.md
+./webinterface/README.md
 
 *.png
 *.jpg
