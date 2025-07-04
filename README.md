@@ -70,18 +70,70 @@ Some more info can be found on this [StackOverflow Thread](https://askubuntu.com
 
 </details>
 
+### Setup DNS Hijacking
+
+The built-in interface `wlan0` is used to host the hotspot.
+First, a static IP is configured for that interface and then all traffic is being rerouted to that IP by the DHCP server `dnsmasq`.
+
+> **NOTE:** this is assuming that the hotspot is hosted on `wlan0`.
+> If this is not the case, replace the device name accordingly (see `$ nmcli device`).
+
+```bash
+# configure the static IP on the hotspot
+# you can also find its name with "$ nmcli connection"
+sudo nmcli connection modify <hotspot-name> ipv4.addresses 192.168.4.1/24
+sudo nmcli connection modify <hotspot-name> ipv4.method manual
+```
+reset internal DNS settings to aviod namespace conflicts
+
+```bash
+sudo nmcli connection modify <hotspot-name> ipv4.ignore-auto-dns yes
+sudo nmcli connection modify <hotspot-name> ipv4.dns ""
+```
+
+then restart the connection on device `wlan0`
+
+```bash
+sudo nmcli device reapply wlan0
+```
+
+Then configure `dnsmasq`, install it with
+
+```bash
+sudo apt-update && apt-install -yq dnsmasq
+```
+
+and create (or modify) a file named `/etc/dnsmasq.conf` with the below content
+
+```conf
+interface=wlan0
+dhcp-range=192.168.4.10,192.168.4.100,12h
+address=/#/192.168.4.
+```
+
+which tells the DNS to lease IPs in the range of `*.10` to `*.100` for 12 hours each (adapt accordingly).
+Then enable `dnsmasq` to be active on system boot and restart it for changes to take effect.
+
+```bash
+sudo systemctl enable dnsmasq
+sudo systemctl restart dnsmasq
+```
+
+
 ## NGINX
 
 Save this as the default NGINX config, assuming `pi4` is the devices hostname (replace otherwise).
 
 ```nginx
-# /etc/nginx/sites-available/default
+# /etc/nginx/sites-enabled/flask
 server {
-        listen 80;
-        server_name pi4.local;
+        listen 80 default_server;
+        server_name _;
         location / {
-                # the production server (./scripts/docker/prod.sh)
                 proxy_pass http://127.0.0.1:8000;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarder-For $proxy_add_x_forwarded_for;
         }
 }
 ```

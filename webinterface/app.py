@@ -145,5 +145,12 @@ def record():
         return render_template("recording.html", form=form, status=status)
 
 
+# captive landing page, most clients will look for this
+@app.route("/generate_204")
+@app.route("/hotspot-detect.html")
+@app.route("/ncsi.txt")
+def captive_redirect():
+    return redirect(url_for("index"))
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0")  # app.run(debug=True)
