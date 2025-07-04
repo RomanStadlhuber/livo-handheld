@@ -1,7 +1,0 @@
-<launch>
-    <!-- remaps the topics to fit the requirements by kalibr and allen_variance_ros,
-    see: https://github.com/ori-drs/allan_variance_ros?tab=readme-ov-file#kalibr -->
-    <remap from="/imu_raw" to="/sensors/imu"/>
-    <remap from="/imu_magnetometer" to="/sensors/magnetometer"/>
-    <include file="$(find nxp_precision_9dof)/launch/imu.launch"/>
-</launch>
