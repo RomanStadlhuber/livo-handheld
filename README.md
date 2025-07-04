@@ -14,7 +14,10 @@ The **key differences** are
 - You can choose to export LiDAR message data as `sensor_msgs/msg/PointCloud2` or [`livox_ros_driver2/msg/CustomMsg`](https://github.com/Livox-SDK/livox_ros_driver2/blob/master/msg/CustomMsg.msg) as you wish.
 - It provides seamless **camera integration**.
 
-![CAD](assets/CAD.png "CAD")
+|               Hardware (CAD) |              The Webapp is hosted and accessed via hotspot     |
+|------------------------------|----------------------------------------------------------------|
+| ![CAD](assets/CAD.png "CAD") | ![webapp on smartphone](assets/app.png "webapp on smartphone") |
+
 
 ## Hardware
 
