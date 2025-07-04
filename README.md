@@ -145,8 +145,17 @@ sudo service nginx restart
 
 and when inside the raspberry pi's hotspot, connect to the webpage using this link
 
-> http://pi4.local
+> http://your-pi-hostname.local
 
+or by following the "sign in to network" prompt when connecting to the hotspot.
+
+
+## Set the LiDAR IP
+
+The static IP address of your LiDAR will always be `192.168.1.1xy`, where `xy` corresponds to the last two digits of the model code.
+You can find the model code on the sticker next to the M12 connector of the LiDAR, or you can use their official software to evaluate it programmatically.
+
+Then go to [`MID360_config.json`](recorder_runner/launch/MID360_config.json#L28) and **modify the IP accordingly before starting the docker build**.
 
 
 ## Building the Docker Image
