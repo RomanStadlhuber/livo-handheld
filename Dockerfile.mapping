@@ -1,0 +1,43 @@
+# NOTE: this Dockerfile is compatible with Raspberri-Pi 4
+FROM ros:humble
+WORKDIR /install
+# set shell to bash
+SHELL ["/bin/bash", "-c"]
+# install prerequisites for GTSAM
+# NOTE:
+# - software-properties common: used to add GTSAM repo
+# - boost is required by GTSAM
+# - cmake cannot build GTSAM projects without TBB installed, see
+# https://www.theimpossiblecode.com/blog/intel-tbb-on-raspberry-pi/
+RUN apt-get update && apt-get install -y -q build-essential libc++1 git \
+    software-properties-common libboost-all-dev libtbb-dev wget curl gdb
+# install GTSAM pre-built
+# see also: https://gtsam.org/get_started/
+RUN add-apt-repository ppa:borglab/gtsam-release-4.2
+RUN apt-get update && apt-get install -y -q libgtsam-dev libgtsam-unstable-dev
+### Install Livox SDK & ROS driver
+WORKDIR /install
+RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git
+RUN cd /install/Livox-SDK2 && mkdir build && cd build && \
+    cmake .. && make -j 8 && make install
+WORKDIR /ros2_ws/src
+RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
+# NOTE: PCL is required as a dependency by the livox ROS driver!
+RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl*
+RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
+    cd /ros2_ws/src/livox_ros_driver2 && ./build.sh humble
+### Download Open3D C++ sources ###
+WORKDIR /install
+RUN wget https://github.com/isl-org/Open3D/releases/download/v0.19.0/open3d-devel-linux-x86_64-cxx11-abi-0.19.0.tar.xz && \
+    tar -xvf open3d-devel-linux-x86_64-cxx11-abi-0.19.0.tar.xz && \
+    mv open3d-devel-linux-x86_64-cxx11-abi-0.19.0 open3d-devel
+# NOTE: to include Open3D as library in CMakeLists.txt, add the following lines
+#
+# list(APPEND CMAKE_PREFIX_PATH "/install/open3d/lib/cmake")
+# find_package(Open3D REQUIRED)
+# target_link_libraries(<target_name> Open3D::Open3D)
+# 
+WORKDIR /ros2_ws
+# make ROS available when sourcing bash as root
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
