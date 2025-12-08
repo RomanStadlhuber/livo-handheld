@@ -6,6 +6,7 @@
 // mapping
 #include <Eigen/Dense>
 #include <open3d/geometry/PointCloud.h>
+#include <open3d/geometry/KDTreeFlann.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
 #include <gtsam/navigation/ImuFactor.h>
@@ -15,6 +16,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 // standard
+#include <list>
 #include <mutex>
 #include <map>
 
@@ -35,6 +37,14 @@ struct LidarData
     std::vector<double> offset_times;
 };
 
+struct ScanBuffer
+{
+    /// @brief Pointcloud of undistorted (and voxelized) scan
+    std::shared_ptr<open3d::geometry::PointCloud> pcd;
+    /// @brief Pose of the scan w.r.t. the latest keyframe pose
+    std::shared_ptr<gtsam::Pose3> kf_T_scan;
+};
+
 enum SystemState
 {
     initializing,
@@ -45,17 +55,28 @@ enum SystemState
 /// @brief Convert LidarData to Open3D PointCloud (no undistortion).
 /// @param lidar_data The raw LiDAR scan, potentially undistorted.
 /// @return an Open3D PointCloud, with scan timestamp info removed.
-open3d::geometry::PointCloud Scan2PCD(const std::shared_ptr<LidarData> &lidar_data)
+open3d::geometry::PointCloud Scan2PCD(const std::shared_ptr<LidarData> &lidar_data, const double minPointDist, const double maxPointDist)
 {
     open3d::geometry::PointCloud pcd;
     size_t point_num = lidar_data->points.size();
     pcd.points_.reserve(point_num);
     for (size_t i = 0; i < point_num; ++i)
     {
+        const Eigen::Vector3d &pt = lidar_data->points[i];
+        const double dist = pt.norm();
+        if (dist < minPointDist || dist > maxPointDist)
+            continue;
         pcd.points_.push_back(lidar_data->points[i]);
     }
     return pcd;
 }
+
+/// @brief Indexing of points in a submap for building point clusters
+/// @details Uses `int` for point index because that's what Open3Ds KNN search returns.
+using SubmapIdxPointIdx = std::pair<u_int32_t, int>;
+/// @brief Type used to identify point clusters
+using ClusterId = u_int32_t;
+constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
 
 // NOTE: this class should not use ROS-specific stuff,
 // as it should ultimately be separated from the ROS implementation
@@ -156,6 +177,17 @@ private:
         w_R_i0.transposeInPlace(); // rotation from initial IMU frame to world frame
         // full initial pose
         gtsam::Pose3 w_T_i0{gtsam::Rot3(w_R_i0), gtsam::Point3(0, 0, 0)};
+        // create new submap with all initial lidar scans
+        open3d::geometry::PointCloud newSubmap;
+        for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
+        {
+            open3d::geometry::PointCloud pcdScan = Scan2PCD(it->second, minPointDist, maxPointDist);
+            pcdScan.VoxelDownSample(0.5);
+            newSubmap += pcdScan;
+        }
+        const u_int32_t idxNewKF = createKeyframeSubmap(w_T_i0, tLastImu, newSubmap);
+        // clear lidar buffer
+        lidarBuffer.erase(lidarBuffer.begin(), lidarBufferEndIt);
         // acceleration bias is unobservable because we the mean value is used for gravity alignment
         // gyro bias is the mean of all gyro measurements (because no rotation is assumed)
         Eigen::Vector3d gyroBiasMean{Eigen::Vector3d::Zero()};
@@ -181,34 +213,22 @@ private:
         gtsam::Vector6 priorPoseSigma;
         priorPoseSigma << 1e-6, 1e-6, 1e-6, 1e-3, 1e-3, 1e-3;
         // pose prior should be certain
-        newSmootherFactors.addPrior(X(keyframeCounter), w_T_i0, gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
-        newSmootherFactors.addPrior(V(keyframeCounter), gtsam::Vector3(gtsam::Vector3::Zero()), gtsam::noiseModel::Isotropic::Sigma(3, 1e-6));
+        newSmootherFactors.addPrior(X(idxNewKF), w_T_i0, gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
+        newSmootherFactors.addPrior(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()), gtsam::noiseModel::Isotropic::Sigma(3, 1e-6));
         // bias prior, very noisy
-        newSmootherFactors.addPrior(B(keyframeCounter), priorImuBias.vector(), gtsam::noiseModel::Isotropic::Sigma(6, 3.0 * std::max(accVariance, gyroVariance)));
-        newVaules.insert(X(keyframeCounter), w_T_i0);
-        newVaules.insert(V(keyframeCounter), gtsam::Vector3(gtsam::Vector3::Zero()));
-        newVaules.insert(B(keyframeCounter), priorImuBias);
+        newSmootherFactors.addPrior(B(idxNewKF), priorImuBias.vector(), gtsam::noiseModel::Isotropic::Sigma(6, 3.0 * std::max(accVariance, gyroVariance)));
+        newVaules.insert(X(idxNewKF), w_T_i0);
+        newVaules.insert(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()));
+        newVaules.insert(B(idxNewKF), priorImuBias);
         currState = gtsam::NavState(w_T_i0, gtsam::Vector3::Zero());
         lastKeyframeState = currState;
-        const double kfInit{static_cast<double>(keyframeCounter)};
+        const double kfInit{static_cast<double>(idxNewKF)};
         // set index of all values
         for (auto const &val : newVaules)
             newSmootherIndices[val.key] = kfInit;
         // clear imu buffer and store timestamp of last IMU reading
         tLastImu = imuBufferEndIt->first;
         imuBuffer.erase(imuBuffer.begin(), imuBufferEndIt);
-        // create new submap with all initial lidar scans
-        currentSubmap.Clear();
-        for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
-        {
-            open3d::geometry::PointCloud scanPcd = Scan2PCD(it->second);
-            scanPcd.VoxelDownSample(0.5);
-            currentSubmap += scanPcd;
-        }
-        lastKeyframePose = w_T_i0;
-        tLastKeyframe = lidarBufferEndIt->first;
-        // clear lidar buffer
-        lidarBuffer.erase(lidarBuffer.begin(), lidarBufferEndIt);
     }
 
     void track()
@@ -237,7 +257,7 @@ private:
         const gtsam::NavState propState{preintegrator.predict(currState, currBias)}; // imu-propagared state
         const double positionDiff{(propState.pose().translation() - currState.pose().translation()).norm()};
         currState = propState; // need to update
-        // iterator to the newest lidar scan that can still be processed (older than latest imu timestamp)
+        // iterator to the newest lidar scan that can still be processed (older than latest imu time    stamp)
         auto lidarBufferEndIt{lidarBuffer.upper_bound(tLastImu)};
         if (std::distance(lidarBuffer.begin(), lidarBufferEndIt) == 0)
         {
@@ -245,65 +265,158 @@ private:
             return;
         }
 
-        if (positionDiff >= threshNewKeyframeDist) // create new submap & add preintegration factor to the graph
+        // --- undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation ---
+        // delta pose to last submap at preintegrated state / last IMU time (!!)
+        gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().between(currState.pose())};
+        const double
+            tLastKeyframe{keyframeTimestamps.rbegin()->second}, // timestamp of last keyframe
+            dtPropToKeyframe{tLastImu - tLastKeyframe};         // time delta to last keyframe
+        // undistort between individual scans
+        gtsam::Pose3 deltaPoseLastScanToKeyframe{gtsam::Pose3::Identity()};
+        double dtLastScanToKeyframe{0.0};
+        for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
         {
-            /**
-             * TODO:
-             * - make undistortion modular
-             * - this likely means that that I have no move a large portion of the code below to a function
-             * - should LiDAR tracking residuals only be added when a new keyframe is created?
-             * - w.r.t. which keyframe pose should the new scans be undistorted here? I think it should not matter..
-             */
-        }
-        else // undistort scans and add them to the current keyframe submap
-        {
-            // delta pose to last submap at preintegrated state / last IMU time (!!)
-            gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().between(currState.pose())};
-            // time delta to last keyframe
-            const double dtPropToKeyframe{tLastImu - tLastKeyframe};
-            // undistort between individual scans
-            gtsam::Pose3 deltaPoseLastScanToKeyframe{gtsam::Pose3::Identity()};
-            double dtLastScanToKeyframe{0.0};
-            for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
+            const auto [tScan, scan] = *it;
+            const double dtScanToKeyframe{tScan - tLastKeyframe};
+            // pose delta of this scan to last keyframe
+            // compute pose delta to last submap at current scan time (extrapolate with constant velocity)
+            // linear and angular velocity are obtained from pose delta over preintegration time
+            const gtsam::Vector3
+                angVel{gtsam::Rot3::Logmap(deltaPoseToSubmap.rotation()) / dtPropToKeyframe},
+                linVel{deltaPoseToSubmap.translation() / dtPropToKeyframe};
+            // apply scan to keyframe delta time to get pose delta of the scan w.r.t. the last keyframe
+            gtsam::Rot3 deltaRotScanToKeyframe{gtsam::Rot3::Expmap(angVel * dtScanToKeyframe)};
+            gtsam::Point3 deltaTransScanToKeyframe{linVel * dtScanToKeyframe};
+            gtsam::Pose3 deltaPoseScanToKeyframe{deltaRotScanToKeyframe, deltaTransScanToKeyframe};
+            // pose & time delta from this to last scan
+            gtsam::Pose3 deltaPoseScanToScan{deltaPoseLastScanToKeyframe.between(deltaPoseScanToKeyframe)};
+            double dtScanToScan{dtScanToKeyframe - dtLastScanToKeyframe};
+
+            // undistort current scan
+            for (std::size_t i = 0; i < scan->points.size(); ++i)
             {
-                const auto [tScan, scan] = *it;
-                const double dtScanToKeyframe{tScan - tLastKeyframe};
-                // pose delta of this scan to last keyframe
-                // compute pose delta to last submap at current scan time (extrapolate with constant velocity)
-                // linear and angular velocity are obtained from pose delta over preintegration time
-                const gtsam::Vector3
-                    angVel{gtsam::Rot3::Logmap(deltaPoseToSubmap.rotation()) / dtPropToKeyframe},
-                    linVel{deltaPoseToSubmap.translation() / dtPropToKeyframe};
-                // apply scan to keyframe delta time to get pose delta of the scan w.r.t. the last keyframe
-                gtsam::Rot3 deltaRotScanToKeyframe{gtsam::Rot3::Expmap(angVel * dtScanToKeyframe)};
-                gtsam::Point3 deltaTransScanToKeyframe{linVel * dtScanToKeyframe};
-                gtsam::Pose3 deltaPoseScanToKeyframe{deltaRotScanToKeyframe, deltaTransScanToKeyframe};
-                // pose & time delta from this to last scan
-                gtsam::Pose3 deltaPoseScanToScan{deltaPoseLastScanToKeyframe.between(deltaPoseScanToKeyframe)};
-                double dtScanToScan{dtScanToKeyframe - dtLastScanToKeyframe};
-                
-                // undistort current scan
-                for(std::size_t i=0; i < scan->points.size(); ++i)
+                const Eigen::Vector3d pt = scan->points[i];
+                const double dt = scan->offset_times[i];
+                const gtsam::Vector3 angVel{gtsam::Rot3::Logmap(deltaPoseScanToScan.rotation())};
+                // presumed rotation and translation that the point should have undergone during scan time
+                gtsam::Rot3 R{gtsam::Rot3::Expmap(angVel / dtScanToScan * dt)};
+                gtsam::Point3 t{deltaPoseScanToScan.translation() / dtScanToScan * dt};
+                gtsam::Pose3 T{R, t};
+                // undistort point
+                const Eigen::Vector3d ptUndistorted{T.transformFrom(pt)};
+                scan->points[i] = ptUndistorted;
+            }
+            // convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
+            open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, minPointDist, maxPointDist);
+            pcdScan.VoxelDownSample(voxelSize);
+            gtsam::Pose3 scanPoseInWorld{keyframePoses.rbegin()->second->compose(deltaPoseScanToKeyframe)}; // pose in world frame
+            pcdScan.Transform(scanPoseInWorld.matrix());
+            // buffer undistorted scan
+            bufferScan(deltaPoseScanToKeyframe, pcdScan);
+        } // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the buffer
+
+        if (positionDiff < threshNewKeyframeDist)
+            return;
+        // --- create new keyframe ---
+        // merge buffered scans together & create new keyframe submap
+        open3d::geometry::PointCloud newSubmap;
+        for (const ScanBuffer &scan : scanBuffer)
+        {
+            // move all scans to same origin
+            scan.pcd->Transform(scan.kf_T_scan->matrix());
+            newSubmap += *(scan.pcd);
+        }
+        newSubmap.VoxelDownSample(voxelSize);
+        const u_int32_t idxKeyframe = createKeyframeSubmap(currState.pose(), tLastImu, newSubmap); // NOTE: also clears the scan buffer
+
+        // search for same-plane point clusters among all keyframes
+        const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps[idxKeyframe];
+        std::vector<int> knnIndices(knnMaxNeighbors); // will be used for NN search results
+        std::vector<double> knnDists(knnMaxNeighbors);
+        // TODO: make this an unordered_map, but requires custom hashing and equality OPs for the key type
+        std::map<SubmapIdxPointIdx, ClusterId> clusterTracks;
+        // find nearest neighbors between the new submap and all other keyframe submaps
+        for (auto itOtherSubmap = keyframeSubmaps.begin(); itOtherSubmap != keyframeSubmaps.end(); ++itOtherSubmap)
+        {
+            // skip self
+            const u_int32_t idxOtherSubmap = itOtherSubmap->first;
+            if (idxOtherSubmap == idxKeyframe)
+                continue;
+            const int numQueryPts = pcdQuery->points_.size();
+            for (int idxPt = 0; idxPt < numQueryPts; ++idxPt)
+            {
+                knnIndices.clear();
+                knnDists.clear();
+                const int knnFound = submapKDTrees[idxOtherSubmap]->SearchHybrid(
+                    pcdQuery->points_[idxPt], knnRadius, knnMaxNeighbors, knnIndices, knnDists);
+                if (knnFound > 0)
                 {
-                    const Eigen::Vector3d pt = scan->points[i];
-                    const double dt = scan->offset_times[i];
-                    const gtsam::Vector3 angVel{gtsam::Rot3::Logmap(deltaPoseScanToScan.rotation())};
-                    // presumed rotation and translation that the point should have undergone during scan time
-                    gtsam::Rot3 R{gtsam::Rot3::Expmap(angVel / dtScanToScan * dt)};
-                    gtsam::Point3 t{deltaPoseScanToScan.translation() / dtScanToScan * dt};
-                    gtsam::Pose3 T{R, t};
-                    // undistort point
-                    const Eigen::Vector3d ptUndistorted{T.transformFrom(pt)};
-                    scan->points[i] = ptUndistorted;
+                    ClusterId clusterId = INVALID_CLUSTER_ID, tempNewCluster = clusterIdCounter + 1;
+                    // clusters that need to be merged (polled & processed after search)
+                    std::vector<ClusterId> duplicateClusters;
+                    // identify or assign cluster to every NN returned point
+                    for (int i = 0; i < knnFound; ++i)
+                    {
+                        SubmapIdxPointIdx idxOther{idxOtherSubmap, knnIndices[i]};
+                        if (clusterTracks.find(idxOther) != clusterTracks.end())
+                        {
+                            clusterTracks[idxOther] = tempNewCluster;
+                        }
+                        else
+                        {
+                            // point belongs to a single existing cluster
+                            if (clusterId == INVALID_CLUSTER_ID)
+                            {
+                                clusterId = clusterTracks[idxOther];
+                                // may have assigned temp cluster, which needs to be replaced
+                                duplicateClusters.push_back(tempNewCluster);
+                            }
+                            else // point belongs to multiple existing clusters, need to merge
+                                duplicateClusters.push_back(clusterTracks[idxOther]);
+                        }
+
+                        // if a new cluster was identified, increment the counter
+                        if (clusterId == INVALID_CLUSTER_ID)
+                            clusterIdCounter = clusterId = tempNewCluster;
+                        // this point belongs to an existing cluster
+                        else // merge all duplicate clusters with the identified one
+                            for (const ClusterId &duplicateId : duplicateClusters)
+                                for (auto &entry : clusterTracks)
+                                    if (entry.second == duplicateId)
+                                        entry.second = clusterId;
+                        // add the current point to the identified cluster
+                        SubmapIdxPointIdx idxCurrent{idxKeyframe, idxPt};
+                        clusterTracks[idxCurrent] = clusterId;
+                    }
                 }
-                // convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
-                open3d::geometry::PointCloud scanPcd = Scan2PCD(scan);
-                scanPcd.VoxelDownSample(voxelSize);
-                gtsam::Pose3 scanPoseInWorld{lastKeyframePose.compose(deltaPoseScanToKeyframe)}; // pose in world frame
-                scanPcd.Transform(scanPoseInWorld.matrix()); // move to world frame w.r.t. last KF
-                currentSubmap += scanPcd; // add to current submap
             }
         }
+        // join tracks by clusters
+        std::unordered_map<ClusterId, std::vector<SubmapIdxPointIdx>> clusters;
+        for (auto itTrack = clusterTracks.begin(); itTrack != clusterTracks.end(); ++itTrack)
+        {
+            const auto [idxPoint, clusterId] = *itTrack;
+            if (clusters.find(clusterId) == clusters.end())
+                clusters[clusterId] = std::vector<SubmapIdxPointIdx>{idxPoint};
+            else
+                clusters[clusterId].push_back(idxPoint);
+        }
+        // remove clusters that are too small
+        for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
+        {
+            if (itCluster->second.size() < minClusterSize)
+                itCluster = clusters.erase(itCluster);
+            else
+                ++itCluster;
+        }
+        /**
+         * TODO: cluster validation & outlier rejection
+         * - fit planes to each cluster and remove those with high fitting error (no RANSAC, use all points)
+         * - construct structureless point-to-plane factors for all points in remaining valid clusters
+         * - add factors to the factor graph
+         * - should existing factors from previous updates be removed? how does iSAM2 handle them?
+         *  - check Kimera implementation
+         */
     }
 
     void resetNewFactors()
@@ -313,8 +426,40 @@ private:
         newSmootherIndices.clear();
     };
 
+    /// @brief Store new keyframe submap and initialized pose, increment keyframe counter and clear the scan buffer.
+    /// @param keyframePose
+    /// @param keyframeTimestamp
+    /// @param keyframeSubmap
+    /// @return
+    u_int32_t createKeyframeSubmap(const gtsam::Pose3 &keyframePose, const double &keyframeTimestamp, open3d::geometry::PointCloud keyframeSubmap)
+    {
+        // increment keyframe counter
+        const u_int32_t idxNewKf = keyframeCounter++;
+        // store keyframe data
+        auto ptrSubmap{std::make_shared<open3d::geometry::PointCloud>(keyframeSubmap)};
+        // transform submap to its estimated pose in the world frame
+        ptrSubmap->Transform(keyframePose.matrix());
+        keyframeSubmaps[idxNewKf] = ptrSubmap;
+        keyframePoses[idxNewKf] = std::make_shared<gtsam::Pose3>(keyframePose);
+        keyframeTimestamps[idxNewKf] = keyframeTimestamp;
+        // initialize a KD-Tree for point cluster search
+        submapKDTrees[idxNewKf] = std::make_shared<open3d::geometry::KDTreeFlann>(*ptrSubmap);
+        // clear scan buffer
+        scanBuffer.clear();
+        return idxNewKf;
+    };
+
+    /// @brief Add a new (undistorted) scan pointcloud to the scan buffer
+    /// @param scanPoseToLastKeyframe
+    /// @param pcdScan
+    void bufferScan(const gtsam::Pose3 &scanPoseToLastKeyframe, open3d::geometry::PointCloud pcdScan)
+    {
+        scanBuffer.push_back(ScanBuffer{std::make_shared<open3d::geometry::PointCloud>(pcdScan),
+                                        std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe)});
+    };
+
 private:
-    // input datat buffers
+    // input data buffers
     std::map<double, std::shared_ptr<ImuData>> imuBuffer;
     std::map<double, std::shared_ptr<LidarData>> lidarBuffer;
     // IMU preintegrator
@@ -333,17 +478,26 @@ private:
     /// @brief current estimated state (propagated OR updated)
     /// @details **NOTE** that this is **NOT** the single best estimate as it is used for IMU propagation
     gtsam::NavState currState, lastKeyframeState;
-    gtsam::Pose3 lastKeyframePose; // pose of the last processed LIDAR scan, may be from IMU propagation or KF update
     gtsam::imuBias::ConstantBias currBias;
-    double tLastImu{0.0}, tLastKeyframe{0.0};
-    // mapping
-    open3d::geometry::PointCloud currentSubmap;
-    std::map<u_int32_t, open3d::geometry::PointCloud> keyframeSubmaps;
+    double tLastImu{0.0};
+    // --- mapping ---
+    // unmerged scan data
+    std::list<ScanBuffer> scanBuffer;
+    // keyframe data
+    std::map<u_int32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps;
+    std::map<u_int32_t, std::shared_ptr<open3d::geometry::KDTreeFlann>> submapKDTrees;
+    std::map<u_int32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses;
+    std::map<u_int32_t, double> keyframeTimestamps;
+    // (same plane) point clusters
+    ClusterId clusterIdCounter{0};
     // configuration constants
-    static constexpr int slidingWindowSize{7};          // in keyframes (including preintegration factors)
-    static constexpr double initTimeWindow{2.0};        // time used for (assumed) static state initialization, in seconds
-    static constexpr double voxelSize{0.5};             // voxel size for submap construction
-    static constexpr double threshNewKeyframeDist{0.5}; // threshold for new keyframe creation based on position change
+    static constexpr int slidingWindowSize{7};                     // in keyframes (including preintegration factors)
+    static constexpr double initTimeWindow{2.0};                   // time used for (assumed) static state initialization, in seconds
+    static constexpr double voxelSize{0.5};                        // voxel size for submap construction
+    static constexpr double threshNewKeyframeDist{0.5};            // threshold for new keyframe creation based on position change
+    static constexpr double minPointDist{1.5}, maxPointDist{60.0}; // min/max point distance for lidar points to be considered
+    static constexpr double knnRadius{0.5}, knnMaxNeighbors{5};    // parameters for KD-Tree search for plane point clusters
+    static constexpr size_t minClusterSize{3};
 };
 
 class MapperNode : public rclcpp::Node
@@ -374,9 +528,10 @@ private:
         // build imu data container from msg
         auto imu_data = std::make_shared<ImuData>();
         imu_data->acceleration = Eigen::Vector3d(
-            msg->linear_acceleration.x,
-            msg->linear_acceleration.y,
-            msg->linear_acceleration.z);
+                                     msg->linear_acceleration.x,
+                                     msg->linear_acceleration.y,
+                                     msg->linear_acceleration.z) *
+                                 livox_imu_scale; // convert from [g] to [m/s^2]
         imu_data->angular_velocity = Eigen::Vector3d(
             msg->angular_velocity.x,
             msg->angular_velocity.y,
@@ -414,10 +569,12 @@ private:
         slam.update();
     }
 
+private:
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr lidar_subscription;
     rclcpp::Time start_time;
     bool has_start_time = false;
+    static constexpr double livox_imu_scale{9.81};
 
     MapperSystem slam;
 };
