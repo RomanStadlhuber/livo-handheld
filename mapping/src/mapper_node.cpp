@@ -185,7 +185,7 @@ private:
             pcdScan.VoxelDownSample(0.5);
             newSubmap += pcdScan;
         }
-        const u_int32_t idxNewKF = createKeyframeSubmap(w_T_i0, tLastImu, newSubmap);
+        const u_int32_t idxNewKF = createKeyframeSubmap(w_T_i0.compose(imu_T_lidar), tLastImu, newSubmap);
         // clear lidar buffer
         lidarBuffer.erase(lidarBuffer.begin(), lidarBufferEndIt);
         // acceleration bias is unobservable because we the mean value is used for gravity alignment
@@ -236,7 +236,7 @@ private:
 
         // NOTE: it this point, the buffers should contain only unprocessed measurements
         // lock the buffers for accessing values
-        std::lock_guard<std::mutex> lockImuBuffer(mtxImuBuffer), lockLidarBuffer(mtxLidarBuffer);
+        std::unique_lock<std::mutex> lockImuBuffer(mtxImuBuffer);
         // delete imu measurements that are older than the latest processed imu timestamp (should not happen)
         imuBuffer.erase(imuBuffer.begin(), imuBuffer.upper_bound(tLastImu));
         std::cout << "::: [WARNING] the system is discarding unprocessed IMU measurements (too old), this should not happen! :::" << std::endl;
@@ -254,10 +254,12 @@ private:
         // save last imu timestamp and clear the buffer
         tLastImu = imuBuffer.rbegin()->first;
         imuBuffer.clear();
+        lockImuBuffer.unlock();
         const gtsam::NavState propState{preintegrator.predict(currState, currBias)}; // imu-propagared state
         const double positionDiff{(propState.pose().translation() - currState.pose().translation()).norm()};
         currState = propState; // need to update
         // iterator to the newest lidar scan that can still be processed (older than latest imu time    stamp)
+        std::unique_lock<std::mutex> lockLidarBuffer(mtxLidarBuffer);
         auto lidarBufferEndIt{lidarBuffer.upper_bound(tLastImu)};
         if (std::distance(lidarBuffer.begin(), lidarBufferEndIt) == 0)
         {
@@ -267,7 +269,7 @@ private:
 
         // --- undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation ---
         // delta pose to last submap at preintegrated state / last IMU time (!!)
-        gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().between(currState.pose())};
+        gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().between(currState.pose().compose(imu_T_lidar))};
         const double
             tLastKeyframe{keyframeTimestamps.rbegin()->second}, // timestamp of last keyframe
             dtPropToKeyframe{tLastImu - tLastKeyframe};         // time delta to last keyframe
@@ -313,7 +315,11 @@ private:
             pcdScan.Transform(scanPoseInWorld.matrix());
             // buffer undistorted scan
             bufferScan(deltaPoseScanToKeyframe, pcdScan);
-        } // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the buffer
+        }
+        // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the PCD buffer
+        // erase processed raw scan data and release buffer lock
+        lidarBuffer.erase(lidarBuffer.begin(), lidarBufferEndIt);
+        lockLidarBuffer.unlock();
 
         if (positionDiff < threshNewKeyframeDist)
             return;
@@ -327,7 +333,7 @@ private:
             newSubmap += *(scan.pcd);
         }
         newSubmap.VoxelDownSample(voxelSize);
-        const u_int32_t idxKeyframe = createKeyframeSubmap(currState.pose(), tLastImu, newSubmap); // NOTE: also clears the scan buffer
+        const u_int32_t idxKeyframe = createKeyframeSubmap(currState.pose().compose(imu_T_lidar), tLastImu, newSubmap); // NOTE: also clears the scan buffer
 
         // search for same-plane point clusters among all keyframes
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps[idxKeyframe];
@@ -412,11 +418,55 @@ private:
         /**
          * TODO: cluster validation & outlier rejection
          * - fit planes to each cluster and remove those with high fitting error (no RANSAC, use all points)
+         * - compute plane thickness, plane factor covariance and standard deviation which is used for validation
+         *  - MSC-LIO Eq. (18-19) and last paragraphs of IV-D
          * - construct structureless point-to-plane factors for all points in remaining valid clusters
          * - add factors to the factor graph
          * - should existing factors from previous updates be removed? how does iSAM2 handle them?
          *  - check Kimera implementation
          */
+        // outlier rejection - remove clusters that aren't planes
+        for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
+        {
+            const size_t numPoints = itCluster->second.size();
+            // compute centered point locations for plane fitting
+            Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
+            for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
+            {
+                const u_int32_t idxSubmap = idxPoint.first;
+                const int pointIdx = idxPoint.second;
+                centroid += keyframeSubmaps[idxSubmap]->points_[pointIdx];
+            }
+            centroid /= static_cast<double>(numPoints);
+
+            Eigen::MatrixXd A(numPoints, 3);
+            size_t i = 0;
+            for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
+            {
+                const u_int32_t idxSubmap = idxPoint.first;
+                const int pointIdx = idxPoint.second;
+                A.row(i++) = keyframeSubmaps[idxSubmap]->points_[pointIdx] - centroid;
+            }
+
+            Eigen::JacobiSVD<Eigen::MatrixXd> svd(A, Eigen::ComputeThinU | Eigen::ComputeThinV);
+            const Eigen::Vector3d planeNormal = svd.matrixV().col(2).normalized();
+            // check if plane is valid - all points need to be withing threshold distance to plane
+            bool isPlaneValid{true};
+            for (size_t idxPt = 0; idxPt < numPoints; i++)
+            {
+                const double pointToPlaneDist{planeNormal.dot(A.row(i))};
+                if (pointToPlaneDist > threshPlaneValid)
+                {
+                    isPlaneValid = false;
+                    break;
+                }
+            }
+            // remove tracked cluster if plane is not valid
+            if (!isPlaneValid)
+                itCluster = clusters.erase(itCluster);
+            else
+                ++itCluster;
+        }
     }
 
     void resetNewFactors()
@@ -488,6 +538,11 @@ private:
     std::map<u_int32_t, std::shared_ptr<open3d::geometry::KDTreeFlann>> submapKDTrees;
     std::map<u_int32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses;
     std::map<u_int32_t, double> keyframeTimestamps;
+    // --- calibration ---
+
+    /// @brief Extrinsics from IMU to LiDAR frame.
+    /// @details See Mid360 User Manual, p. 15, Paragraph "IMU Data"
+    const gtsam::Pose3 imu_T_lidar{gtsam::Rot3::Identity(), gtsam::Point3(-0.011, -0.02329, 0.04412)};
     // (same plane) point clusters
     ClusterId clusterIdCounter{0};
     // configuration constants
@@ -497,7 +552,8 @@ private:
     static constexpr double threshNewKeyframeDist{0.5};            // threshold for new keyframe creation based on position change
     static constexpr double minPointDist{1.5}, maxPointDist{60.0}; // min/max point distance for lidar points to be considered
     static constexpr double knnRadius{0.5}, knnMaxNeighbors{5};    // parameters for KD-Tree search for plane point clusters
-    static constexpr size_t minClusterSize{3};
+    static constexpr size_t minClusterSize{5};                     // minimum number of points in a cluster to start tracking
+    static constexpr double threshPlaneValid{0.1};                 // maximum distance from all cluster pts to fitted plane for validity
 };
 
 class MapperNode : public rclcpp::Node
