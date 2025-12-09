@@ -399,6 +399,7 @@ private:
         }
         // join tracks by clusters
         std::unordered_map<ClusterId, std::vector<SubmapIdxPointIdx>> clusters;
+        std::unordered_map<ClusterId, double> clusterPlaneThickness;
         for (auto itTrack = clusterTracks.begin(); itTrack != clusterTracks.end(); ++itTrack)
         {
             const auto [idxPoint, clusterId] = *itTrack;
@@ -452,20 +453,27 @@ private:
             const Eigen::Vector3d planeNormal = svd.matrixV().col(2).normalized();
             // check if plane is valid - all points need to be withing threshold distance to plane
             bool isPlaneValid{true};
-            for (size_t idxPt = 0; idxPt < numPoints; i++)
+            double planeThickness{0.0};
+            for (size_t idxPt = 0; idxPt < numPoints; idxPt++)
             {
-                const double pointToPlaneDist{planeNormal.dot(A.row(i))};
+                const double pointToPlaneDist{std::abs(planeNormal.dot(A.row(i)))};
                 if (pointToPlaneDist > threshPlaneValid)
                 {
                     isPlaneValid = false;
                     break;
                 }
+                else
+                    planeThickness += std::pow(pointToPlaneDist, 2);
             }
             // remove tracked cluster if plane is not valid
             if (!isPlaneValid)
                 itCluster = clusters.erase(itCluster);
             else
+            {
+                planeThickness /= static_cast<double>(numPoints);
+                clusterPlaneThickness[itCluster->first] = planeThickness;
                 ++itCluster;
+            }
         }
     }
 
