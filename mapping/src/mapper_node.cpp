@@ -78,6 +78,63 @@ using SubmapIdxPointIdx = std::pair<u_int32_t, int>;
 using ClusterId = u_int32_t;
 constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
 
+class PointToPlaneFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
+{
+
+public:
+    PointToPlaneFactor(
+        const gtsam::Key key,                                            // key of the NavState variable in the smoothers factor graph
+        const gtsam::Pose3 &imu_T_lidar,                                 // fixed extrinsic calibration
+        const std::vector<std::shared_ptr<Eigen::Vector3d>> &scanPoints, // plane points in the LiDAR frame
+        const std::shared_ptr<Eigen::Vector3d> &planeNormal,             // plane normal in the world frame
+        const double planeNormalOffsetD,                                 // plane normal offset d in the world frame s.t. n^T * x - d = 0
+        const gtsam::SharedNoiseModel &noiseModel                        // point-to-plane noise model
+        ) : NoiseModelFactor1<gtsam::Pose3>(noiseModel, key),
+            imu_T_lidar(imu_T_lidar),
+            scanPoints(scanPoints),
+            planeNormal(planeNormal),
+            planeNormalOffsetD(planeNormalOffsetD) {};
+
+    gtsam::Vector evaluateError(
+        const gtsam::Pose3 &w_T_imu,                     ///< current estimate of the IMU pose in the world frame
+        boost::optional<gtsam::Matrix &> H = boost::none ///< optional Jacobian matrix
+    ) const override
+    {
+        // transform plane points to world frame
+        gtsam::Pose3 w_T_lidar = w_T_imu.compose(imu_T_lidar);
+        size_t numPoints = scanPoints.size();
+        gtsam::Vector errorVec(numPoints);
+        for (size_t i = 0; i < numPoints; ++i)
+        {
+            gtsam::Point3 w_p = w_T_lidar.transformFrom(gtsam::Point3(*scanPoints[i]));
+            errorVec(i) = planeNormal->dot(w_p) - planeNormalOffsetD;
+        }
+
+        if (H)
+        {
+            (*H) = gtsam::Matrix(numPoints, 6);
+            for (size_t i = 0; i < numPoints; ++i)
+            {
+                gtsam::Point3 w_p = w_T_lidar.transformFrom(gtsam::Point3(*scanPoints[i]));
+                // derivative of point-to-plane distance w.r.t. pose perturbation
+                gtsam::Matrix16 D_error_D_pose;
+                const Eigen::Matrix<double, 1, 3> nT = planeNormal->transpose();
+                D_error_D_pose.row(i).head<3>() = -nT * gtsam::skewSymmetric(w_p);  // rotation
+                D_error_D_pose.row(i).tail<3>() = nT * w_T_imu.rotation().matrix(); // translation
+                (*H).row(i) = D_error_D_pose;
+            }
+        }
+        return errorVec;
+    }
+
+private:
+    // input parameters
+    const gtsam::Pose3 imu_T_lidar;
+    const std::vector<std::shared_ptr<Eigen::Vector3d>> scanPoints;
+    const std::shared_ptr<Eigen::Vector3d> planeNormal;
+    const double planeNormalOffsetD;
+};
+
 // NOTE: this class should not use ROS-specific stuff,
 // as it should ultimately be separated from the ROS implementation
 class MapperSystem
@@ -217,14 +274,14 @@ private:
         newSmootherFactors.addPrior(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()), gtsam::noiseModel::Isotropic::Sigma(3, 1e-6));
         // bias prior, very noisy
         newSmootherFactors.addPrior(B(idxNewKF), priorImuBias.vector(), gtsam::noiseModel::Isotropic::Sigma(6, 3.0 * std::max(accVariance, gyroVariance)));
-        newVaules.insert(X(idxNewKF), w_T_i0);
-        newVaules.insert(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()));
-        newVaules.insert(B(idxNewKF), priorImuBias);
+        newValues.insert(X(idxNewKF), w_T_i0);
+        newValues.insert(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()));
+        newValues.insert(B(idxNewKF), priorImuBias);
         currState = gtsam::NavState(w_T_i0, gtsam::Vector3::Zero());
         lastKeyframeState = currState;
         const double kfInit{static_cast<double>(idxNewKF)};
         // set index of all values
-        for (auto const &val : newVaules)
+        for (auto const &val : newValues)
             newSmootherIndices[val.key] = kfInit;
         // clear imu buffer and store timestamp of last IMU reading
         tLastImu = imuBufferEndIt->first;
@@ -243,6 +300,7 @@ private:
         // delete lidar scans that are older than the latest processed lidar timestamp (should not happen, warn if it does)
         lidarBuffer.erase(lidarBuffer.begin(), lidarBuffer.upper_bound(tLastImu));
         std::cout << "::: [ERROR] discarded unprocessed LiDAR scan (too old), this should not happen! :::" << std::endl;
+        std::cout << "::: [DEBUG] begin IMU preintegration :::" << std::endl;
         // perform preintegration to decide whether a new keyframe is needed
         for (auto imuIt = imuBuffer.begin(); imuIt != imuBuffer.end(); ++imuIt)
         {
@@ -251,6 +309,7 @@ private:
             // integrate measurement
             preintegrator.integrateMeasurement(u->acceleration, u->angular_velocity, dt);
         }
+        std::cout << "::: [DEBUG] IMU preintegration completed :::" << std::endl;
         // save last imu timestamp and clear the buffer
         tLastImu = imuBuffer.rbegin()->first;
         imuBuffer.clear();
@@ -267,6 +326,7 @@ private:
             return;
         }
 
+        std::cout << "::: [DEBUG] begin undistorting LiDAR scans :::" << std::endl;
         // --- undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation ---
         // delta pose to last submap at preintegrated state / last IMU time (!!)
         gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().between(currState.pose().compose(imu_T_lidar))};
@@ -316,6 +376,7 @@ private:
             // buffer undistorted scan
             bufferScan(deltaPoseScanToKeyframe, pcdScan);
         }
+        std::cout << "::: [DEBUG] completed undistorting LiDAR scans, proceeding to identify keyframe :::" << std::endl;
         // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the PCD buffer
         // erase processed raw scan data and release buffer lock
         lidarBuffer.erase(lidarBuffer.begin(), lidarBufferEndIt);
@@ -323,6 +384,7 @@ private:
 
         if (positionDiff < threshNewKeyframeDist)
             return;
+        std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
         // --- create new keyframe ---
         // merge buffered scans together & create new keyframe submap
         open3d::geometry::PointCloud newSubmap;
@@ -335,6 +397,7 @@ private:
         newSubmap.VoxelDownSample(voxelSize);
         const u_int32_t idxKeyframe = createKeyframeSubmap(currState.pose().compose(imu_T_lidar), tLastImu, newSubmap); // NOTE: also clears the scan buffer
 
+        std::cout << "::: [DEBUG] identifying same-plane point clusters among keyframe submaps :::" << std::endl;
         // search for same-plane point clusters among all keyframes
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps[idxKeyframe];
         std::vector<int> knnIndices(knnMaxNeighbors); // will be used for NN search results
@@ -397,9 +460,11 @@ private:
                 }
             }
         }
+        std::cout << "::: [DEBUG] cluster identification completed, proceeding with outlier rejection :::" << std::endl;
         // join tracks by clusters
         std::unordered_map<ClusterId, std::vector<SubmapIdxPointIdx>> clusters;
         std::unordered_map<ClusterId, double> clusterPlaneThickness;
+        std::unordered_map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters, clusterNormals;
         for (auto itTrack = clusterTracks.begin(); itTrack != clusterTracks.end(); ++itTrack)
         {
             const auto [idxPoint, clusterId] = *itTrack;
@@ -429,14 +494,16 @@ private:
         // outlier rejection - remove clusters that aren't planes
         for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
         {
-            const size_t numPoints = itCluster->second.size();
+            size_t numPoints{0};
             // compute centered point locations for plane fitting
             Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
             for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
             {
-                const u_int32_t idxSubmap = idxPoint.first;
-                const int pointIdx = idxPoint.second;
+                auto const [idxSubmap, pointIdx] = idxPoint;
+                if (idxSubmap == idxKeyframe) // plane thickness and normal will not be computed using points from the new keyframe
+                    continue;
                 centroid += keyframeSubmaps[idxSubmap]->points_[pointIdx];
+                numPoints++;
             }
             centroid /= static_cast<double>(numPoints);
 
@@ -444,8 +511,9 @@ private:
             size_t i = 0;
             for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
             {
-                const u_int32_t idxSubmap = idxPoint.first;
-                const int pointIdx = idxPoint.second;
+                auto const [idxSubmap, pointIdx] = idxPoint;
+                if (idxSubmap == idxKeyframe) // plane thickness and normal will not be computed using points from the new keyframe
+                    continue;
                 A.row(i++) = keyframeSubmaps[idxSubmap]->points_[pointIdx] - centroid;
             }
 
@@ -456,7 +524,7 @@ private:
             double planeThickness{0.0};
             for (size_t idxPt = 0; idxPt < numPoints; idxPt++)
             {
-                const double pointToPlaneDist{std::abs(planeNormal.dot(A.row(i)))};
+                const double pointToPlaneDist{std::abs(planeNormal.dot(A.row(idxPt)))};
                 if (pointToPlaneDist > threshPlaneValid)
                 {
                     isPlaneValid = false;
@@ -472,15 +540,78 @@ private:
             {
                 planeThickness /= static_cast<double>(numPoints);
                 clusterPlaneThickness[itCluster->first] = planeThickness;
+                clusterCenters[itCluster->first] = std::make_shared<Eigen::Vector3d>(centroid);
+                clusterNormals[itCluster->first] = std::make_shared<Eigen::Vector3d>(planeNormal);
                 ++itCluster;
             }
         }
-    }
+        std::cout << "::: [DEBUG] outlier rejection completed, proceeding to formulate tracking constraints :::" << std::endl;
+        // build residuals for active keyframe points from valid clusters
+        for (auto itValidCluster = clusters.begin(); itValidCluster != clusters.end(); ++itValidCluster)
+        {
+            const ClusterId clusterId = itValidCluster->first;
+            const std::vector<SubmapIdxPointIdx> &clusterPoints = itValidCluster->second;
+            const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters[clusterId];
+            const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals[clusterId];
+            const double planeThickness = clusterPlaneThickness[clusterId];
+            // noise model for point-to-plane factor
+            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, std::sqrt(planeThickness));
+            std::vector<std::shared_ptr<Eigen::Vector3d>> planePoints; // this clusters points in the lidar frame of the active keyframe
+            for (const SubmapIdxPointIdx &idxPoint : clusterPoints)
+            {
+                auto const [keySubmap, pointIdx] = idxPoint;
+                if (keySubmap != idxKeyframe)
+                    continue; // only create factors for points in the new keyframe
+                // scan point in LiDAR frame
+                planePoints.push_back(std::make_shared<Eigen::Vector3d>(
+                    keyframeSubmaps[keySubmap]->points_[pointIdx] - keyframePoses[idxKeyframe]->translation()));
+            }
+            // add point to plane factors for all points in the active keyframe
+            if (planePoints.size() > 0)
+            {
+                newSmootherFactors.add(boost::make_shared<PointToPlaneFactor>(
+                    X(idxKeyframe),
+                    imu_T_lidar,
+                    planePoints,
+                    clusterNormal,
+                    clusterNormal->dot(*clusterCenter), // d in plane equation s.t. n^T * x - d = 0
+                    noiseModel));
+                newValues.insert(X(idxKeyframe), currState.pose());
+                newSmootherIndices[X(idxKeyframe)] = static_cast<double>(idxKeyframe);
+            }
+        }
+        // predicted state
+        newValues.insert(X(idxKeyframe), currState.pose());
+        newValues.insert(V(idxKeyframe), currState.v());
+        newValues.insert(B(idxKeyframe), currBias);
+        // preintegration factor
+        newSmootherFactors.add(
+            gtsam::CombinedImuFactor(
+                X(idxKeyframe - 1), V(idxKeyframe - 1), // previous pose and velocity
+                X(idxKeyframe), V(idxKeyframe),         // new pose and velocity
+                B(idxKeyframe - 1), B(idxKeyframe),     // previous bias and new bias
+                preintegrator));
+        // smoother indices used for marginalization
+        newSmootherIndices[X(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
+        newSmootherIndices[V(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
+        newSmootherIndices[B(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
+        // update smoother, TODO: identify marginalized keyframes and remove their submap data
+        smoother.update(newSmootherFactors, newValues, newSmootherIndices);
+        resetNewFactors(); // clear factor, index & value buffers
+        // extract estimated state
+        currState = gtsam::NavState{
+                smoother.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
+                smoother.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
+        currBias = smoother.calculateEstimate<gtsam::imuBias::ConstantBias>(B(idxKeyframe));
+        lastKeyframeState = currState;
+        // reset preintegrator
+        preintegrator.resetIntegrationAndSetBias(currBias);
+    };
 
     void resetNewFactors()
     {
         newSmootherFactors.resize(0);
-        newVaules.clear();
+        newValues.clear();
         newSmootherIndices.clear();
     };
 
@@ -507,6 +638,13 @@ private:
         return idxNewKf;
     };
 
+    void updateKeyframeSubmapPose(const u_int32_t keyframeIdx, const gtsam::Pose3 &newWorldPose)
+    {
+        const gtsam::Pose3 deltaPose{keyframePoses[keyframeIdx]->between(newWorldPose)};
+        keyframeSubmaps[keyframeIdx]->Transform(deltaPose.matrix());
+        keyframePoses[keyframeIdx] = std::make_shared<gtsam::Pose3>(newWorldPose);
+    };
+
     /// @brief Add a new (undistorted) scan pointcloud to the scan buffer
     /// @param scanPoseToLastKeyframe
     /// @param pcdScan
@@ -526,7 +664,7 @@ private:
     gtsam::BatchFixedLagSmoother smoother{static_cast<double>(slidingWindowSize)};
     // factors, nodes and timestamps to add to the graph
     gtsam::NonlinearFactorGraph newSmootherFactors;              // new factors appended to the smoother
-    gtsam::Values newVaules;                                     // estimated values of the factors above
+    gtsam::Values newValues;                                     // estimated values of the factors above
     gtsam::FixedLagSmoother::KeyTimestampMap newSmootherIndices; // KF-indices of the factors in the smoother
     // lifecycle management & state estimation
     SystemState systemState{SystemState::initializing};
