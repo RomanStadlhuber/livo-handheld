@@ -12,12 +12,17 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
+find_package(rosbag2_cpp REQUIRED)
+find_package(rosbag2_storage REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(GTSAM_UNSTABLE REQUIRED)
 list(APPEND CMAKE_PREFIX_PATH "/install/open3d-devel/lib/cmake")
 find_package(Open3D REQUIRED)
 
+# remove this when done with debugging
+message(WARNING "Building in Debug mode")
+set(CMAKE_BUILD_TYPE Debug)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -34,7 +39,7 @@ endif()
 add_executable(mapper src/mapper_node.cpp)
 ament_target_dependencies(mapper 
   rclcpp std_msgs geometry_msgs sensor_msgs
-  livox_ros_driver2 
+  livox_ros_driver2 rosbag2_cpp rosbag2_storage
 )
 target_link_libraries(mapper
   Eigen3::Eigen Open3D::Open3D gtsam gtsam_unstable

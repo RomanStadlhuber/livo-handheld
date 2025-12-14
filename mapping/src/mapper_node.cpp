@@ -2,6 +2,9 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
+#include <rosbag2_cpp/reader.hpp>
+#include <rosbag2_cpp/readers/sequential_reader.hpp>
+#include <rosbag2_storage/storage_options.hpp>
 
 // mapping
 #include <Eigen/Dense>
@@ -19,6 +22,7 @@
 #include <list>
 #include <mutex>
 #include <map>
+#include <memory>
 
 // symbols for factor graph keys
 using gtsam::symbol_shorthand::B;
@@ -461,7 +465,6 @@ private:
                 }
             }
         }
-        std::cout << "::: [DEBUG] cluster identification completed, proceeding with outlier rejection :::" << std::endl;
         // join tracks by clusters
         std::unordered_map<ClusterId, std::vector<SubmapIdxPointIdx>> clusters;
         std::unordered_map<ClusterId, double> clusterPlaneThickness;
@@ -482,6 +485,7 @@ private:
             else
                 ++itCluster;
         }
+        std::cout << "::: [DEBUG] identified " << clusters.size() << " clusters, proceeding with outlier rejection :::" << std::endl;
         // outlier rejection - remove clusters that aren't planes
         for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
         {
@@ -496,8 +500,12 @@ private:
                 centroid += keyframeSubmaps[idxSubmap]->points_[pointIdx];
                 numPoints++;
             }
+            if (numPoints == 0)
+            {
+                itCluster = clusters.erase(itCluster);
+                continue;
+            }
             centroid /= static_cast<double>(numPoints);
-
             Eigen::MatrixXd A(numPoints, 3);
             size_t i = 0;
             for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
@@ -510,7 +518,7 @@ private:
 
             Eigen::JacobiSVD<Eigen::MatrixXd> svd(A, Eigen::ComputeThinU | Eigen::ComputeThinV);
             const Eigen::Vector3d planeNormal = svd.matrixV().col(2).normalized();
-            // check if plane is valid - all points need to be withing threshold distance to plane
+            // check if plane is valid - all points need to be within threshold distance to plane
             bool isPlaneValid{true};
             double planeThickness{0.0};
             for (size_t idxPt = 0; idxPt < numPoints; idxPt++)
@@ -622,7 +630,7 @@ private:
         keyframeSubmaps[idxNewKf] = ptrSubmap;
         keyframePoses[idxNewKf] = std::make_shared<gtsam::Pose3>(keyframePose);
         keyframeTimestamps[idxNewKf] = keyframeTimestamp;
-        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " at timestamp " << keyframeTimestamp << " :::" << std::endl;
+        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " (" << keyframeSubmap.points_.size() << "points ) at timestamp " << keyframeTimestamp << " :::" << std::endl;
         // initialize a KD-Tree for point cluster search
         submapKDTrees[idxNewKf] = std::make_shared<open3d::geometry::KDTreeFlann>(*ptrSubmap);
         // clear scan buffer
@@ -774,10 +782,115 @@ private:
     MapperSystem slam;
 };
 
+// Standalone bag reader for debugging
+void runFromBag(const std::string &bag_path)
+{
+    MapperSystem slam;
+
+    // Setup bag reader
+    rosbag2_cpp::Reader reader;
+    rosbag2_storage::StorageOptions storage_options;
+    storage_options.uri = bag_path;
+    storage_options.storage_id = "sqlite3";
+
+    rosbag2_cpp::ConverterOptions converter_options;
+    converter_options.input_serialization_format = "cdr";
+    converter_options.output_serialization_format = "cdr";
+
+    reader.open(storage_options, converter_options);
+
+    rclcpp::Time start_time;
+    bool has_start_time = false;
+    constexpr double livox_imu_scale{9.81};
+
+    std::cout << "Reading bag file: " << bag_path << std::endl;
+
+    while (reader.has_next())
+    {
+        auto bag_message = reader.read_next();
+
+        if (bag_message->topic_name == "/livox/imu")
+        {
+            rclcpp::SerializedMessage serialized_msg(*bag_message->serialized_data);
+            auto msg = std::make_shared<sensor_msgs::msg::Imu>();
+            rclcpp::Serialization<sensor_msgs::msg::Imu> serialization;
+            serialization.deserialize_message(&serialized_msg, msg.get());
+
+            if (!has_start_time)
+            {
+                start_time = rclcpp::Time(msg->header.stamp);
+                has_start_time = true;
+            }
+
+            double timestamp = (rclcpp::Time(msg->header.stamp) - start_time).seconds();
+            auto imu_data = std::make_shared<ImuData>();
+            imu_data->acceleration = Eigen::Vector3d(
+                                         msg->linear_acceleration.x,
+                                         msg->linear_acceleration.y,
+                                         msg->linear_acceleration.z) *
+                                     livox_imu_scale;
+            imu_data->angular_velocity = Eigen::Vector3d(
+                msg->angular_velocity.x,
+                msg->angular_velocity.y,
+                msg->angular_velocity.z);
+
+            slam.feedImu(imu_data, timestamp);
+        }
+        else if (bag_message->topic_name == "/livox/lidar" || bag_message->topic_name == "livox/lidar")
+        {
+            rclcpp::SerializedMessage serialized_msg(*bag_message->serialized_data);
+            auto msg = std::make_shared<livox_ros_driver2::msg::CustomMsg>();
+            rclcpp::Serialization<livox_ros_driver2::msg::CustomMsg> serialization;
+            serialization.deserialize_message(&serialized_msg, msg.get());
+
+            if (!has_start_time)
+            {
+                start_time = rclcpp::Time(msg->header.stamp);
+                has_start_time = true;
+            }
+
+            double timestamp = (rclcpp::Time(msg->header.stamp) - start_time).seconds();
+            auto lidar_data = std::make_shared<LidarData>();
+            size_t point_num = msg->points.size();
+            lidar_data->points.reserve(point_num);
+            lidar_data->offset_times.reserve(point_num);
+
+            for (size_t i = 0; i < point_num; ++i)
+            {
+                const auto &point = msg->points[i];
+                Eigen::Vector3d pt(
+                    static_cast<double>(point.x),
+                    static_cast<double>(point.y),
+                    static_cast<double>(point.z));
+                lidar_data->points.push_back(pt);
+                rclcpp::Time point_offset_time(static_cast<uint64_t>(point.offset_time));
+                lidar_data->offset_times.push_back(point_offset_time.seconds());
+            }
+
+            slam.feedLidar(lidar_data, timestamp);
+            slam.update();
+        }
+    }
+
+    std::cout << "Finished processing bag file." << std::endl;
+}
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<MapperNode>());
+
+    // Check if running in standalone bag mode
+    if (argc >= 3 && std::string(argv[1]) == "--bag")
+    {
+        std::cout << "Running in standalone bag reader mode" << std::endl;
+        runFromBag(argv[2]);
+    }
+    else
+    {
+        std::cout << "Running as ROS 2 node" << std::endl;
+        rclcpp::spin(std::make_shared<MapperNode>());
+    }
+
     rclcpp::shutdown();
     return 0;
 }
