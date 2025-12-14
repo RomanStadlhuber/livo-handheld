@@ -282,8 +282,7 @@ private:
         newValues.insert(X(idxNewKF), w_T_i0);
         newValues.insert(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()));
         newValues.insert(B(idxNewKF), priorImuBias);
-        currState = gtsam::NavState(w_T_i0, gtsam::Vector3::Zero());
-        lastKeyframeState = currState;
+        w_X_curr = gtsam::NavState(w_T_i0, gtsam::Vector3::Zero());
         const double kfInit{static_cast<double>(idxNewKF)};
         // set index of all values
         for (auto const &val : newValues)
@@ -323,15 +322,15 @@ private:
         tLastImu = imuBuffer.rbegin()->first;
         imuBuffer.clear();
         lockImuBuffer.unlock();
-        const gtsam::NavState propState{preintegrator.predict(currState, currBias)}; // imu-propagared state
-        const double positionDiff{(propState.pose().translation() - currState.pose().translation()).norm()};
-        currState = propState; // need to update
-        // iterator to the newest lidar scan that can still be processed (older than latest imu time    stamp)
+        const gtsam::NavState w_X_propagated{preintegrator.predict(w_X_curr, currBias)}; // imu-propagated state
+        const double positionDiff{(w_X_propagated.pose().translation() - lastKeyframePose().translation()).norm()};
+        w_X_curr = w_X_propagated; // need to update
+        // iterator to the newest lidar scan that can still be processed (older than latest imu timestamp)
         std::unique_lock<std::mutex> lockLidarBuffer(mtxLidarBuffer);
         std::cout << "::: [DEBUG] tLastIMU " << tLastImu << ", tLastLiDAR " << (lidarBuffer.size() ? lidarBuffer.rbegin()->first : 0) << " :::" << std::endl;
         // --- undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation ---
         // delta pose to last submap at preintegrated state / last IMU time (!!)
-        gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().inverse().compose(currState.pose().compose(imu_T_lidar))};
+        gtsam::Pose3 kf_T_prop{lastKeyframePose().inverse().compose(w_X_curr.pose().compose(imu_T_lidar))};
         std::cout << "::: [DEBUG] has " << keyframeTimestamps.size() << " keyframes :::" << std::endl;
         const double
             tLastKeyframe{keyframeTimestamps.rbegin()->second}, // timestamp of last keyframe
@@ -339,7 +338,6 @@ private:
         std::cout << "::: [DEBUG] begin undistorting " << lidarBuffer.size() << " LiDAR scans :::" << std::endl;
         // undistort between individual scans
         gtsam::Pose3 deltaPoseLastScanToKeyframe{gtsam::Pose3::Identity()};
-        double dtLastScanToKeyframe{0.0};
         for (auto it = lidarBuffer.begin(); it != lidarBuffer.end(); ++it)
         {
             const auto [tScan, scan] = *it;
@@ -348,45 +346,44 @@ private:
             // compute pose delta to last submap at current scan time (extrapolate with constant velocity)
             // linear and angular velocity are obtained from pose delta over preintegration time
             const gtsam::Vector3
-                angVel{gtsam::Rot3::Logmap(deltaPoseToSubmap.rotation()) / dtPropToKeyframe},
-                linVel{deltaPoseToSubmap.translation() / dtPropToKeyframe};
+                angVel{gtsam::Rot3::Logmap(kf_T_prop.rotation()) / dtPropToKeyframe},
+                linVel{kf_T_prop.translation() / dtPropToKeyframe};
             // apply scan to keyframe delta time to get pose delta of the scan w.r.t. the last keyframe
-            gtsam::Rot3 deltaRotScanToKeyframe{gtsam::Rot3::Expmap(angVel * dtScanToKeyframe)};
-            gtsam::Point3 deltaTransScanToKeyframe{linVel * dtScanToKeyframe};
-            gtsam::Pose3 deltaPoseScanToKeyframe{deltaRotScanToKeyframe, deltaTransScanToKeyframe};
+            gtsam::Rot3 kf_R_scan{gtsam::Rot3::Expmap(angVel * dtScanToKeyframe)};
+            gtsam::Point3 kf_P_scan{linVel * dtScanToKeyframe};
+            gtsam::Pose3 kf_T_scan{kf_R_scan, kf_P_scan};
             // pose & time delta from this to last scan
-            gtsam::Pose3 deltaPoseScanToScan{deltaPoseLastScanToKeyframe.between(deltaPoseScanToKeyframe)};
-            double dtScanToScan{dtScanToKeyframe - dtLastScanToKeyframe};
+            gtsam::Pose3 lastScan_T_currScan{deltaPoseLastScanToKeyframe.between(kf_T_scan)};
 
             // undistort current scan
             for (std::size_t i = 0; i < scan->points.size(); ++i)
             {
                 const Eigen::Vector3d pt = scan->points[i];
                 const double dt = scan->offset_times[i];
-                const gtsam::Vector3 angVel{gtsam::Rot3::Logmap(deltaPoseScanToScan.rotation())};
+                const gtsam::Vector3 angVel{gtsam::Rot3::Logmap(lastScan_T_currScan.rotation())};
                 // presumed rotation and translation that the point should have undergone during scan time
-                gtsam::Rot3 R{gtsam::Rot3::Expmap(angVel / dtScanToScan * dt)};
-                gtsam::Point3 t{deltaPoseScanToScan.translation() / dtScanToScan * dt};
-                gtsam::Pose3 T{R, t};
+                gtsam::Rot3 scan_R_pt{gtsam::Rot3::Expmap(angVel * dt)};
+                gtsam::Point3 scan_P_pt{lastScan_T_currScan.translation() * dt};
+                gtsam::Pose3 scan_T_pt{scan_R_pt, scan_P_pt};
                 // undistort point
-                const Eigen::Vector3d ptUndistorted{T.transformFrom(pt)};
+                const Eigen::Vector3d ptUndistorted{scan_T_pt.transformFrom(pt)};
                 scan->points[i] = ptUndistorted;
             }
             std::cout << "::: [DEBUG] undistorted LiDAR scan with " << scan->points.size() << " points :::" << std::endl;
             // convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, minPointDist, maxPointDist);
             pcdScan.VoxelDownSample(voxelSize);
-            gtsam::Pose3 scanPoseInWorld{keyframePoses.rbegin()->second->compose(deltaPoseScanToKeyframe)}; // pose in world frame
+            gtsam::Pose3 scanPoseInWorld{keyframePoses.rbegin()->second->compose(kf_T_scan)}; // pose in world frame
             pcdScan.Transform(scanPoseInWorld.matrix());
             // buffer undistorted scan
-            bufferScan(deltaPoseScanToKeyframe, pcdScan);
+            bufferScan(kf_T_scan, pcdScan);
+            deltaPoseLastScanToKeyframe = kf_T_scan;
         }
         std::cout << "::: [DEBUG] completed undistorting LiDAR scans, proceeding to identify keyframe :::" << std::endl;
         // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the PCD buffer
         // erase processed raw scan data and release buffer lock
         lidarBuffer.clear();
         lockLidarBuffer.unlock();
-
         if (positionDiff < threshNewKeyframeDist)
             return;
         std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
@@ -400,7 +397,7 @@ private:
             newSubmap += *(scan.pcd);
         }
         newSubmap.VoxelDownSample(voxelSize);
-        const u_int32_t idxKeyframe = createKeyframeSubmap(currState.pose().compose(imu_T_lidar), tLastImu, newSubmap); // NOTE: also clears the scan buffer
+        const u_int32_t idxKeyframe = createKeyframeSubmap(w_X_curr.pose().compose(imu_T_lidar), tLastImu, newSubmap); // NOTE: also clears the scan buffer
 
         std::cout << "::: [DEBUG] identifying same-plane point clusters among keyframe submaps :::" << std::endl;
         // search for same-plane point clusters among all keyframes
@@ -423,7 +420,7 @@ private:
                 knnDists.clear();
                 const int knnFound = submapKDTrees[idxOtherSubmap]->SearchHybrid(
                     pcdQuery->points_[idxPt], knnRadius, knnMaxNeighbors, knnIndices, knnDists);
-                if (knnFound > 0)
+                if (knnFound > 4)
                 {
                     ClusterId clusterId = INVALID_CLUSTER_ID, tempNewCluster = clusterIdCounter + 1;
                     // clusters that need to be merged (polled & processed after search)
@@ -489,7 +486,7 @@ private:
         // outlier rejection - remove clusters that aren't planes
         for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
         {
-            size_t numPoints{0};
+            size_t numHistoricPoints{0}; // no. of points from historic keyframes
             // compute centered point locations for plane fitting
             Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
             for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
@@ -498,15 +495,16 @@ private:
                 if (idxSubmap == idxKeyframe) // plane thickness and normal will not be computed using points from the new keyframe
                     continue;
                 centroid += keyframeSubmaps[idxSubmap]->points_[pointIdx];
-                numPoints++;
+                numHistoricPoints++;
             }
-            if (numPoints == 0)
+            if (numHistoricPoints < 4) // need at least 3 points to fit a plane
             {
                 itCluster = clusters.erase(itCluster);
                 continue;
             }
-            centroid /= static_cast<double>(numPoints);
-            Eigen::MatrixXd A(numPoints, 3);
+            const double n{static_cast<double>(numHistoricPoints)};
+            centroid /= n;
+            Eigen::MatrixXd A(numHistoricPoints, 3);
             size_t i = 0;
             for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
             {
@@ -521,7 +519,7 @@ private:
             // check if plane is valid - all points need to be within threshold distance to plane
             bool isPlaneValid{true};
             double planeThickness{0.0};
-            for (size_t idxPt = 0; idxPt < numPoints; idxPt++)
+            for (size_t idxPt = 0; idxPt < numHistoricPoints; idxPt++)
             {
                 const double pointToPlaneDist{std::abs(planeNormal.dot(A.row(idxPt)))};
                 if (pointToPlaneDist > threshPlaneValid)
@@ -537,7 +535,7 @@ private:
                 itCluster = clusters.erase(itCluster);
             else
             {
-                planeThickness /= static_cast<double>(numPoints);
+                planeThickness /= n;
                 clusterPlaneThickness[itCluster->first] = planeThickness;
                 clusterCenters[itCluster->first] = std::make_shared<Eigen::Vector3d>(centroid);
                 clusterNormals[itCluster->first] = std::make_shared<Eigen::Vector3d>(planeNormal);
@@ -575,13 +573,13 @@ private:
                     clusterNormal,
                     clusterNormal->dot(*clusterCenter), // d in plane equation s.t. n^T * x - d = 0
                     noiseModel));
-                newValues.insert(X(idxKeyframe), currState.pose());
+                newValues.insert(X(idxKeyframe), w_X_curr.pose());
                 newSmootherIndices[X(idxKeyframe)] = static_cast<double>(idxKeyframe);
             }
         }
         // predicted state
-        newValues.insert(X(idxKeyframe), currState.pose());
-        newValues.insert(V(idxKeyframe), currState.v());
+        newValues.insert(X(idxKeyframe), w_X_curr.pose());
+        newValues.insert(V(idxKeyframe), w_X_curr.v());
         newValues.insert(B(idxKeyframe), currBias);
         // preintegration factor
         newSmootherFactors.add(
@@ -598,11 +596,10 @@ private:
         smoother.update(newSmootherFactors, newValues, newSmootherIndices);
         resetNewFactors(); // clear factor, index & value buffers
         // extract estimated state
-        currState = gtsam::NavState{
+        w_X_curr = gtsam::NavState{
             smoother.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
             smoother.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
         currBias = smoother.calculateEstimate<gtsam::imuBias::ConstantBias>(B(idxKeyframe));
-        lastKeyframeState = currState;
         // reset preintegrator
         preintegrator.resetIntegrationAndSetBias(currBias);
     };
@@ -630,12 +627,17 @@ private:
         keyframeSubmaps[idxNewKf] = ptrSubmap;
         keyframePoses[idxNewKf] = std::make_shared<gtsam::Pose3>(keyframePose);
         keyframeTimestamps[idxNewKf] = keyframeTimestamp;
-        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " (" << keyframeSubmap.points_.size() << "points ) at timestamp " << keyframeTimestamp << " :::" << std::endl;
+        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " (" << keyframeSubmap.points_.size() << " pts ) at timestamp " << keyframeTimestamp << " :::" << std::endl;
         // initialize a KD-Tree for point cluster search
         submapKDTrees[idxNewKf] = std::make_shared<open3d::geometry::KDTreeFlann>(*ptrSubmap);
         // clear scan buffer
         scanBuffer.clear();
         return idxNewKf;
+    };
+
+    gtsam::Pose3 lastKeyframePose() const
+    {
+        return *keyframePoses.rbegin()->second;
     };
 
     void updateKeyframeSubmapPose(const u_int32_t keyframeIdx, const gtsam::Pose3 &newWorldPose)
@@ -673,7 +675,7 @@ private:
     std::mutex mtxState, mtxLidarBuffer, mtxImuBuffer;
     /// @brief current estimated state (propagated OR updated)
     /// @details **NOTE** that this is **NOT** the single best estimate as it is used for IMU propagation
-    gtsam::NavState currState, lastKeyframeState;
+    gtsam::NavState w_X_curr;
     gtsam::imuBias::ConstantBias currBias;
     double tLastImu{0.0};
     // --- mapping ---
