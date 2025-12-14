@@ -178,6 +178,7 @@ public:
             const double maxBufferTime = lidarBuffer.rbegin()->first;
             if (maxBufferTime >= initTimeWindow)
             {
+                initializeSystem();
                 std::cout << "Initialization complete. Switching to tracking state." << std::endl;
                 systemState = SystemState::tracking;
             }
@@ -244,7 +245,7 @@ private:
         }
         const u_int32_t idxNewKF = createKeyframeSubmap(w_T_i0.compose(imu_T_lidar), tLastImu, newSubmap);
         // clear lidar buffer
-        lidarBuffer.erase(lidarBuffer.begin(), lidarBufferEndIt);
+        lidarBuffer.clear();
         // acceleration bias is unobservable because we the mean value is used for gravity alignment
         // gyro bias is the mean of all gyro measurements (because no rotation is assumed)
         Eigen::Vector3d gyroBiasMean{Eigen::Vector3d::Zero()};
@@ -285,7 +286,7 @@ private:
             newSmootherIndices[val.key] = kfInit;
         // clear imu buffer and store timestamp of last IMU reading
         tLastImu = imuBufferEndIt->first;
-        imuBuffer.erase(imuBuffer.begin(), imuBufferEndIt);
+        imuBuffer.clear();
     }
 
     void track()
@@ -294,6 +295,7 @@ private:
         // NOTE: it this point, the buffers should contain only unprocessed measurements
         // lock the buffers for accessing values
         std::unique_lock<std::mutex> lockImuBuffer(mtxImuBuffer);
+        /*
         // delete imu measurements that are older than the latest processed imu timestamp (should not happen)
         imuBuffer.erase(imuBuffer.begin(), imuBuffer.upper_bound(tLastImu));
         std::cout << "::: [WARNING] the system is discarding unprocessed IMU measurements (too old), this should not happen! :::" << std::endl;
@@ -301,6 +303,9 @@ private:
         lidarBuffer.erase(lidarBuffer.begin(), lidarBuffer.upper_bound(tLastImu));
         std::cout << "::: [ERROR] discarded unprocessed LiDAR scan (too old), this should not happen! :::" << std::endl;
         std::cout << "::: [DEBUG] begin IMU preintegration :::" << std::endl;
+         */
+        std::cout << "::: [DEBUG] tracking with " << imuBuffer.size() << " IMU measurements and " << lidarBuffer.size() << " LiDAR scans :::" << std::endl;
+
         // perform preintegration to decide whether a new keyframe is needed
         for (auto imuIt = imuBuffer.begin(); imuIt != imuBuffer.end(); ++imuIt)
         {
@@ -319,24 +324,19 @@ private:
         currState = propState; // need to update
         // iterator to the newest lidar scan that can still be processed (older than latest imu time    stamp)
         std::unique_lock<std::mutex> lockLidarBuffer(mtxLidarBuffer);
-        auto lidarBufferEndIt{lidarBuffer.upper_bound(tLastImu)};
-        if (std::distance(lidarBuffer.begin(), lidarBufferEndIt) == 0)
-        {
-            std::cout << "::: [WARN] cannot process LiDAR scans, no IMU readings to predict pose! :::" << std::endl;
-            return;
-        }
-
-        std::cout << "::: [DEBUG] begin undistorting LiDAR scans :::" << std::endl;
+        std::cout << "::: [DEBUG] tLastIMU " << tLastImu << ", tLastLiDAR " << (lidarBuffer.size() ? lidarBuffer.rbegin()->first : 0) << " :::" << std::endl;
         // --- undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation ---
         // delta pose to last submap at preintegrated state / last IMU time (!!)
-        gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().between(currState.pose().compose(imu_T_lidar))};
+        gtsam::Pose3 deltaPoseToSubmap{lastKeyframeState.pose().inverse().compose(currState.pose().compose(imu_T_lidar))};
+        std::cout << "::: [DEBUG] has " << keyframeTimestamps.size() << " keyframes :::" << std::endl;
         const double
             tLastKeyframe{keyframeTimestamps.rbegin()->second}, // timestamp of last keyframe
             dtPropToKeyframe{tLastImu - tLastKeyframe};         // time delta to last keyframe
+        std::cout << "::: [DEBUG] begin undistorting " << lidarBuffer.size() << " LiDAR scans :::" << std::endl;
         // undistort between individual scans
         gtsam::Pose3 deltaPoseLastScanToKeyframe{gtsam::Pose3::Identity()};
         double dtLastScanToKeyframe{0.0};
-        for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
+        for (auto it = lidarBuffer.begin(); it != lidarBuffer.end(); ++it)
         {
             const auto [tScan, scan] = *it;
             const double dtScanToKeyframe{tScan - tLastKeyframe};
@@ -368,6 +368,7 @@ private:
                 const Eigen::Vector3d ptUndistorted{T.transformFrom(pt)};
                 scan->points[i] = ptUndistorted;
             }
+            std::cout << "::: [DEBUG] undistorted LiDAR scan with " << scan->points.size() << " points :::" << std::endl;
             // convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, minPointDist, maxPointDist);
             pcdScan.VoxelDownSample(voxelSize);
@@ -379,7 +380,7 @@ private:
         std::cout << "::: [DEBUG] completed undistorting LiDAR scans, proceeding to identify keyframe :::" << std::endl;
         // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the PCD buffer
         // erase processed raw scan data and release buffer lock
-        lidarBuffer.erase(lidarBuffer.begin(), lidarBufferEndIt);
+        lidarBuffer.clear();
         lockLidarBuffer.unlock();
 
         if (positionDiff < threshNewKeyframeDist)
@@ -481,16 +482,6 @@ private:
             else
                 ++itCluster;
         }
-        /**
-         * TODO: cluster validation & outlier rejection
-         * - fit planes to each cluster and remove those with high fitting error (no RANSAC, use all points)
-         * - compute plane thickness, plane factor covariance and standard deviation which is used for validation
-         *  - MSC-LIO Eq. (18-19) and last paragraphs of IV-D
-         * - construct structureless point-to-plane factors for all points in remaining valid clusters
-         * - add factors to the factor graph
-         * - should existing factors from previous updates be removed? how does iSAM2 handle them?
-         *  - check Kimera implementation
-         */
         // outlier rejection - remove clusters that aren't planes
         for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
         {
@@ -600,8 +591,8 @@ private:
         resetNewFactors(); // clear factor, index & value buffers
         // extract estimated state
         currState = gtsam::NavState{
-                smoother.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
-                smoother.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
+            smoother.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
+            smoother.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
         currBias = smoother.calculateEstimate<gtsam::imuBias::ConstantBias>(B(idxKeyframe));
         lastKeyframeState = currState;
         // reset preintegrator
@@ -631,6 +622,7 @@ private:
         keyframeSubmaps[idxNewKf] = ptrSubmap;
         keyframePoses[idxNewKf] = std::make_shared<gtsam::Pose3>(keyframePose);
         keyframeTimestamps[idxNewKf] = keyframeTimestamp;
+        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " at timestamp " << keyframeTimestamp << " :::" << std::endl;
         // initialize a KD-Tree for point cluster search
         submapKDTrees[idxNewKf] = std::make_shared<open3d::geometry::KDTreeFlann>(*ptrSubmap);
         // clear scan buffer
@@ -689,6 +681,7 @@ private:
     /// @brief Extrinsics from IMU to LiDAR frame.
     /// @details See Mid360 User Manual, p. 15, Paragraph "IMU Data"
     const gtsam::Pose3 imu_T_lidar{gtsam::Rot3::Identity(), gtsam::Point3(-0.011, -0.02329, 0.04412)};
+    double lidarTimeOffset{0.0}; // temporal calibration such that t_imu = t_lidar + lidarTimeOffset
     // (same plane) point clusters
     ClusterId clusterIdCounter{0};
     // configuration constants
