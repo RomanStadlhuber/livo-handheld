@@ -244,10 +244,10 @@ private:
         for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
         {
             open3d::geometry::PointCloud pcdScan = Scan2PCD(it->second, minPointDist, maxPointDist);
-            pcdScan.VoxelDownSample(0.5);
-            newSubmap += pcdScan;
+            newSubmap += *(pcdScan.VoxelDownSample(voxelSize));
         }
-        const u_int32_t idxNewKF = createKeyframeSubmap(w_T_i0.compose(imu_T_lidar), tLastImu, newSubmap);
+        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(voxelSize);
+        const u_int32_t idxNewKF = createKeyframeSubmap(w_T_i0.compose(imu_T_lidar), tLastImu, ptrNewSubmapVoxelized);
         // clear lidar buffer
         lidarBuffer.clear();
         // acceleration bias is unobservable because we the mean value is used for gravity alignment
@@ -372,11 +372,11 @@ private:
             std::cout << "::: [DEBUG] undistorted LiDAR scan with " << scan->points.size() << " points :::" << std::endl;
             // convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, minPointDist, maxPointDist);
-            pcdScan.VoxelDownSample(voxelSize);
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(voxelSize);
             gtsam::Pose3 scanPoseInWorld{keyframePoses.rbegin()->second->compose(kf_T_scan)}; // pose in world frame
-            pcdScan.Transform(scanPoseInWorld.matrix());
+            ptrPcdScanVoxelized->Transform(scanPoseInWorld.matrix());
             // buffer undistorted scan
-            bufferScan(kf_T_scan, pcdScan);
+            bufferScan(kf_T_scan, ptrPcdScanVoxelized);
             deltaPoseLastScanToKeyframe = kf_T_scan;
         }
         std::cout << "::: [DEBUG] completed undistorting LiDAR scans, proceeding to identify keyframe :::" << std::endl;
@@ -396,9 +396,8 @@ private:
             scan.pcd->Transform(scan.kf_T_scan->matrix());
             newSubmap += *(scan.pcd);
         }
-        newSubmap.VoxelDownSample(voxelSize);
-        const u_int32_t idxKeyframe = createKeyframeSubmap(w_X_curr.pose().compose(imu_T_lidar), tLastImu, newSubmap); // NOTE: also clears the scan buffer
-
+        std::shared_ptr<open3d::geometry::PointCloud>ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(voxelSize);
+        const u_int32_t idxKeyframe = createKeyframeSubmap(w_X_curr.pose().compose(imu_T_lidar), tLastImu, ptrNewSubmapVoxelized); // NOTE: also clears the scan buffer
         std::cout << "::: [DEBUG] identifying same-plane point clusters among keyframe submaps :::" << std::endl;
         // search for same-plane point clusters among all keyframes
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps[idxKeyframe];
@@ -542,7 +541,12 @@ private:
                 ++itCluster;
             }
         }
-        std::cout << "::: [DEBUG] outlier rejection completed, proceeding to formulate tracking constraints :::" << std::endl;
+        if (clusters.size() == 0)
+        {
+            std::cout << "::: [WARNING] no valid point clusters found for keyframe " << idxKeyframe << ", skipping constraint creation :::" << std::endl;
+            return;
+        }
+        std::cout << "::: [DEBUG] outlier rejection completed (keeping " << clusters.size() << " clusters), proceeding to formulate tracking constraints :::" << std::endl;
         // build residuals for active keyframe points from valid clusters
         for (auto itValidCluster = clusters.begin(); itValidCluster != clusters.end(); ++itValidCluster)
         {
@@ -616,20 +620,18 @@ private:
     /// @param keyframeTimestamp
     /// @param keyframeSubmap
     /// @return
-    u_int32_t createKeyframeSubmap(const gtsam::Pose3 &keyframePose, const double &keyframeTimestamp, open3d::geometry::PointCloud keyframeSubmap)
+    u_int32_t createKeyframeSubmap(const gtsam::Pose3 &keyframePose, const double &keyframeTimestamp, std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap)
     {
         // increment keyframe counter
         const u_int32_t idxNewKf = keyframeCounter++;
-        // store keyframe data
-        auto ptrSubmap{std::make_shared<open3d::geometry::PointCloud>(keyframeSubmap)};
         // transform submap to its estimated pose in the world frame
-        ptrSubmap->Transform(keyframePose.matrix());
-        keyframeSubmaps[idxNewKf] = ptrSubmap;
+        ptrKeyframeSubmap->Transform(keyframePose.matrix());
+        keyframeSubmaps[idxNewKf] = ptrKeyframeSubmap;
         keyframePoses[idxNewKf] = std::make_shared<gtsam::Pose3>(keyframePose);
         keyframeTimestamps[idxNewKf] = keyframeTimestamp;
-        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " (" << keyframeSubmap.points_.size() << " pts ) at timestamp " << keyframeTimestamp << " :::" << std::endl;
+        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " (" << ptrKeyframeSubmap->points_.size() << " pts ) at timestamp " << keyframeTimestamp << " :::" << std::endl;
         // initialize a KD-Tree for point cluster search
-        submapKDTrees[idxNewKf] = std::make_shared<open3d::geometry::KDTreeFlann>(*ptrSubmap);
+        submapKDTrees[idxNewKf] = std::make_shared<open3d::geometry::KDTreeFlann>(*ptrKeyframeSubmap);
         // clear scan buffer
         scanBuffer.clear();
         return idxNewKf;
@@ -650,10 +652,9 @@ private:
     /// @brief Add a new (undistorted) scan pointcloud to the scan buffer
     /// @param scanPoseToLastKeyframe
     /// @param pcdScan
-    void bufferScan(const gtsam::Pose3 &scanPoseToLastKeyframe, open3d::geometry::PointCloud pcdScan)
+    void bufferScan(const gtsam::Pose3 &scanPoseToLastKeyframe, std::shared_ptr<open3d::geometry::PointCloud> pcdScan)
     {
-        scanBuffer.push_back(ScanBuffer{std::make_shared<open3d::geometry::PointCloud>(pcdScan),
-                                        std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe)});
+        scanBuffer.push_back(ScanBuffer{pcdScan, std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe)});
     };
 
 private:
