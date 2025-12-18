@@ -82,61 +82,109 @@ using SubmapIdxPointIdx = std::pair<u_int32_t, int>;
 using ClusterId = u_int32_t;
 constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
 
-class PointToPlaneFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
+class PointToPlaneFactor : public gtsam::NoiseModelFactor
 {
-
 public:
+    /// @brief Constructor for point-to-plane factor with multiple keyframe poses
+    /// @param keys Vector of pose keys that this factor connects (e.g., X(0), X(1), X(3))
+    /// @param imu_T_lidar Fixed extrinsic calibration
+    /// @param scanPointsPerKey Map from key index (in keys vector) to scan points in that keyframe's LiDAR frame
+    /// @param planeNormal Plane normal in the world frame
+    /// @param planeNormalOffsetD Plane offset d in world frame (n^T * x - d = 0)
+    /// @param noiseModel Point-to-plane noise model
     PointToPlaneFactor(
-        const gtsam::Key key,                                            // key of the NavState variable in the smoothers factor graph
-        const gtsam::Pose3 &imu_T_lidar,                                 // fixed extrinsic calibration
-        const std::vector<std::shared_ptr<Eigen::Vector3d>> &scanPoints, // plane points in the LiDAR frame
-        const std::shared_ptr<Eigen::Vector3d> &planeNormal,             // plane normal in the world frame
-        const double planeNormalOffsetD,                                 // plane normal offset d in the world frame s.t. n^T * x - d = 0
-        const gtsam::SharedNoiseModel &noiseModel                        // point-to-plane noise model
-        ) : NoiseModelFactor1<gtsam::Pose3>(noiseModel, key),
-            imu_T_lidar(imu_T_lidar),
-            scanPoints(scanPoints),
-            planeNormal(planeNormal),
-            planeNormalOffsetD(planeNormalOffsetD) {};
-
-    gtsam::Vector evaluateError(
-        const gtsam::Pose3 &w_T_imu,                     ///< current estimate of the IMU pose in the world frame
-        boost::optional<gtsam::Matrix &> H = boost::none ///< optional Jacobian matrix
-    ) const override
+        const gtsam::KeyVector &keys,
+        const gtsam::Pose3 &imu_T_lidar,
+        const std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> &scanPointsPerKey,
+        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+        const double planeNormalOffsetD,
+        const gtsam::SharedNoiseModel &noiseModel)
+        : NoiseModelFactor(noiseModel, keys),
+          imu_T_lidar(imu_T_lidar),
+          scanPointsPerKey(scanPointsPerKey),
+          planeNormal(planeNormal),
+          planeNormalOffsetD(planeNormalOffsetD)
     {
-        // transform plane points to world frame
-        gtsam::Pose3 w_T_lidar = w_T_imu.compose(imu_T_lidar);
-        size_t numPoints = scanPoints.size();
-        gtsam::Vector errorVec(numPoints);
-        for (size_t i = 0; i < numPoints; ++i)
+        // Calculate total number of points for dimensionality
+        totalPoints = 0;
+        for (const auto &[keyIdx, points] : scanPointsPerKey)
         {
-            gtsam::Point3 w_p = w_T_lidar.transformFrom(gtsam::Point3(*scanPoints[i]));
-            errorVec(i) = planeNormal->dot(w_p) - planeNormalOffsetD;
+            totalPoints += points.size();
         }
+    }
 
+    /// @brief Evaluate error for all poses involved in this factor
+    /// @param values Current estimates of all variables in the factor graph
+    /// @param H Optional Jacobians w.r.t. each pose
+    gtsam::Vector unwhitenedError(
+        const gtsam::Values &values,
+        boost::optional<std::vector<gtsam::Matrix> &> H = boost::none) const override
+    {
+        gtsam::Vector errorVec(totalPoints);
+
+        // If Jacobians requested, initialize them
         if (H)
         {
-            (*H) = gtsam::Matrix(numPoints, 6);
-            for (size_t i = 0; i < numPoints; ++i)
+            H->resize(keys().size());
+            for (size_t i = 0; i < keys().size(); ++i)
             {
-                gtsam::Point3 w_p = w_T_lidar.transformFrom(gtsam::Point3(*scanPoints[i]));
-                // derivative of point-to-plane distance w.r.t. pose perturbation
-                gtsam::Matrix16 D_error_D_pose;
-                const Eigen::Matrix<double, 1, 3> nT = planeNormal->transpose();
-                D_error_D_pose.row(i).head<3>() = -nT * gtsam::skewSymmetric(w_p);  // rotation
-                D_error_D_pose.row(i).tail<3>() = nT * w_T_imu.rotation().matrix(); // translation
-                (*H).row(i) = D_error_D_pose;
+                (*H)[i] = gtsam::Matrix::Zero(totalPoints, 6);
             }
         }
+
+        size_t errorIdx = 0;
+
+        // Iterate over each keyframe that has observations
+        for (const auto &[keyIdx, scanPoints] : scanPointsPerKey)
+        {
+            // Get the pose estimate for this keyframe
+            const gtsam::Pose3 w_T_imu = values.at<gtsam::Pose3>(keys()[keyIdx]);
+            const gtsam::Pose3 w_T_lidar = w_T_imu.compose(imu_T_lidar);
+
+            // Compute error and Jacobian for each point from this keyframe
+            for (size_t ptIdx = 0; ptIdx < scanPoints.size(); ++ptIdx, ++errorIdx)
+            {
+                const gtsam::Point3 lidar_p(*scanPoints[ptIdx]);
+                const gtsam::Point3 w_p = w_T_lidar.transformFrom(lidar_p);
+
+                // Point-to-plane distance error
+                errorVec(errorIdx) = planeNormal->dot(w_p) - planeNormalOffsetD;
+
+                // Compute Jacobian if requested
+                if (H)
+                {
+                    // Jacobian w.r.t. the pose of this keyframe
+                    const Eigen::Matrix<double, 1, 3> nT = planeNormal->transpose();
+
+                    // Rotation component: -n^T * [w_p]_x (where [.]_x is skew-symmetric)
+                    gtsam::Matrix16 D_error_D_pose;
+                    D_error_D_pose.head<3>() = -nT * gtsam::skewSymmetric(w_p);
+
+                    // Translation component: n^T * R
+                    D_error_D_pose.tail<3>() = nT * w_T_imu.rotation().matrix();
+
+                    // Assign to the appropriate Jacobian matrix
+                    (*H)[keyIdx].row(errorIdx) = D_error_D_pose;
+                }
+            }
+        }
+
         return errorVec;
     }
 
+    /// @brief Clone method required for GTSAM factor copying
+    gtsam::NonlinearFactor::shared_ptr clone() const override
+    {
+        return boost::make_shared<PointToPlaneFactor>(
+            keys(), imu_T_lidar, scanPointsPerKey, planeNormal, planeNormalOffsetD, noiseModel());
+    }
+
 private:
-    // input parameters
     const gtsam::Pose3 imu_T_lidar;
-    const std::vector<std::shared_ptr<Eigen::Vector3d>> scanPoints;
+    const std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
     const std::shared_ptr<Eigen::Vector3d> planeNormal;
     const double planeNormalOffsetD;
+    size_t totalPoints;
 };
 
 // NOTE: this class should not use ROS-specific stuff,
@@ -396,7 +444,7 @@ private:
             scan.pcd->Transform(scan.kf_T_scan->matrix());
             newSubmap += *(scan.pcd);
         }
-        std::shared_ptr<open3d::geometry::PointCloud>ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(voxelSize);
+        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(voxelSize);
         const u_int32_t idxKeyframe = createKeyframeSubmap(w_X_curr.pose().compose(imu_T_lidar), tLastImu, ptrNewSubmapVoxelized); // NOTE: also clears the scan buffer
         std::cout << "::: [DEBUG] identifying same-plane point clusters among keyframe submaps :::" << std::endl;
         // search for same-plane point clusters among all keyframes
@@ -557,29 +605,28 @@ private:
             const double planeThickness = clusterPlaneThickness[clusterId];
             // noise model for point-to-plane factor
             gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, std::sqrt(planeThickness));
-            std::vector<std::shared_ptr<Eigen::Vector3d>> planePoints; // this clusters points in the lidar frame of the active keyframe
+            // points in the current cluster ordered by keyframe index
+            std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
             for (const SubmapIdxPointIdx &idxPoint : clusterPoints)
             {
                 auto const [keySubmap, pointIdx] = idxPoint;
-                if (keySubmap != idxKeyframe)
-                    continue; // only create factors for points in the new keyframe
-                // scan point in LiDAR frame
-                planePoints.push_back(std::make_shared<Eigen::Vector3d>(
-                    keyframeSubmaps[keySubmap]->points_[pointIdx] - keyframePoses[idxKeyframe]->translation()));
+                if (scanPointsPerKey.find(keySubmap) == scanPointsPerKey.end())
+                    scanPointsPerKey[keySubmap] = std::vector<std::shared_ptr<Eigen::Vector3d>>{};
+                scanPointsPerKey[keySubmap].push_back(std::make_shared<Eigen::Vector3d>(
+                    keyframeSubmaps[keySubmap]->points_[pointIdx] - keyframePoses[keySubmap]->translation()));
             }
             // add point to plane factors for all points in the active keyframe
-            if (planePoints.size() > 0)
-            {
-                newSmootherFactors.add(boost::make_shared<PointToPlaneFactor>(
-                    X(idxKeyframe),
-                    imu_T_lidar,
-                    planePoints,
-                    clusterNormal,
-                    clusterNormal->dot(*clusterCenter), // d in plane equation s.t. n^T * x - d = 0
-                    noiseModel));
-                newValues.insert(X(idxKeyframe), w_X_curr.pose());
-                newSmootherIndices[X(idxKeyframe)] = static_cast<double>(idxKeyframe);
-            }
+            /*
+            newSmootherFactors.add(boost::make_shared<PointToPlaneFactor>(
+                X(idxKeyframe),
+                imu_T_lidar,
+                planePoints,
+                clusterNormal,
+                clusterNormal->dot(*clusterCenter), // d in plane equation s.t. n^T * x - d = 0
+                noiseModel));
+            newValues.insert(X(idxKeyframe), w_X_curr.pose());
+            newSmootherIndices[X(idxKeyframe)] = static_cast<double>(idxKeyframe);
+            */
         }
         // predicted state
         newValues.insert(X(idxKeyframe), w_X_curr.pose());
