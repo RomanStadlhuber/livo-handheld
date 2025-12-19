@@ -36,14 +36,23 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+add_library(mapping
+  src/mapping/factors/PointToPlaneFactor.cpp
+  src/mapping/MappingSystem.cpp
+)
+
+target_include_directories(mapping PUBLIC include)
+
+target_link_libraries(mapping
+  Eigen3::Eigen Open3D::Open3D gtsam gtsam_unstable
+)
+
 add_executable(mapper src/mapper_node.cpp)
 ament_target_dependencies(mapper 
   rclcpp std_msgs geometry_msgs sensor_msgs
   livox_ros_driver2 rosbag2_cpp rosbag2_storage
 )
-target_link_libraries(mapper
-  Eigen3::Eigen Open3D::Open3D gtsam gtsam_unstable
-)
+target_link_libraries(mapper mapping)
 
 install(TARGETS
   mapper
