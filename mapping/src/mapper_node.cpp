@@ -23,6 +23,8 @@
 #include <mutex>
 #include <map>
 #include <memory>
+#include <algorithm>
+#include <set>
 
 // symbols for factor graph keys
 using gtsam::symbol_shorthand::B;
@@ -326,7 +328,7 @@ private:
         newSmootherFactors.addPrior(X(idxNewKF), w_T_i0, gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
         newSmootherFactors.addPrior(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()), gtsam::noiseModel::Isotropic::Sigma(3, 1e-6));
         // bias prior, very noisy
-        newSmootherFactors.addPrior(B(idxNewKF), priorImuBias.vector(), gtsam::noiseModel::Isotropic::Sigma(6, 3.0 * std::max(accVariance, gyroVariance)));
+        newSmootherFactors.addPrior(B(idxNewKF), priorImuBias, gtsam::noiseModel::Isotropic::Sigma(6, 3.0 * std::max(accVariance, gyroVariance)));
         newValues.insert(X(idxNewKF), w_T_i0);
         newValues.insert(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()));
         newValues.insert(B(idxNewKF), priorImuBias);
@@ -591,6 +593,7 @@ private:
         }
         if (clusters.size() == 0)
         {
+            // TODO: tracking lost
             std::cout << "::: [WARNING] no valid point clusters found for keyframe " << idxKeyframe << ", skipping constraint creation :::" << std::endl;
             return;
         }
@@ -603,32 +606,50 @@ private:
             const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters[clusterId];
             const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals[clusterId];
             const double planeThickness = clusterPlaneThickness[clusterId];
-            // noise model for point-to-plane factor
-            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, std::sqrt(planeThickness));
-            // points in the current cluster ordered by keyframe index
-            std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
+
+            // Step 1: Collect unique keyframe IDs involved in this cluster
+            std::set<u_int32_t> uniqueKeyframeIds;
             for (const SubmapIdxPointIdx &idxPoint : clusterPoints)
             {
-                auto const [keySubmap, pointIdx] = idxPoint;
-                if (scanPointsPerKey.find(keySubmap) == scanPointsPerKey.end())
-                    scanPointsPerKey[keySubmap] = std::vector<std::shared_ptr<Eigen::Vector3d>>{};
-                scanPointsPerKey[keySubmap].push_back(std::make_shared<Eigen::Vector3d>(
-                    keyframeSubmaps[keySubmap]->points_[pointIdx] - keyframePoses[keySubmap]->translation()));
+                uniqueKeyframeIds.insert(idxPoint.first);
             }
-            // add point to plane factors for all points in the active keyframe
-            /*
+
+            // Step 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
+            gtsam::KeyVector keys;
+            keys.reserve(uniqueKeyframeIds.size());
+            std::unordered_map<u_int32_t, size_t> keyframeIdToKeyIdx;
+            size_t keyIdx = 0;
+            for (const u_int32_t kfId : uniqueKeyframeIds)
+            {
+                keys.push_back(X(kfId));
+                keyframeIdToKeyIdx[kfId] = keyIdx++;
+            }
+
+            // Step 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
+            std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
+            size_t totalPoints = 0;
+            for (const SubmapIdxPointIdx &idxPoint : clusterPoints)
+            {
+                auto const [keyframeId, pointIdx] = idxPoint;
+                const size_t keyVecIdx = keyframeIdToKeyIdx[keyframeId];
+                // Point in LiDAR frame = world point - keyframe translation
+                scanPointsPerKey[keyVecIdx].push_back(std::make_shared<Eigen::Vector3d>(
+                    keyframeSubmaps[keyframeId]->points_[pointIdx] - keyframePoses[keyframeId]->translation()));
+                totalPoints++;
+            }
+
+            // noise model for point-to-plane factor (one sigma per point measurement)
+            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(totalPoints, std::sqrt(planeThickness));
+            // create a point-to-plane factor for this cluster
             newSmootherFactors.add(boost::make_shared<PointToPlaneFactor>(
-                X(idxKeyframe),
+                keys,
                 imu_T_lidar,
-                planePoints,
+                scanPointsPerKey,
                 clusterNormal,
                 clusterNormal->dot(*clusterCenter), // d in plane equation s.t. n^T * x - d = 0
                 noiseModel));
-            newValues.insert(X(idxKeyframe), w_X_curr.pose());
-            newSmootherIndices[X(idxKeyframe)] = static_cast<double>(idxKeyframe);
-            */
         }
-        // predicted state
+        // add variables for the active keyframe
         newValues.insert(X(idxKeyframe), w_X_curr.pose());
         newValues.insert(V(idxKeyframe), w_X_curr.v());
         newValues.insert(B(idxKeyframe), currBias);
@@ -643,16 +664,41 @@ private:
         newSmootherIndices[X(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
         newSmootherIndices[V(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
         newSmootherIndices[B(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
-        // update smoother, TODO: identify marginalized keyframes and remove their submap data
         smoother.update(newSmootherFactors, newValues, newSmootherIndices);
+        smoother.print("Smoother after update:\n");
         resetNewFactors(); // clear factor, index & value buffers
         // extract estimated state
         w_X_curr = gtsam::NavState{
             smoother.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
             smoother.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
         currBias = smoother.calculateEstimate<gtsam::imuBias::ConstantBias>(B(idxKeyframe));
+        w_X_curr.print();
         // reset preintegrator
         preintegrator.resetIntegrationAndSetBias(currBias);
+        if (idxKeyframe > slidingWindowSize)
+        {
+            u_int32_t
+                idxLowerBound = keyframeSubmaps.begin()->first,
+                idxUpperbound = idxKeyframe - slidingWindowSize;
+
+            std::cout << "::: [DEBUG] marginalizing " << (idxUpperbound - idxLowerBound) << " keyframes :::" << std::endl;
+            for (u_int32_t idx = idxLowerBound; idx < idxUpperbound; ++idx)
+            {
+                if (keyframeSubmaps.find(idx) != keyframeSubmaps.end())
+                {
+                    keyframeSubmaps.erase(idx);
+                    submapKDTrees.erase(idx);
+                    keyframePoses.erase(idx);
+                    keyframeTimestamps.erase(idx);
+                }
+            }
+        }
+        // update the poses of the keyframe submaps
+        for (auto const &[idxKf, _] : keyframeSubmaps)
+        {
+            const gtsam::Pose3 updatedPose = smoother.calculateEstimate<gtsam::Pose3>(X(idxKf));
+            updateKeyframeSubmapPose(idxKf, updatedPose);
+        }
     };
 
     void resetNewFactors()
