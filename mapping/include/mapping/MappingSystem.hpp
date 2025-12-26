@@ -61,6 +61,9 @@ namespace mapping
     /// @brief Type used to identify point clusters
     using ClusterId = uint32_t;
 
+    using ClusterTracks = std::unordered_map<SubmapIdxPointIdx, ClusterId, boost::hash<SubmapIdxPointIdx>>;
+    using Clusters = std::unordered_map<ClusterId, std::vector<ClusterTracks::iterator>>;
+
     /// @brief Invalid cluster ID sentinel value
     constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
 
@@ -108,6 +111,19 @@ namespace mapping
 
         /// @brief Main tracking loop - process IMU and LiDAR data
         void track();
+
+        /// @brief Lock the IMU buffer and preintegrate all measurements within it.
+        /// @return A NavState containing the preintegrated pose and velocity.
+        gtsam::NavState preintegrateIMU();
+        /// @brief Undistort all scans based on previous motion and store them to the pointcloud buffer.
+        void undistortScans();
+        /// @brief Track the current keyframe submap against persistent "same plane point" clusters
+        /// @param idxKeyframe Index of the current keyframe
+        void trackScanPointsToClusters(const uint32_t &idxKeyframe);
+        /// @brief Erase all tracks associated with a cluster, erase the cluster itself.
+        /// @param itCluster Iterator to the cluster to erase.
+        /// @return Iterator to the next cluster after the erased one.
+        Clusters::iterator eraseClusterAndTracks(Clusters::iterator &itCluster);
 
         /// @brief Reset factor graph buffers for next iteration
         void resetNewFactors();
@@ -168,6 +184,15 @@ namespace mapping
 
         // Mapping data
         std::list<ScanBuffer> scanBuffer_;
+        /// @brief Cluster tracks are built up with candidates (including invalid ones) during searach
+        /// and are pruned during cluster validation (num. points, plane fit).
+        ClusterTracks clusterTracks_;
+        /// @brief Clusters are built from associated track candidates and point back to them for access of point data.
+        Clusters clusters_;
+        /// @brief The thickness of a clusters fitted plane, used for validation and modelling noise characteristics.
+        std::unordered_map<ClusterId, double> clusterPlaneThickness_;
+        /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing constraints.
+        std::unordered_map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
 
         // Keyframe data
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;

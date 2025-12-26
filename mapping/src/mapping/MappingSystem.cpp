@@ -202,9 +202,8 @@ namespace mapping
 #endif
     }
 
-    void MappingSystem::track()
+    gtsam::NavState MappingSystem::preintegrateIMU()
     {
-        // NOTE: at this point, the buffers should contain only unprocessed measurements
         // Lock the buffers for accessing values
         std::unique_lock<std::mutex> lockImuBuffer(mtxImuBuffer_);
 
@@ -227,9 +226,11 @@ namespace mapping
         lockImuBuffer.unlock();
 
         const gtsam::NavState w_X_propagated = preintegrator_.predict(w_X_curr_, currBias_);
-        const double positionDiff = (w_X_propagated.pose().translation() - lastKeyframePose().translation()).norm();
-        w_X_curr_ = w_X_propagated;
+        return w_X_propagated;
+    }
 
+    void MappingSystem::undistortScans()
+    {
         // Iterator to the newest lidar scan that can still be processed (older than latest imu timestamp)
         std::unique_lock<std::mutex> lockLidarBuffer(mtxLidarBuffer_);
         std::cout << "::: [DEBUG] tLastIMU " << tLastImu_ << ", tLastLiDAR "
@@ -299,27 +300,10 @@ namespace mapping
         // Erase processed raw scan data and release buffer lock
         lidarBuffer_.clear();
         lockLidarBuffer.unlock();
+    }
 
-        if (positionDiff < kThreshNewKeyframeDist)
-            return;
-
-        std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
-
-        // Create new keyframe
-        // Merge buffered scans together & create new keyframe submap
-        open3d::geometry::PointCloud newSubmap;
-        for (const ScanBuffer &scan : scanBuffer_)
-        {
-            // Move all scans to same origin
-            scan.pcd->Transform(scan.kf_T_scan->matrix());
-            newSubmap += *(scan.pcd);
-        }
-        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(kVoxelSize);
-        const uint32_t idxKeyframe = createKeyframeSubmap(w_X_curr_.pose().compose(imu_T_lidar_), tLastImu_, ptrNewSubmapVoxelized);
-#ifndef DISABLEVIZ
-        visualizer.addSubmap(idxKeyframe, w_X_curr_.pose().matrix(), ptrNewSubmapVoxelized);
-#endif
-
+    void MappingSystem::trackScanPointsToClusters(const uint32_t &idxKeyframe)
+    {
         std::cout
             << "::: [DEBUG] identifying same-plane point clusters among keyframe submaps :::" << std::endl;
 
@@ -327,9 +311,6 @@ namespace mapping
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps_[idxKeyframe];
         std::vector<int> knnIndices(kKnnMaxNeighbors);
         std::vector<double> knnDists(kKnnMaxNeighbors);
-
-        // TODO: make this an unordered_map, but requires custom hashing and equality OPs for the key type
-        std::map<SubmapIdxPointIdx, ClusterId> clusterTracks;
 
         // Find nearest neighbors between the new submap and all other keyframe submaps
         for (auto itOtherSubmap = keyframeSubmaps_.begin(); itOtherSubmap != keyframeSubmaps_.end(); ++itOtherSubmap)
@@ -358,22 +339,22 @@ namespace mapping
                     for (int i = 0; i < knnFound; ++i)
                     {
                         SubmapIdxPointIdx idxOther{idxOtherSubmap, knnIndices[i]};
-                        if (clusterTracks.find(idxOther) != clusterTracks.end())
+                        if (clusterTracks_.find(idxOther) != clusterTracks_.end())
                         {
-                            clusterTracks[idxOther] = tempNewCluster;
+                            clusterTracks_[idxOther] = tempNewCluster;
                         }
                         else
                         {
                             // Point belongs to a single existing cluster
                             if (clusterId == INVALID_CLUSTER_ID)
                             {
-                                clusterId = clusterTracks[idxOther];
+                                clusterId = clusterTracks_[idxOther];
                                 // May have assigned temp cluster, which needs to be replaced
                                 duplicateClusters.push_back(tempNewCluster);
                             }
                             else // Point belongs to multiple existing clusters, need to merge
                             {
-                                duplicateClusters.push_back(clusterTracks[idxOther]);
+                                duplicateClusters.push_back(clusterTracks_[idxOther]);
                             }
                         }
 
@@ -384,52 +365,49 @@ namespace mapping
                         else // Merge all duplicate clusters with the identified one
                         {
                             for (const ClusterId &duplicateId : duplicateClusters)
-                                for (auto &entry : clusterTracks)
+                                for (auto &entry : clusterTracks_)
                                     if (entry.second == duplicateId)
                                         entry.second = clusterId;
                         }
 
                         // Add the current point to the identified cluster
                         SubmapIdxPointIdx idxCurrent{idxKeyframe, idxPt};
-                        clusterTracks[idxCurrent] = clusterId;
+                        clusterTracks_[idxCurrent] = clusterId;
                     }
                 }
             }
         }
 
-        // Join tracks by clusters
-        std::unordered_map<ClusterId, std::vector<SubmapIdxPointIdx>> clusters;
-        std::unordered_map<ClusterId, double> clusterPlaneThickness;
-        std::unordered_map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters, clusterNormals;
-
-        for (auto itTrack = clusterTracks.begin(); itTrack != clusterTracks.end(); ++itTrack)
+        for (auto itTrack = clusterTracks_.begin(); itTrack != clusterTracks_.end(); ++itTrack)
         {
-            const auto [idxPoint, clusterId] = *itTrack;
-            if (clusters.find(clusterId) == clusters.end())
-                clusters[clusterId] = std::vector<SubmapIdxPointIdx>{idxPoint};
+            auto const &[idxPoint, clusterId] = *itTrack;
+            if (clusters_.find(clusterId) == clusters_.end())
+                clusters_[clusterId] = std::vector<ClusterTracks::iterator>{itTrack};
             else
-                clusters[clusterId].push_back(idxPoint);
+                clusters_[clusterId].push_back(itTrack);
         }
 
         // Remove clusters that are too small
-        for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
+        for (auto itCluster = clusters_.begin(); itCluster != clusters_.end();)
         {
-            if (itCluster->second.size() < kMinClusterSize)
-                itCluster = clusters.erase(itCluster);
+            auto const &[clusterId, clusterPoints] = *itCluster;
+            if (clusterPoints.size() < kMinClusterSize)
+                itCluster = eraseClusterAndTracks(itCluster);
             else
                 ++itCluster;
         }
-        std::cout << "::: [DEBUG] identified " << clusters.size() << " clusters, proceeding with outlier rejection :::" << std::endl;
+        std::cout << "::: [DEBUG] identified " << clusters_.size() << " clusters, proceeding with outlier rejection :::" << std::endl;
 
         // Outlier rejection - remove clusters that aren't planes
-        for (auto itCluster = clusters.begin(); itCluster != clusters.end();)
+        for (auto itCluster = clusters_.begin(); itCluster != clusters_.end();)
         {
+            auto const &[clusterId, clusterPoints] = *itCluster;
             size_t numHistoricPoints = 0;
             // Compute centered point locations for plane fitting
             Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
-            for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
+            for (const ClusterTracks::iterator &itTrack : itCluster->second)
             {
-                auto const [idxSubmap, pointIdx] = idxPoint;
+                auto const &[idxSubmap, pointIdx] = itTrack->first;
                 if (idxSubmap == idxKeyframe)
                     continue;
                 centroid += keyframeSubmaps_[idxSubmap]->points_[pointIdx];
@@ -438,20 +416,20 @@ namespace mapping
 
             if (numHistoricPoints < 4)
             {
-                itCluster = clusters.erase(itCluster);
+                itCluster = eraseClusterAndTracks(itCluster);
                 continue;
             }
 
             const double n = static_cast<double>(numHistoricPoints);
             centroid /= n;
             Eigen::MatrixXd A(numHistoricPoints, 3);
-            size_t i = 0;
-            for (const SubmapIdxPointIdx &idxPoint : itCluster->second)
+            size_t idxClusterPt = 0;
+            for (const ClusterTracks::iterator &itTrack : itCluster->second)
             {
-                auto const [idxSubmap, pointIdx] = idxPoint;
+                auto const [idxSubmap, pointIdx] = itTrack->first;
                 if (idxSubmap == idxKeyframe)
                     continue;
-                A.row(i++) = keyframeSubmaps_[idxSubmap]->points_[pointIdx] - centroid;
+                A.row(idxClusterPt++) = keyframeSubmaps_[idxSubmap]->points_[pointIdx] - centroid;
             }
 
             Eigen::JacobiSVD<Eigen::MatrixXd> svd(A, Eigen::ComputeThinU | Eigen::ComputeThinV);
@@ -477,42 +455,79 @@ namespace mapping
             // Remove tracked cluster if plane is not valid
             if (!isPlaneValid)
             {
-                itCluster = clusters.erase(itCluster);
+                itCluster = eraseClusterAndTracks(itCluster);
             }
             else
             {
                 planeThickness /= n;
-                clusterPlaneThickness[itCluster->first] = planeThickness;
-                clusterCenters[itCluster->first] = std::make_shared<Eigen::Vector3d>(centroid);
-                clusterNormals[itCluster->first] = std::make_shared<Eigen::Vector3d>(planeNormal);
+                clusterPlaneThickness_[clusterId] = planeThickness;
+                clusterCenters_[clusterId] = std::make_shared<Eigen::Vector3d>(centroid);
+                clusterNormals_[clusterId] = std::make_shared<Eigen::Vector3d>(planeNormal);
                 ++itCluster;
             }
         }
+    }
 
-        if (clusters.size() == 0)
+    Clusters::iterator MappingSystem::eraseClusterAndTracks(Clusters::iterator &itCluster)
+    {
+        // erase all tracks associated with this cluster
+        for (ClusterTracks::iterator &itPoint : itCluster->second)
+            clusterTracks_.erase(itPoint);
+        // erase the cluster itself
+        Clusters::iterator itClusterNxt = clusters_.erase(itCluster);
+        return itClusterNxt;
+    }
+
+    void MappingSystem::track()
+    {
+        const gtsam::NavState w_X_propagated = preintegrateIMU();
+        const double positionDiff = (w_X_curr_.pose().translation() - lastKeyframePose().translation()).norm();
+        // undistort all scans and move them to the scanBuffer
+        undistortScans();
+        if (positionDiff < kThreshNewKeyframeDist)
+            return;
+        std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
+        // Create new keyframe
+        // Merge buffered scans together & create new keyframe submap
+        open3d::geometry::PointCloud newSubmap;
+        for (const ScanBuffer &scan : scanBuffer_)
+        {
+            // Move all scans to same origin
+            scan.pcd->Transform(scan.kf_T_scan->matrix());
+            newSubmap += *(scan.pcd);
+        }
+        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(kVoxelSize);
+        const uint32_t idxKeyframe = createKeyframeSubmap(w_X_curr_.pose().compose(imu_T_lidar_), tLastImu_, ptrNewSubmapVoxelized);
+#ifndef DISABLEVIZ
+        visualizer.addSubmap(idxKeyframe, w_X_curr_.pose().matrix(), ptrNewSubmapVoxelized);
+#endif
+
+        trackScanPointsToClusters(idxKeyframe);
+
+        if (clusters_.size() == 0)
         {
             std::cout << "::: [ERROR] no valid clusters found in keyframe, tracking lost :::" << std::endl;
             systemState_ = SystemState::Recovery;
             return;
         }
 
-        std::cout << "::: [DEBUG] outlier rejection completed (keeping " << clusters.size()
+        std::cout << "::: [DEBUG] outlier rejection completed (keeping " << clusters_.size()
                   << " clusters), proceeding to formulate tracking constraints :::" << std::endl;
 
         // Build residuals for active keyframe points from valid clusters
-        for (auto itValidCluster = clusters.begin(); itValidCluster != clusters.end(); ++itValidCluster)
+        for (auto itValidCluster = clusters_.begin(); itValidCluster != clusters_.end(); ++itValidCluster)
         {
-            const ClusterId clusterId = itValidCluster->first;
-            const std::vector<SubmapIdxPointIdx> &clusterPoints = itValidCluster->second;
-            const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters[clusterId];
-            const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals[clusterId];
-            const double planeThickness = clusterPlaneThickness[clusterId];
+            auto const &[clusterId, clusterTracks] = *itValidCluster;
+            const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
+            const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
+            const double planeThickness = clusterPlaneThickness_[clusterId];
 
             // Step 1: Collect unique keyframe IDs involved in this cluster
             std::set<uint32_t> uniqueKeyframeIds;
-            for (const SubmapIdxPointIdx &idxPoint : clusterPoints)
+            for (ClusterTracks::iterator itTrack : clusterTracks)
             {
-                uniqueKeyframeIds.insert(idxPoint.first);
+                // track is (idxSubmapIdxPoint, clusterId)
+                uniqueKeyframeIds.insert(itTrack->first.first);
             }
 
             // Step 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
@@ -529,9 +544,9 @@ namespace mapping
             // Step 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
             std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
             size_t totalPoints = 0;
-            for (const SubmapIdxPointIdx &idxPoint : clusterPoints)
+            for (ClusterTracks::iterator itTrack : clusterTracks)
             {
-                auto const [keyframeId, pointIdx] = idxPoint;
+                auto const [keyframeId, pointIdx] = itTrack->first;
                 const size_t keyVecIdx = keyframeIdToKeyIdx[keyframeId];
                 // Point in LiDAR frame = world point - keyframe translation
                 scanPointsPerKey[keyVecIdx].push_back(std::make_shared<Eigen::Vector3d>(
