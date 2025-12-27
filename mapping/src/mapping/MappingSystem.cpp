@@ -1,5 +1,4 @@
 #include <mapping/MappingSystem.hpp>
-#include <mapping/factors/PointToPlaneFactor.hpp>
 
 #include <gtsam/inference/Symbol.h>
 
@@ -139,16 +138,16 @@ namespace mapping
 
         // Create new submap with all initial lidar scans
         open3d::geometry::PointCloud newSubmap;
+        gtsam::Pose3 w_T_l0{w_T_i0.compose(imu_T_lidar_)};
         for (auto it = lidarBuffer_.begin(); it != lidarBufferEndIt; ++it)
         {
             open3d::geometry::PointCloud pcdScan = Scan2PCD(it->second, kMinPointDist, kMaxPointDist);
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(kVoxelSize);
-            ptrPcdScan->Transform(w_T_i0.matrix() * imu_T_lidar_.matrix());
+            ptrPcdScan->Transform(w_T_l0.matrix());
             newSubmap += *ptrPcdScan;
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(kVoxelSize);
-        const uint32_t idxNewKF = createKeyframeSubmap(w_T_i0.compose(imu_T_lidar_), tLastImu_, ptrNewSubmapVoxelized);
-
+        const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
         // Clear lidar buffer
         lidarBuffer_.clear();
 
@@ -482,6 +481,66 @@ namespace mapping
         return itClusterNxt;
     }
 
+    void MappingSystem::createAndUpdateFactors()
+    {
+        // Build residuals for active keyframe points from valid clusters
+        for (auto itValidCluster = clusters_.begin(); itValidCluster != clusters_.end(); ++itValidCluster)
+        {
+            auto const &[clusterId, clusterTracks] = *itValidCluster;
+            const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
+            const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
+            const double planeThickness = clusterPlaneThickness_[clusterId];
+
+            // 1: Collect unique keyframe IDs involved in this cluster
+            std::set<uint32_t> uniqueKeyframeIds;
+            for (ClusterTracks::iterator itTrack : clusterTracks)
+                // track is (idxSubmapIdxPoint, clusterId)
+                uniqueKeyframeIds.insert(itTrack->first.first);
+
+            // 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
+            gtsam::KeyVector keys;
+            keys.reserve(uniqueKeyframeIds.size());
+            std::unordered_map<uint32_t, size_t> keyframeIdToKeyIdx;
+            size_t keyIdx = 0;
+            for (const uint32_t kfId : uniqueKeyframeIds)
+            {
+                keys.push_back(X(kfId));
+                keyframeIdToKeyIdx[kfId] = keyIdx++;
+            }
+
+            // 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
+            std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
+            size_t totalPoints = 0;
+            for (ClusterTracks::iterator itTrack : clusterTracks)
+            {
+                auto const [keyframeId, pointIdx] = itTrack->first;
+                const size_t keyVecIdx = keyframeIdToKeyIdx[keyframeId];
+                // Point in LiDAR frame = world point - keyframe translation
+                scanPointsPerKey[keyVecIdx].push_back(std::make_shared<Eigen::Vector3d>(
+                    keyframeSubmaps_[keyframeId]->points_[pointIdx] - keyframePoses_[keyframeId]->translation()));
+                totalPoints++;
+            }
+
+            // Noise model for point-to-plane factor (one sigma per point measurement)
+            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(totalPoints, std::sqrt(planeThickness));
+            const PointToPlaneFactor::shared_ptr ptpFactor = boost::make_shared<PointToPlaneFactor>(
+                keys,
+                imu_T_lidar_,
+                scanPointsPerKey,
+                clusterNormal,
+                clusterNormal->dot(*clusterCenter),
+                noiseModel);
+
+            ClusterFactors::iterator itExistingFactor = clusterFactors_.find(clusterId);
+
+            if (itExistingFactor != clusterFactors_.end()) // copy and update if the factor exists
+            {
+                auto const &[existingFactor, existingFactorIdx] = itExistingFactor->second;
+                factorsToRemove_.push_back(existingFactorIdx);
+            }
+        }
+    }
+
     void MappingSystem::track()
     {
         const gtsam::NavState w_X_propagated = preintegrateIMU();
@@ -520,58 +579,7 @@ namespace mapping
         std::cout << "::: [DEBUG] outlier rejection completed (keeping " << clusters_.size()
                   << " clusters), proceeding to formulate tracking constraints :::" << std::endl;
 
-        // Build residuals for active keyframe points from valid clusters
-        for (auto itValidCluster = clusters_.begin(); itValidCluster != clusters_.end(); ++itValidCluster)
-        {
-            auto const &[clusterId, clusterTracks] = *itValidCluster;
-            const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
-            const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
-            const double planeThickness = clusterPlaneThickness_[clusterId];
-
-            // Step 1: Collect unique keyframe IDs involved in this cluster
-            std::set<uint32_t> uniqueKeyframeIds;
-            for (ClusterTracks::iterator itTrack : clusterTracks)
-            {
-                // track is (idxSubmapIdxPoint, clusterId)
-                uniqueKeyframeIds.insert(itTrack->first.first);
-            }
-
-            // Step 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
-            gtsam::KeyVector keys;
-            keys.reserve(uniqueKeyframeIds.size());
-            std::unordered_map<uint32_t, size_t> keyframeIdToKeyIdx;
-            size_t keyIdx = 0;
-            for (const uint32_t kfId : uniqueKeyframeIds)
-            {
-                keys.push_back(X(kfId));
-                keyframeIdToKeyIdx[kfId] = keyIdx++;
-            }
-
-            // Step 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
-            std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
-            size_t totalPoints = 0;
-            for (ClusterTracks::iterator itTrack : clusterTracks)
-            {
-                auto const [keyframeId, pointIdx] = itTrack->first;
-                const size_t keyVecIdx = keyframeIdToKeyIdx[keyframeId];
-                // Point in LiDAR frame = world point - keyframe translation
-                scanPointsPerKey[keyVecIdx].push_back(std::make_shared<Eigen::Vector3d>(
-                    keyframeSubmaps_[keyframeId]->points_[pointIdx] - keyframePoses_[keyframeId]->translation()));
-                totalPoints++;
-            }
-
-            // Noise model for point-to-plane factor (one sigma per point measurement)
-            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(totalPoints, std::sqrt(planeThickness));
-
-            // Create a point-to-plane factor for this cluster
-            newSmootherFactors_.add(boost::make_shared<PointToPlaneFactor>(
-                keys,
-                imu_T_lidar_,
-                scanPointsPerKey,
-                clusterNormal,
-                clusterNormal->dot(*clusterCenter),
-                noiseModel));
-        }
+        createAndUpdateFactors();
 
         // Add variables for the active keyframe
         newValues_.insert(X(idxKeyframe), w_X_curr_.pose());
@@ -591,7 +599,7 @@ namespace mapping
         newSmootherIndices_[V(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
         newSmootherIndices_[B(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
 
-        smoother_.update(newSmootherFactors_, newValues_, newSmootherIndices_);
+        smoother_.update(newSmootherFactors_, newValues_, newSmootherIndices_, factorsToRemove_);
         smoother_.print("Smoother after update:\n");
         resetNewFactors();
 
@@ -644,6 +652,7 @@ namespace mapping
         newSmootherFactors_.resize(0);
         newValues_.clear();
         newSmootherIndices_.clear();
+        factorsToRemove_.clear();
     }
 
     uint32_t MappingSystem::createKeyframeSubmap(

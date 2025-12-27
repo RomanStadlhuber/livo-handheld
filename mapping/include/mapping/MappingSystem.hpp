@@ -14,6 +14,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include <Visualization.hpp>
+#include <mapping/factors/PointToPlaneFactor.hpp>
 
 #include <list>
 #include <map>
@@ -63,6 +64,9 @@ namespace mapping
 
     using ClusterTracks = std::unordered_map<SubmapIdxPointIdx, ClusterId, boost::hash<SubmapIdxPointIdx>>;
     using Clusters = std::unordered_map<ClusterId, std::vector<ClusterTracks::iterator>>;
+
+    /// @brief Factors associated with valid clusters tracks including their index in the smoothers factor graph
+    using ClusterFactors = std::unordered_map<ClusterId, std::pair<PointToPlaneFactor::shared_ptr, size_t>>;
 
     /// @brief Invalid cluster ID sentinel value
     constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
@@ -120,6 +124,10 @@ namespace mapping
         /// @brief Track the current keyframe submap against persistent "same plane point" clusters
         /// @param idxKeyframe Index of the current keyframe
         void trackScanPointsToClusters(const uint32_t &idxKeyframe);
+
+        /// @brief Create new factors for previously unttracked clusters and update existing factors.
+        void createAndUpdateFactors();
+
         /// @brief Erase all tracks associated with a cluster, erase the cluster itself.
         /// @param itCluster Iterator to the cluster to erase.
         /// @return Iterator to the next cluster after the erased one.
@@ -193,6 +201,9 @@ namespace mapping
         std::unordered_map<ClusterId, double> clusterPlaneThickness_;
         /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing constraints.
         std::unordered_map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
+        /// @brief Factors associated with valid clusters tracks including their index in the smoothers factor graph
+        ClusterFactors clusterFactors_;
+        gtsam::FactorIndices factorsToRemove_;
 
         // Keyframe data
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;

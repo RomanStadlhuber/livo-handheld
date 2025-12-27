@@ -6,6 +6,9 @@ namespace mapping
 
     void Visualization::createWindow(const bool &addWorldFrame)
     {
+        if (windowRunning)
+            return;
+
         o3dVisualizer.CreateVisualizerWindow("Mapping Visualization", 800, 600);
         windowRunning = true;
 

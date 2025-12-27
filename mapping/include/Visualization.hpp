@@ -21,6 +21,13 @@ namespace mapping
 
         void createWindow(const bool &addWorldFrame = true);
 
+        void visualizeScan(const std::shared_ptr<open3d::geometry::PointCloud> &pcdScan)
+        {
+            o3dVisualizer.ClearGeometries();
+            o3dVisualizer.AddGeometry(pcdScan);
+            refreshWindow();
+        }
+
         void addSubmap(
             const u_int32_t keyframeId,
             const Eigen::Matrix4d &pose,
