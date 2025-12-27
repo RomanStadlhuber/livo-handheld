@@ -142,7 +142,9 @@ namespace mapping
         for (auto it = lidarBuffer_.begin(); it != lidarBufferEndIt; ++it)
         {
             open3d::geometry::PointCloud pcdScan = Scan2PCD(it->second, kMinPointDist, kMaxPointDist);
-            newSubmap += *(pcdScan.VoxelDownSample(kVoxelSize));
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(kVoxelSize);
+            ptrPcdScan->Transform(w_T_i0.matrix() * imu_T_lidar_.matrix());
+            newSubmap += *ptrPcdScan;
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(kVoxelSize);
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_i0.compose(imu_T_lidar_), tLastImu_, ptrNewSubmapVoxelized);
@@ -483,7 +485,8 @@ namespace mapping
     void MappingSystem::track()
     {
         const gtsam::NavState w_X_propagated = preintegrateIMU();
-        const double positionDiff = (w_X_curr_.pose().translation() - lastKeyframePose().translation()).norm();
+        const double positionDiff = (w_X_propagated.pose().translation() - lastKeyframePose().translation()).norm();
+        w_X_curr_ = w_X_propagated;
         // undistort all scans and move them to the scanBuffer
         undistortScans();
         if (positionDiff < kThreshNewKeyframeDist)

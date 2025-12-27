@@ -218,7 +218,7 @@ namespace mapping
         static constexpr double kInitTimeWindow = 2.0;
         static constexpr double kVoxelSize = 0.5;
         static constexpr double kThreshNewKeyframeDist = 0.5;
-        static constexpr double kMinPointDist = 1.5;
+        static constexpr double kMinPointDist = 2.5;
         static constexpr double kMaxPointDist = 60.0;
         static constexpr double kKnnRadius = 0.5;
         static constexpr int kKnnMaxNeighbors = 5;
