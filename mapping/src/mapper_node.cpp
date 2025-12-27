@@ -9,9 +9,20 @@
 // Mapping
 #include <mapping/MappingSystem.hpp>
 
+#include <atomic>
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <string>
+
+// Global flag for signal handling
+std::atomic<bool> g_shutdown_requested{false};
+
+void signalHandler(int signum)
+{
+    (void)signum;
+    g_shutdown_requested = true;
+}
 
 class MapperNode : public rclcpp::Node
 {
@@ -67,7 +78,7 @@ private:
         lidar_data->offset_times.reserve(point_num);
         for (size_t i = 0; i < point_num; ++i)
         {
-            const auto& point = msg->points[i];
+            const auto &point = msg->points[i];
             Eigen::Vector3d pt(
                 static_cast<double>(point.x),
                 static_cast<double>(point.y),
@@ -92,7 +103,7 @@ private:
 };
 
 // Standalone bag reader for debugging
-void runFromBag(const std::string& bag_path)
+void runFromBag(const std::string &bag_path)
 {
     mapping::MappingSystem slam;
 
@@ -114,7 +125,7 @@ void runFromBag(const std::string& bag_path)
 
     std::cout << "Reading bag file: " << bag_path << std::endl;
 
-    while (reader.has_next())
+    while (reader.has_next() && !g_shutdown_requested)
     {
         auto bag_message = reader.read_next();
 
@@ -166,7 +177,7 @@ void runFromBag(const std::string& bag_path)
 
             for (size_t i = 0; i < point_num; ++i)
             {
-                const auto& point = msg->points[i];
+                const auto &point = msg->points[i];
                 Eigen::Vector3d pt(
                     static_cast<double>(point.x),
                     static_cast<double>(point.y),
@@ -184,8 +195,11 @@ void runFromBag(const std::string& bag_path)
     std::cout << "Finished processing bag file." << std::endl;
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
+    // Register signal handler for CTRL+C
+    std::signal(SIGINT, signalHandler);
+
     rclcpp::init(argc, argv);
 
     // Check if running in standalone bag mode

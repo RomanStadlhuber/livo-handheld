@@ -198,7 +198,9 @@ namespace mapping
         imuBuffer_.clear();
 
 #ifndef DISABLEVIZ
-        visualizer.createWindow(); // create window with adding world frame
+        visualizer.createWindow(); // create window & add world frame
+        visualizer.addSubmap(idxNewKF, w_T_i0.matrix(), ptrNewSubmapVoxelized);
+        visualizer.waitForSpacebar();
 #endif
     }
 
@@ -500,6 +502,7 @@ namespace mapping
         const uint32_t idxKeyframe = createKeyframeSubmap(w_X_curr_.pose().compose(imu_T_lidar_), tLastImu_, ptrNewSubmapVoxelized);
 #ifndef DISABLEVIZ
         visualizer.addSubmap(idxKeyframe, w_X_curr_.pose().matrix(), ptrNewSubmapVoxelized);
+        visualizer.waitForSpacebar();
 #endif
 
         trackScanPointsToClusters(idxKeyframe);
@@ -615,6 +618,7 @@ namespace mapping
                     keyframeTimestamps_.erase(idx);
 #ifndef DISABLEVIZ
                     visualizer.removeSubmap(idx);
+                    visualizer.waitForSpacebar();
 #endif
                 }
             }
@@ -627,6 +631,7 @@ namespace mapping
             updateKeyframeSubmapPose(idxKf, updatedPose);
 #ifndef DISABLEVIZ
             visualizer.updateSubmap(idxKf, updatedPose.matrix());
+            visualizer.waitForSpacebar();
 #endif
         }
     }

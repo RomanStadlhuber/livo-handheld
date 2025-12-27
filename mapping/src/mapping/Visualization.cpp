@@ -76,4 +76,32 @@ namespace mapping
             o3dVisualizer.UpdateRender();
         }
     }
+
+    void Visualization::waitForSpacebar()
+    {
+        if (!windowRunning)
+            return;
+
+        bool spacePressed = false;
+
+        // Register key callback for spacebar (key code 32)
+        o3dVisualizer.RegisterKeyCallback(
+            SPACEBAR,
+            [&spacePressed](open3d::visualization::Visualizer *vis) -> bool
+            {
+            spacePressed = true;
+            return true; });
+
+        std::cout << "::: [INFO] processing halted by visualization, press [SPACE] to continue :::" << std::endl;
+
+        // Block and refresh until spacebar is pressed
+        while (!spacePressed && windowRunning)
+        {
+            o3dVisualizer.PollEvents();
+            o3dVisualizer.UpdateRender();
+        }
+
+        // Unregister the callback
+        o3dVisualizer.RegisterKeyCallback(SPACEBAR, nullptr);
+    }
 }
