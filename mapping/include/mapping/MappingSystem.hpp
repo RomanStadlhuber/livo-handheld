@@ -62,11 +62,11 @@ namespace mapping
     /// @brief Type used to identify point clusters
     using ClusterId = uint32_t;
 
-    using ClusterTracks = std::unordered_map<SubmapIdxPointIdx, ClusterId, boost::hash<SubmapIdxPointIdx>>;
-    using Clusters = std::unordered_map<ClusterId, std::vector<ClusterTracks::iterator>>;
+    using ClusterTracks = std::map<SubmapIdxPointIdx, ClusterId>;
+    using Clusters = std::map<ClusterId, std::vector<ClusterTracks::iterator>>;
 
     /// @brief Factors associated with valid clusters tracks including their index in the smoothers factor graph
-    using ClusterFactors = std::unordered_map<ClusterId, std::pair<PointToPlaneFactor::shared_ptr, size_t>>;
+    using ClusterFactors = std::map<ClusterId, std::pair<PointToPlaneFactor::shared_ptr, size_t>>;
 
     /// @brief Invalid cluster ID sentinel value
     constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
@@ -124,15 +124,17 @@ namespace mapping
         /// @brief Track the current keyframe submap against persistent "same plane point" clusters
         /// @param idxKeyframe Index of the current keyframe
         void trackScanPointsToClusters(const uint32_t &idxKeyframe);
-
-        /// @brief Create new factors for previously unttracked clusters and update existing factors.
-        void createAndUpdateFactors();
-
+        /// @brief Remove all tracks associated with a keyframe and sanitize the clusters pointing to them.
+        /// @param idxKeyframe Index of the keyframe to remove tracks for.
+        void removeTracksFromClusters(const u_int32_t &idxKeyframe);
         /// @brief Erase all tracks associated with a cluster, erase the cluster itself.
         /// @param itCluster Iterator to the cluster to erase.
         /// @return Iterator to the next cluster after the erased one.
         Clusters::iterator eraseClusterAndTracks(Clusters::iterator &itCluster);
-
+        /// @brief Summarize current clusters for debugging purposes.
+        void summarizeClusters() const;
+        /// @brief Create new factors for previously unttracked clusters and update existing factors.
+        void createAndUpdateFactors();
         /// @brief Reset factor graph buffers for next iteration
         void resetNewFactors();
 
@@ -233,7 +235,8 @@ namespace mapping
         static constexpr double kMaxPointDist = 60.0;
         static constexpr double kKnnRadius = 0.5;
         static constexpr int kKnnMaxNeighbors = 5;
-        static constexpr size_t kMinClusterSize = 5;
+        // clusters below min size are discarded, clusters above max size will not be merged
+        static constexpr size_t kMinClusterSize = 5, kMaxClusterSize = 20;
         static constexpr double kThreshPlaneValid = 0.1;
     };
 

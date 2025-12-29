@@ -75,7 +75,7 @@ namespace mapping
     {
         if (windowRunning)
         {
-            o3dVisualizer.PollEvents();
+            // o3dVisualizer.PollEvents();
             o3dVisualizer.UpdateRender();
         }
     }

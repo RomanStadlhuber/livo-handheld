@@ -307,6 +307,8 @@ namespace mapping
 
     void MappingSystem::trackScanPointsToClusters(const uint32_t &idxKeyframe)
     {
+        clusters_.clear();
+
         std::cout
             << "::: [DEBUG] identifying same-plane point clusters among keyframe submaps :::" << std::endl;
 
@@ -314,7 +316,6 @@ namespace mapping
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps_[idxKeyframe];
         std::vector<int> knnIndices(kKnnMaxNeighbors);
         std::vector<double> knnDists(kKnnMaxNeighbors);
-
         // Find nearest neighbors between the new submap and all other keyframe submaps
         for (auto itOtherSubmap = keyframeSubmaps_.begin(); itOtherSubmap != keyframeSubmaps_.end(); ++itOtherSubmap)
         {
@@ -335,43 +336,50 @@ namespace mapping
                 {
                     ClusterId clusterId = INVALID_CLUSTER_ID;
                     ClusterId tempNewCluster = clusterIdCounter_ + 1;
-                    // Clusters that need to be merged (polled & processed after search)
-                    std::vector<ClusterId> duplicateClusters;
+                    // KNN associations that track the same cluster (redundant id -> target id)
+                    std::vector<ClusterId> duplicateTracks;
 
                     // Identify or assign cluster to every NN returned point
                     for (int i = 0; i < knnFound; ++i)
                     {
                         SubmapIdxPointIdx idxOther{idxOtherSubmap, knnIndices[i]};
-                        if (clusterTracks_.find(idxOther) != clusterTracks_.end())
+                        if (clusterTracks_.find(idxOther) == clusterTracks_.end()) // point is not tracked as part of a cluster yet ..
                         {
-                            clusterTracks_[idxOther] = tempNewCluster;
+                            clusterTracks_[idxOther] = tempNewCluster; // .. assign a temp cluster id until another cluster is found
                         }
                         else
                         {
-                            // Point belongs to a single existing cluster
-                            if (clusterId == INVALID_CLUSTER_ID)
-                            {
-                                clusterId = clusterTracks_[idxOther];
-                                // May have assigned temp cluster, which needs to be replaced
-                                duplicateClusters.push_back(tempNewCluster);
+                            if (clusterId == INVALID_CLUSTER_ID) // no cluster has been assigned to this point yet -> pick the first other
+                            {                                    // merge with existing cluster from other point if that cluster is not already full
+                                if (clusters_.size() == 0 || clusters_[clusterTracks_[idxOther]].size() < kMaxClusterSize)
+                                {
+                                    clusterId = clusterTracks_[idxOther];
+                                    // a temp cluster MIGHT have been assigned to one of the previous NN points, need to record it for merging
+                                    duplicateTracks.push_back(tempNewCluster);
+                                }
+                                // if there is not enough space to merge into an existing cluster, create a new one
+                                else
+                                {
+                                    clusterId = tempNewCluster;
+                                }
                             }
-                            else // Point belongs to multiple existing clusters, need to merge
+                            // the other point has been assigned to cluster already -> record for merging
+                            else if (clusters_.size() == 0 || clusters_[clusterTracks_[idxOther]].size() < kMaxClusterSize)
                             {
-                                duplicateClusters.push_back(clusterTracks_[idxOther]);
+                                duplicateTracks.push_back(clusterTracks_[idxOther]);
                             }
                         }
 
                         // If a new cluster was identified, increment the counter
                         if (clusterId == INVALID_CLUSTER_ID)
                             clusterIdCounter_ = clusterId = tempNewCluster;
-                        // This point belongs to an existing cluster
-                        else // Merge all duplicate clusters with the identified one
-                        {
-                            for (const ClusterId &duplicateId : duplicateClusters)
+                        // or, if this point belongs to an existing cluster
+                        else if (duplicateTracks.size() > 0)
+                            // assign the common cluster-id to all tracks of duplicate cluster
+                            for (const ClusterId &duplicateId : duplicateTracks)
                                 for (auto &entry : clusterTracks_)
                                     if (entry.second == duplicateId)
                                         entry.second = clusterId;
-                        }
 
                         // Add the current point to the identified cluster
                         SubmapIdxPointIdx idxCurrent{idxKeyframe, idxPt};
@@ -380,12 +388,16 @@ namespace mapping
                 }
             }
         }
-
+        // Rebuild clusters from tracks (cluster IDs have already been merged in clusterTracks_ above)
         for (auto itTrack = clusterTracks_.begin(); itTrack != clusterTracks_.end(); ++itTrack)
         {
             auto const &[idxPoint, clusterId] = *itTrack;
             if (clusters_.find(clusterId) == clusters_.end())
-                clusters_[clusterId] = std::vector<ClusterTracks::iterator>{itTrack};
+            {
+                clusters_[clusterId] = std::vector<ClusterTracks::iterator>();
+                clusters_[clusterId].reserve(kKnnMaxNeighbors);
+                clusters_[clusterId].push_back(itTrack);
+            }
             else
                 clusters_[clusterId].push_back(itTrack);
         }
@@ -394,12 +406,11 @@ namespace mapping
         for (auto itCluster = clusters_.begin(); itCluster != clusters_.end();)
         {
             auto const &[clusterId, clusterPoints] = *itCluster;
-            if (clusterPoints.size() < kMinClusterSize)
+            if (clusterPoints.size() < kMinClusterSize || clusterPoints.size() > kMaxClusterSize * 2)
                 itCluster = eraseClusterAndTracks(itCluster);
             else
                 ++itCluster;
         }
-        std::cout << "::: [DEBUG] identified " << clusters_.size() << " clusters, proceeding with outlier rejection :::" << std::endl;
 
         // Outlier rejection - remove clusters that aren't planes
         for (auto itCluster = clusters_.begin(); itCluster != clusters_.end();)
@@ -478,7 +489,47 @@ namespace mapping
             clusterTracks_.erase(itPoint);
         // erase the cluster itself
         Clusters::iterator itClusterNxt = clusters_.erase(itCluster);
+        // erase cluster properties if they exist (might not have been evaluated yet)
+        if (clusterPlaneThickness_.find(itCluster->first) != clusterPlaneThickness_.end())
+            clusterPlaneThickness_.erase(itCluster->first);
+        if (clusterCenters_.find(itCluster->first) != clusterCenters_.end())
+            clusterCenters_.erase(itCluster->first);
+        if (clusterNormals_.find(itCluster->first) != clusterNormals_.end())
+            clusterNormals_.erase(itCluster->first);
         return itClusterNxt;
+    }
+
+    void MappingSystem::removeTracksFromClusters(const u_int32_t &idxKeyframe)
+    {
+        // Remove all tracks from the marginalized keyframe
+        for (auto itTrack = clusterTracks_.begin(); itTrack != clusterTracks_.end();)
+        {
+            if (itTrack->first.first == idxKeyframe) // if submap index matches
+                itTrack = clusterTracks_.erase(itTrack);
+            else
+                ++itTrack;
+        }
+
+        // Remove clusters that no longer have enough points
+        for (auto itCluster = clusters_.begin(); itCluster != clusters_.end();)
+        {
+            // NOTE: erase-remove -> (re-)move all previously deleted tracks to the end of the range (returns new logical end)
+            // then erase all elements past the new logical end
+            auto &trackIters = itCluster->second;
+            trackIters.erase(
+                std::remove_if(trackIters.begin(), trackIters.end(),
+                               [idxKeyframe](const ClusterTracks::iterator &it)
+                               {
+                                   return it->first.first == idxKeyframe;
+                               }),
+                trackIters.end());
+
+            // Remove cluster if too small
+            if (trackIters.size() < kMinClusterSize)
+                itCluster = eraseClusterAndTracks(itCluster);
+            else
+                ++itCluster;
+        }
     }
 
     void MappingSystem::createAndUpdateFactors()
@@ -619,16 +670,17 @@ namespace mapping
             uint32_t idxUpperbound = idxKeyframe - kSlidingWindowSize;
 
             std::cout << "::: [DEBUG] marginalizing " << (idxUpperbound - idxLowerBound) << " keyframes :::" << std::endl;
-            for (uint32_t idx = idxLowerBound; idx < idxUpperbound; ++idx)
+            for (uint32_t idxMargiznalizedKeyframe = idxLowerBound; idxMargiznalizedKeyframe < idxUpperbound; ++idxMargiznalizedKeyframe)
             {
-                if (keyframeSubmaps_.find(idx) != keyframeSubmaps_.end())
+                if (keyframeSubmaps_.find(idxMargiznalizedKeyframe) != keyframeSubmaps_.end())
                 {
-                    keyframeSubmaps_.erase(idx);
-                    submapKDTrees_.erase(idx);
-                    keyframePoses_.erase(idx);
-                    keyframeTimestamps_.erase(idx);
+                    removeTracksFromClusters(idxMargiznalizedKeyframe);
+                    keyframeSubmaps_.erase(idxMargiznalizedKeyframe);
+                    submapKDTrees_.erase(idxMargiznalizedKeyframe);
+                    keyframePoses_.erase(idxMargiznalizedKeyframe);
+                    keyframeTimestamps_.erase(idxMargiznalizedKeyframe);
 #ifndef DISABLEVIZ
-                    visualizer.removeSubmap(idx);
+                    visualizer.removeSubmap(idxMargiznalizedKeyframe);
                     visualizer.waitForSpacebar();
 #endif
                 }
@@ -699,6 +751,17 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> pcdScan)
     {
         scanBuffer_.push_back(ScanBuffer{pcdScan, std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe)});
+    }
+
+    void MappingSystem::summarizeClusters() const
+    {
+        std::cout << "::: [SUMMARY] Current clusters :::" << std::endl;
+        for (auto itCluster = clusters_.begin(); itCluster != clusters_.end(); ++itCluster)
+        {
+            auto const &[clusterId, clusterPoints] = *itCluster;
+            std::cout << "\tCluster " << clusterId << ": " << clusterPoints.size() << " points" << std::endl;
+            // << "thickness " << clusterPlaneThickness_.at(clusterId) << std::endl;
+        }
     }
 
 } // namespace mapping
