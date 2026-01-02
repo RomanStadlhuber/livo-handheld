@@ -35,23 +35,31 @@ namespace mapping
     }
 
     MappingSystem::MappingSystem()
-        : smoother_(static_cast<double>(kSlidingWindowSize)),
-          systemState_(SystemState::Initializing),
+        : systemState_(SystemState::Initializing),
           keyframeCounter_(0),
           tLastImu_(0.0),
           imu_T_lidar_(gtsam::Rot3::Identity(), gtsam::Point3(-0.011, -0.02329, 0.04412)),
           lidarTimeOffset_(0.0),
           clusterIdCounter_(0)
     {
+        // TODO: use iSAM2 (IncrementalFixedLagSmoother) over BatchFixedLagSmoother for efficiency
+        gtsam::LevenbergMarquardtParams optimizerParams;
+        optimizerParams.verbosity = gtsam::NonlinearOptimizerParams::Verbosity::VALUES;
+        optimizerParams.verbosityLM = gtsam::LevenbergMarquardtParams::VerbosityLM::SUMMARY;
+        smoother_ = gtsam::BatchFixedLagSmoother(static_cast<double>(kSlidingWindowSize), optimizerParams);
         // Initialize IMU preintegration parameters
         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
-        // TODO: set sensible values for Livox Mid360 IMU here
-        constexpr double accelerometerNoise = 0.15;
-        constexpr double gyroscopeNoise = 0.314;
-        params->accelerometerCovariance = gtsam::I_3x3 * std::pow(accelerometerNoise, 2);
-        params->gyroscopeCovariance = gtsam::I_3x3 * std::pow(gyroscopeNoise, 2);
-        params->integrationCovariance = gtsam::I_3x3 * 1e-6;
-        gtsam::imuBias::ConstantBias priorImuBias{};
+        // noise values from:
+        // https://github.com/RomanStadlhuber/mid360_docker/blob/main/mid360_runner/config/mapping_mid360.yaml#L13
+        constexpr double accelerometerNoise = 0.1;
+        constexpr double gyroscopeNoise = 0.1;
+        params->accelerometerCovariance = gtsam::I_3x3 * accelerometerNoise;
+        params->gyroscopeCovariance = gtsam::I_3x3 * gyroscopeNoise;
+        // bias value from:
+        // https://github.com/hku-mars/FAST_LIO/blob/7cc4175de6f8ba2edf34bab02a42195b141027e9/include/use-ikfom.hpp#L35
+        params->integrationCovariance = gtsam::I_3x3 * 1e-4;
+        const gtsam::Vector6 commonBias{gtsam::Vector6::Ones() * 0.0001};
+        gtsam::imuBias::ConstantBias priorImuBias{commonBias};
         preintegrator_ = gtsam::PreintegratedCombinedMeasurements(params, priorImuBias);
     }
 
@@ -290,7 +298,7 @@ namespace mapping
             // Convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, kMinPointDist, kMaxPointDist);
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(kVoxelSize);
-            gtsam::Pose3 scanPoseInWorld = keyframePoses_.rbegin()->second->compose(kf_T_scan);
+            gtsam::Pose3 scanPoseInWorld = lastKeyframePose().compose(kf_T_scan);
             ptrPcdScanVoxelized->Transform(scanPoseInWorld.matrix());
 
             // Buffer undistorted scan
@@ -714,6 +722,8 @@ namespace mapping
             smoother_.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
         currBias_ = smoother_.calculateEstimate<gtsam::imuBias::ConstantBias>(B(idxKeyframe));
         w_X_curr_.print();
+        std::cout << "Current bias: ";
+        currBias_.print();
 
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);

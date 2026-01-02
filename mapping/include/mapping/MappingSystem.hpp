@@ -234,9 +234,9 @@ namespace mapping
         static constexpr double kInitTimeWindow = 2.0;
         static constexpr double kVoxelSize = 2.0;
         static constexpr double kThreshNewKeyframeDist = 0.075, kThreshNewKeyframeAngle = 0.087; // ~ 5 [°]
-        static constexpr size_t kThreshNewKeyframeElapsedScans = 15;                             // number of scans to force new keyframe
+        static constexpr size_t kThreshNewKeyframeElapsedScans = 3;                              // number of scans to force new keyframe
         static constexpr double kMinPointDist = 2.5;
-        static constexpr double kMaxPointDist = 60.0;
+        static constexpr double kMaxPointDist = 100.0;
         static constexpr double kKnnRadius = 1.5;
         static constexpr int kKnnMaxNeighbors = 5;
         // clusters below min size are discarded, clusters above max size will not be merged
