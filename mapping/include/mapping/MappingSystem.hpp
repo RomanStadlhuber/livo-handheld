@@ -20,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <chrono>
 
 namespace mapping
 {
@@ -123,7 +124,8 @@ namespace mapping
         void undistortScans();
         /// @brief Track the current keyframe submap against persistent "same plane point" clusters
         /// @param idxKeyframe Index of the current keyframe
-        void trackScanPointsToClusters(const uint32_t &idxKeyframe);
+        /// @return True if the keyframe was tracked successfully
+        bool trackScanPointsToClusters(const uint32_t &idxKeyframe);
         /// @brief Remove all tracks associated with a keyframe and sanitize the clusters pointing to them.
         /// @param idxKeyframe Index of the keyframe to remove tracks for.
         void removeTracksFromClusters(const u_int32_t &idxKeyframe);
@@ -206,6 +208,7 @@ namespace mapping
         /// @brief Factors associated with valid clusters tracks including their index in the smoothers factor graph
         ClusterFactors clusterFactors_;
         gtsam::FactorIndices factorsToRemove_;
+        size_t scansSinceLastKeyframe_ = 0;
 
         // Keyframe data
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
@@ -229,11 +232,12 @@ namespace mapping
         // Configuration constants
         static constexpr int kSlidingWindowSize = 7;
         static constexpr double kInitTimeWindow = 2.0;
-        static constexpr double kVoxelSize = 0.5;
-        static constexpr double kThreshNewKeyframeDist = 0.5;
+        static constexpr double kVoxelSize = 2.0;
+        static constexpr double kThreshNewKeyframeDist = 0.075, kThreshNewKeyframeAngle = 0.087; // ~ 5 [°]
+        static constexpr size_t kThreshNewKeyframeElapsedScans = 15;                             // number of scans to force new keyframe
         static constexpr double kMinPointDist = 2.5;
         static constexpr double kMaxPointDist = 60.0;
-        static constexpr double kKnnRadius = 0.5;
+        static constexpr double kKnnRadius = 1.5;
         static constexpr int kKnnMaxNeighbors = 5;
         // clusters below min size are discarded, clusters above max size will not be merged
         static constexpr size_t kMinClusterSize = 5, kMaxClusterSize = 20;

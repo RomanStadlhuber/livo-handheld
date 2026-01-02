@@ -305,7 +305,7 @@ namespace mapping
         lockLidarBuffer.unlock();
     }
 
-    void MappingSystem::trackScanPointsToClusters(const uint32_t &idxKeyframe)
+    bool MappingSystem::trackScanPointsToClusters(const uint32_t &idxKeyframe)
     {
         clusters_.clear();
 
@@ -316,6 +316,9 @@ namespace mapping
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps_[idxKeyframe];
         std::vector<int> knnIndices(kKnnMaxNeighbors);
         std::vector<double> knnDists(kKnnMaxNeighbors);
+
+        // TODO: remove stopwatch after slowdown was diagnosed
+        auto stopwatchKNNStart = std::chrono::high_resolution_clock::now();
         // Find nearest neighbors between the new submap and all other keyframe submaps
         for (auto itOtherSubmap = keyframeSubmaps_.begin(); itOtherSubmap != keyframeSubmaps_.end(); ++itOtherSubmap)
         {
@@ -388,6 +391,13 @@ namespace mapping
                 }
             }
         }
+        auto stopwatchKNNEnd = std::chrono::high_resolution_clock::now();
+        auto durationKNN = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchKNNEnd - stopwatchKNNStart).count();
+        std::cout << "::: [DEBUG] KNN search and cluster association took " << durationKNN << " ms :::" << std::endl;
+
+        // TODO: remove stopwatch after slowdown was diagnosed
+        auto stopwatchClusteringStart = std::chrono::high_resolution_clock::now();
+        bool keyframeHasTracks = false; // indicates whether the current keyframe is still being tracked
         // Rebuild clusters from tracks (cluster IDs have already been merged in clusterTracks_ above)
         for (auto itTrack = clusterTracks_.begin(); itTrack != clusterTracks_.end(); ++itTrack)
         {
@@ -400,7 +410,16 @@ namespace mapping
             }
             else
                 clusters_[clusterId].push_back(itTrack);
+            if (idxPoint.first == idxKeyframe)
+                keyframeHasTracks = true;
         }
+        if (!keyframeHasTracks)
+        {
+            std::cout << "::: [ERROR] lost tracking at keyframe " << idxKeyframe << " :::" << std::endl;
+            return keyframeHasTracks;
+        }
+        // reset because we might remove current tracks as outliers
+        keyframeHasTracks = false;
 
         // Remove clusters that are too small
         for (auto itCluster = clusters_.begin(); itCluster != clusters_.end();)
@@ -480,6 +499,22 @@ namespace mapping
                 ++itCluster;
             }
         }
+
+        auto stopwatchClusteringEnd = std::chrono::high_resolution_clock::now();
+        auto durationClustering = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchClusteringEnd - stopwatchClusteringStart).count();
+        std::cout << "::: [DEBUG] clustering and outlier rejection took " << durationClustering << " ms :::" << std::endl;
+
+        // check if there are still tracks for the current keyframe after outlier rejection
+        for (const auto &[idxTrack, _] : clusterTracks_)
+        {
+            if (idxTrack.first == idxKeyframe)
+            {
+                keyframeHasTracks = true;
+                break;
+            }
+        }
+
+        return keyframeHasTracks; // is true at this point
     }
 
     Clusters::iterator MappingSystem::eraseClusterAndTracks(Clusters::iterator &itCluster)
@@ -595,13 +630,24 @@ namespace mapping
     void MappingSystem::track()
     {
         const gtsam::NavState w_X_propagated = preintegrateIMU();
-        const double positionDiff = (w_X_propagated.pose().translation() - lastKeyframePose().translation()).norm();
+        const double
+            positionDiff = (w_X_propagated.pose().translation() - lastKeyframePose().translation()).norm(),
+            angleDiff = (lastKeyframePose().rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
         w_X_curr_ = w_X_propagated;
         // undistort all scans and move them to the scanBuffer
         undistortScans();
-        if (positionDiff < kThreshNewKeyframeDist)
+        // check if a new keyframe is needed
+        if (
+            positionDiff < kThreshNewKeyframeDist                       // translation threshold
+            && angleDiff < kThreshNewKeyframeAngle                      // angle threshold
+            && scansSinceLastKeyframe_ < kThreshNewKeyframeElapsedScans // number of elapsed scans since last keyframe
+        )
             return;
         std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
+        std::cout << "::: [DEBUG] position diff: " << positionDiff
+                  << " (thresh " << kThreshNewKeyframeDist << "), angle diff: " << angleDiff
+                  << " (thresh " << kThreshNewKeyframeAngle << "), scans elapsed: " << scansSinceLastKeyframe_
+                  << " (thresh " << kThreshNewKeyframeElapsedScans << ") :::" << std::endl;
         // Create new keyframe
         // Merge buffered scans together & create new keyframe submap
         open3d::geometry::PointCloud newSubmap;
@@ -618,7 +664,13 @@ namespace mapping
         visualizer.waitForSpacebar();
 #endif
 
-        trackScanPointsToClusters(idxKeyframe);
+        const bool isTracking = trackScanPointsToClusters(idxKeyframe);
+        if (!isTracking)
+        {
+            std::cout << "::: [ERROR] lost tracking at keyframe " << idxKeyframe << " :::" << std::endl;
+            systemState_ = SystemState::Recovery;
+            return;
+        }
 
         if (clusters_.size() == 0)
         {
@@ -629,6 +681,8 @@ namespace mapping
 
         std::cout << "::: [DEBUG] outlier rejection completed (keeping " << clusters_.size()
                   << " clusters), proceeding to formulate tracking constraints :::" << std::endl;
+
+        summarizeClusters();
 
         createAndUpdateFactors();
 
@@ -681,6 +735,7 @@ namespace mapping
                     keyframeTimestamps_.erase(idxMargiznalizedKeyframe);
 #ifndef DISABLEVIZ
                     visualizer.removeSubmap(idxMargiznalizedKeyframe);
+                    std::cout << "::: [INFO] marginalized keyframe " << idxMargiznalizedKeyframe << " :::" << std::endl;
                     visualizer.waitForSpacebar();
 #endif
                 }
@@ -694,9 +749,11 @@ namespace mapping
             updateKeyframeSubmapPose(idxKf, updatedPose);
 #ifndef DISABLEVIZ
             visualizer.updateSubmap(idxKf, updatedPose.matrix());
-            visualizer.waitForSpacebar();
 #endif
         }
+#ifndef DISABLEVIZ
+        visualizer.waitForSpacebar();
+#endif
     }
 
     void MappingSystem::resetNewFactors()
@@ -727,10 +784,10 @@ namespace mapping
 
         // Initialize a KD-Tree for point cluster search
         submapKDTrees_[idxNewKf] = std::make_shared<open3d::geometry::KDTreeFlann>(*ptrKeyframeSubmap);
-
         // Clear scan buffer
         scanBuffer_.clear();
-
+        // reset scan counter
+        scansSinceLastKeyframe_ = 0;
         return idxNewKf;
     }
 
@@ -751,6 +808,7 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> pcdScan)
     {
         scanBuffer_.push_back(ScanBuffer{pcdScan, std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe)});
+        scansSinceLastKeyframe_++;
     }
 
     void MappingSystem::summarizeClusters() const
