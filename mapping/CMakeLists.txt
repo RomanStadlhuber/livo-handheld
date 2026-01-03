@@ -19,6 +19,8 @@ find_package(GTSAM REQUIRED)
 find_package(GTSAM_UNSTABLE REQUIRED)
 list(APPEND CMAKE_PREFIX_PATH "/install/open3d-devel/lib/cmake")
 find_package(Open3D REQUIRED)
+# list(APPEND CMAKE_PREFIX_PATH "/usr/local/lib/cmake/config_utilities")
+find_package(config_utilities REQUIRED)
 
 # remove this when done with debugging
 message(WARNING "Building in Debug mode")
@@ -45,7 +47,11 @@ add_library(mapping
 target_include_directories(mapping PUBLIC include)
 
 target_link_libraries(mapping
-  Eigen3::Eigen Open3D::Open3D gtsam gtsam_unstable
+  Eigen3::Eigen 
+  Open3D::Open3D 
+  gtsam 
+  gtsam_unstable 
+  config_utilities::config_utilities
 )
 
 add_executable(mapper src/mapper_node.cpp)

@@ -37,18 +37,22 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
 ### NOTE: build will performed for both when livox driver is loaded as well!
 ### ./build.sh invokes colcon build again!
 ## colcon build --event-handlers=console_direct+
-### Install Livox SDK & ROS driver
+### Install Livox SDK & ROS driver + config_utilities
 WORKDIR /install
-RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git
+RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git && \
+    git clone https://github.com/MIT-SPARK/config_utilities.git
+# build & install livox SDK
 RUN cd /install/Livox-SDK2 && mkdir build && cd build && \
     cmake .. && make -j 8 && make install
+# build & install config_utilities
+RUN cd /install/config_utilities/config_utilities && mkdir build && \
+    cd build && cmake .. && make -j 8 && make install
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
 RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl*
 RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
     cd /ros2_ws/src/livox_ros_driver2 && ./build.sh humble
-
 # change to ROS2 workspace source
 FROM base AS development
 WORKDIR /ros2_ws/src
