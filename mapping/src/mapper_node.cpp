@@ -9,6 +9,11 @@
 // Mapping
 #include <mapping/MappingSystem.hpp>
 
+// configuration form config_utilities
+#include <config_utilities/parsing/yaml.h>
+#include <config_utilities/printing.h>
+#include <config_utilities/validation.h>
+
 #include <atomic>
 #include <csignal>
 #include <iostream>
@@ -27,7 +32,9 @@ void signalHandler(int signum)
 class MapperNode : public rclcpp::Node
 {
 public:
-    MapperNode() : Node("mapper_node")
+    explicit MapperNode(const mapping::MappingConfig &config)
+        : Node("mapper_node"),
+          slam_(config)
     {
         RCLCPP_INFO(this->get_logger(), "MapperNode has been initialized.");
 
@@ -103,9 +110,9 @@ private:
 };
 
 // Standalone bag reader for debugging
-void runFromBag(const std::string &bag_path)
+void runFromBag(const std::string &bag_path, const mapping::MappingConfig &config)
 {
-    mapping::MappingSystem slam;
+    mapping::MappingSystem slam(config);
 
     // Setup bag reader
     rosbag2_cpp::Reader reader;
@@ -195,6 +202,16 @@ void runFromBag(const std::string &bag_path)
     std::cout << "Finished processing bag file." << std::endl;
 }
 
+mapping::MappingConfig loadConfig(const std::string &config_path)
+{
+    std::cout << "Loading config from: " << config_path << std::endl;
+    mapping::MappingConfig config = config::fromYamlFile<mapping::MappingConfig>(config_path);
+    config::checkValid(config);
+    std::cout << "Loaded config:\n"
+              << config::toString(config) << std::endl;
+    return config;
+}
+
 int main(int argc, char **argv)
 {
     // Register signal handler for CTRL+C
@@ -202,16 +219,45 @@ int main(int argc, char **argv)
 
     rclcpp::init(argc, argv);
 
+    // Parse arguments for config file
+    std::string config_path;
+    std::string bag_path;
+    bool use_bag = false;
+
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "--config" && i + 1 < argc)
+        {
+            config_path = argv[++i];
+        }
+        else if (arg == "--bag" && i + 1 < argc)
+        {
+            bag_path = argv[++i];
+            use_bag = true;
+        }
+    }
+
+    if (config_path.empty())
+    {
+        std::cerr << "Error: --config <path> is required" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " --config <config.yaml> [--bag <bag_path>]" << std::endl;
+        return 1;
+    }
+
+    // Load configuration
+    mapping::MappingConfig config = loadConfig(config_path);
+
     // Check if running in standalone bag mode
-    if (argc >= 3 && std::string(argv[1]) == "--bag")
+    if (use_bag)
     {
         std::cout << "Running in standalone bag reader mode" << std::endl;
-        runFromBag(argv[2]);
+        runFromBag(bag_path, config);
     }
     else
     {
         std::cout << "Running as ROS 2 node" << std::endl;
-        rclcpp::spin(std::make_shared<MapperNode>());
+        rclcpp::spin(std::make_shared<MapperNode>(config));
     }
 
     rclcpp::shutdown();

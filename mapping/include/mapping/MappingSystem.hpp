@@ -15,6 +15,7 @@
 
 #include <Visualization.hpp>
 #include <mapping/factors/PointToPlaneFactor.hpp>
+#include <mapping/Config.hpp>
 
 #include <list>
 #include <map>
@@ -89,7 +90,7 @@ namespace mapping
     class MappingSystem
     {
     public:
-        MappingSystem();
+        explicit MappingSystem(const MappingConfig &config);
         ~MappingSystem() = default;
 
         /// @brief Feed an IMU measurement to the system
@@ -222,28 +223,15 @@ namespace mapping
         Visualization visualizer;
 #endif
 
-        // Calibration
-        /// @brief Extrinsics from IMU to LiDAR frame
-        /// @details See Mid360 User Manual, p. 15, Paragraph "IMU Data"
-        const gtsam::Pose3 imu_T_lidar_;
-        double lidarTimeOffset_;
-
         // Point cluster tracking
         ClusterId clusterIdCounter_;
 
-        // Configuration constants
-        static constexpr int kSlidingWindowSize = 7;
-        static constexpr double kInitTimeWindow = 2.0;
-        static constexpr double kVoxelSize = 2.0;
-        static constexpr double kThreshNewKeyframeDist = 0.075, kThreshNewKeyframeAngle = 0.087; // ~ 5 [°]
-        static constexpr size_t kThreshNewKeyframeElapsedScans = 5;                              // number of scans to force new keyframe
-        static constexpr double kMinPointDist = 2.5;
-        static constexpr double kMaxPointDist = 100.0;
-        static constexpr double kKnnRadius = 1.5;
-        static constexpr int kKnnMaxNeighbors = 5;
-        // clusters below min size are discarded, clusters above max size will not be merged
-        static constexpr size_t kMinClusterSize = 5, kMaxClusterSize = 20;
-        static constexpr double kThreshPlaneValid = 0.1;
+        // Configuration
+        const MappingConfig config_;
+
+        // Derived from config (cached for convenience)
+        const gtsam::Pose3 imu_T_lidar_;
+        double lidarTimeOffset_;
     };
 
 } // namespace mapping

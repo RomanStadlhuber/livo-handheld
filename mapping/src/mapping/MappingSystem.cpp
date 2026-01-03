@@ -34,19 +34,20 @@ namespace mapping
         return pcd;
     }
 
-    MappingSystem::MappingSystem()
+    MappingSystem::MappingSystem(const MappingConfig &config)
         : systemState_(SystemState::Initializing),
           keyframeCounter_(0),
           tLastImu_(0.0),
-          imu_T_lidar_(gtsam::Rot3::Identity(), gtsam::Point3(-0.011, -0.02329, 0.04412)),
-          lidarTimeOffset_(0.0),
-          clusterIdCounter_(0)
+          clusterIdCounter_(0),
+          config_(config),
+          imu_T_lidar_(config.extrinsics.imu_T_lidar.toPose3()),
+          lidarTimeOffset_(0.0)
     {
         // TODO: use iSAM2 (IncrementalFixedLagSmoother) over BatchFixedLagSmoother for efficiency
         gtsam::LevenbergMarquardtParams optimizerParams;
         optimizerParams.verbosity = gtsam::NonlinearOptimizerParams::Verbosity::VALUES;
         optimizerParams.verbosityLM = gtsam::LevenbergMarquardtParams::VerbosityLM::SUMMARY;
-        smoother_ = gtsam::BatchFixedLagSmoother(static_cast<double>(kSlidingWindowSize), optimizerParams);
+        smoother_ = gtsam::BatchFixedLagSmoother(static_cast<double>(config_.backend.sliding_window_size), optimizerParams);
         // Initialize IMU preintegration parameters
         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
         // noise values from:
@@ -83,7 +84,7 @@ namespace mapping
         case SystemState::Initializing:
         {
             const double maxBufferTime = lidarBuffer_.rbegin()->first;
-            if (maxBufferTime >= kInitTimeWindow)
+            if (maxBufferTime >= config_.backend.init_time_window)
             {
                 initializeSystem();
                 std::cout << "Initialization complete. Switching to tracking state." << std::endl;
@@ -149,12 +150,12 @@ namespace mapping
         gtsam::Pose3 w_T_l0{w_T_i0.compose(imu_T_lidar_)};
         for (auto it = lidarBuffer_.begin(); it != lidarBufferEndIt; ++it)
         {
-            open3d::geometry::PointCloud pcdScan = Scan2PCD(it->second, kMinPointDist, kMaxPointDist);
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(kVoxelSize);
+            open3d::geometry::PointCloud pcdScan = Scan2PCD(it->second, config_.point_filter.min_distance, config_.point_filter.max_distance);
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(config_.lidar_frontend.voxel_size);
             ptrPcdScan->Transform(w_T_l0.matrix());
             newSubmap += *ptrPcdScan;
         }
-        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(kVoxelSize);
+        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
         // Clear lidar buffer
         lidarBuffer_.clear();
@@ -296,8 +297,8 @@ namespace mapping
             std::cout << "::: [DEBUG] undistorted LiDAR scan with " << scan->points.size() << " points :::" << std::endl;
 
             // Convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
-            open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, kMinPointDist, kMaxPointDist);
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(kVoxelSize);
+            open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, config_.point_filter.min_distance, config_.point_filter.max_distance);
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(config_.lidar_frontend.voxel_size);
             gtsam::Pose3 scanPoseInWorld = lastKeyframePose().compose(kf_T_scan);
             // ptrPcdScanVoxelized->Transform(scanPoseInWorld.matrix());
 
@@ -322,8 +323,8 @@ namespace mapping
 
         // Search for same-plane point clusters among all keyframes
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps_[idxKeyframe];
-        std::vector<int> knnIndices(kKnnMaxNeighbors);
-        std::vector<double> knnDists(kKnnMaxNeighbors);
+        std::vector<int> knnIndices(config_.lidar_frontend.knn_neighbors);
+        std::vector<double> knnDists(config_.lidar_frontend.knn_neighbors);
 
         // TODO: remove stopwatch after slowdown was diagnosed
         auto stopwatchKNNStart = std::chrono::high_resolution_clock::now();
@@ -341,7 +342,7 @@ namespace mapping
                 knnIndices.clear();
                 knnDists.clear();
                 const int knnFound = submapKDTrees_[idxOtherSubmap]->SearchHybrid(
-                    pcdQuery->points_[idxPt], kKnnRadius, kKnnMaxNeighbors, knnIndices, knnDists);
+                    pcdQuery->points_[idxPt], config_.lidar_frontend.knn_radius, config_.lidar_frontend.knn_neighbors, knnIndices, knnDists);
 
                 if (knnFound > 4)
                 {
@@ -362,7 +363,7 @@ namespace mapping
                         {
                             if (clusterId == INVALID_CLUSTER_ID) // no cluster has been assigned to this point yet -> pick the first other
                             {                                    // merge with existing cluster from other point if that cluster is not already full
-                                if (clusters_.size() == 0 || clusters_[clusterTracks_[idxOther]].size() < kMaxClusterSize)
+                                if (clusters_.size() == 0 || clusters_[clusterTracks_[idxOther]].size() < config_.lidar_frontend.clustering.max_points)
                                 {
                                     clusterId = clusterTracks_[idxOther];
                                     // a temp cluster MIGHT have been assigned to one of the previous NN points, need to record it for merging
@@ -375,7 +376,7 @@ namespace mapping
                                 }
                             }
                             // the other point has been assigned to cluster already -> record for merging
-                            else if (clusters_.size() == 0 || clusters_[clusterTracks_[idxOther]].size() < kMaxClusterSize)
+                            else if (clusters_.size() == 0 || clusters_[clusterTracks_[idxOther]].size() < config_.lidar_frontend.clustering.max_points)
                             {
                                 duplicateTracks.push_back(clusterTracks_[idxOther]);
                             }
@@ -413,7 +414,7 @@ namespace mapping
             if (clusters_.find(clusterId) == clusters_.end())
             {
                 clusters_[clusterId] = std::vector<ClusterTracks::iterator>();
-                clusters_[clusterId].reserve(kKnnMaxNeighbors);
+                clusters_[clusterId].reserve(config_.lidar_frontend.knn_neighbors);
                 clusters_[clusterId].push_back(itTrack);
             }
             else
@@ -433,7 +434,7 @@ namespace mapping
         for (auto itCluster = clusters_.begin(); itCluster != clusters_.end();)
         {
             auto const &[clusterId, clusterPoints] = *itCluster;
-            if (clusterPoints.size() < kMinClusterSize || clusterPoints.size() > kMaxClusterSize * 2)
+            if (clusterPoints.size() < config_.lidar_frontend.clustering.min_points || clusterPoints.size() > config_.lidar_frontend.clustering.max_points * 2)
                 itCluster = eraseClusterAndTracks(itCluster);
             else
                 ++itCluster;
@@ -482,7 +483,7 @@ namespace mapping
             for (size_t idxPt = 0; idxPt < numHistoricPoints; idxPt++)
             {
                 const double pointToPlaneDist = std::abs(planeNormal.dot(A.row(idxPt)));
-                if (pointToPlaneDist > kThreshPlaneValid)
+                if (pointToPlaneDist > config_.lidar_frontend.clustering.max_plane_thickness)
                 {
                     isPlaneValid = false;
                     break;
@@ -568,7 +569,7 @@ namespace mapping
                 trackIters.end());
 
             // Remove cluster if too small
-            if (trackIters.size() < kMinClusterSize)
+            if (trackIters.size() < config_.lidar_frontend.clustering.min_points)
                 itCluster = eraseClusterAndTracks(itCluster);
             else
                 ++itCluster;
@@ -646,16 +647,16 @@ namespace mapping
         undistortScans();
         // check if a new keyframe is needed
         if (
-            positionDiff < kThreshNewKeyframeDist                       // translation threshold
-            && angleDiff < kThreshNewKeyframeAngle                      // angle threshold
-            && scansSinceLastKeyframe_ < kThreshNewKeyframeElapsedScans // number of elapsed scans since last keyframe
+            positionDiff < config_.lidar_frontend.keyframe.thresh_distance                       // translation threshold
+            && angleDiff < config_.lidar_frontend.keyframe.thresh_angle                          // angle threshold
+            && scansSinceLastKeyframe_ < config_.lidar_frontend.keyframe.thresh_elapsed_scans    // number of elapsed scans since last keyframe
         )
             return;
         std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
         std::cout << "::: [DEBUG] position diff: " << positionDiff
-                  << " (thresh " << kThreshNewKeyframeDist << "), angle diff: " << angleDiff
-                  << " (thresh " << kThreshNewKeyframeAngle << "), scans elapsed: " << scansSinceLastKeyframe_
-                  << " (thresh " << kThreshNewKeyframeElapsedScans << ") :::" << std::endl;
+                  << " (thresh " << config_.lidar_frontend.keyframe.thresh_distance << "), angle diff: " << angleDiff
+                  << " (thresh " << config_.lidar_frontend.keyframe.thresh_angle << "), scans elapsed: " << scansSinceLastKeyframe_
+                  << " (thresh " << config_.lidar_frontend.keyframe.thresh_elapsed_scans << ") :::" << std::endl;
         // Create new keyframe
         // Merge buffered scans together & create new keyframe submap
         open3d::geometry::PointCloud newSubmap;
@@ -680,7 +681,7 @@ namespace mapping
             scan.pcd->Transform(newKf_T_scan.matrix());
             newSubmap += *(scan.pcd);
         }
-        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(kVoxelSize);
+        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const uint32_t idxKeyframe = createKeyframeSubmap(w_X_curr_.pose().compose(imu_T_lidar_), tLastImu_, ptrNewSubmapVoxelized);
 #ifndef DISABLEVIZ
         visualizer.addSubmap(idxKeyframe, w_X_curr_.pose().matrix(), ptrNewSubmapVoxelized);
@@ -743,10 +744,10 @@ namespace mapping
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
 
-        if (idxKeyframe > kSlidingWindowSize)
+        if (idxKeyframe > static_cast<uint32_t>(config_.backend.sliding_window_size))
         {
             uint32_t idxLowerBound = keyframeSubmaps_.begin()->first;
-            uint32_t idxUpperbound = idxKeyframe - kSlidingWindowSize;
+            uint32_t idxUpperbound = idxKeyframe - static_cast<uint32_t>(config_.backend.sliding_window_size);
 
             std::cout << "::: [DEBUG] marginalizing " << (idxUpperbound - idxLowerBound) << " keyframes :::" << std::endl;
             for (uint32_t idxMargiznalizedKeyframe = idxLowerBound; idxMargiznalizedKeyframe < idxUpperbound; ++idxMargiznalizedKeyframe)

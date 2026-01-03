@@ -1,4 +1,4 @@
-backend: 
+backend:
   sliding_window_size: 7 # [keyframes]
   init_time_window: 2.0 # [sec.]
 
@@ -7,11 +7,14 @@ lidar_frontend:
   undistort: true # disable for solid state LiDARs
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
-  # for building & validating clusters
   clustering:
     min_points: 5
     max_points: 20
     max_plane_thickness: 0.1 # [m]
+  keyframe:
+    thresh_distance: 0.075 # [m]
+    thresh_angle: 0.087 # [rad], ~5 degrees
+    thresh_elapsed_scans: 5
 
 point_filter:
   min_distance: 2.5 # [m]
@@ -21,4 +24,4 @@ extrinsics:
   temporal_calibration_enabled: false
   imu_T_lidar:
     translation: [-0.011, -0.02329, 0.04412] # [m]
-    rotation: [0, 0, 0, 1] # hamilton-quaternion
+    rotation: [0, 0, 0, 1] # hamilton quaternion (x, y, z, w)
