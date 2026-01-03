@@ -299,7 +299,7 @@ namespace mapping
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, kMinPointDist, kMaxPointDist);
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(kVoxelSize);
             gtsam::Pose3 scanPoseInWorld = lastKeyframePose().compose(kf_T_scan);
-            ptrPcdScanVoxelized->Transform(scanPoseInWorld.matrix());
+            // ptrPcdScanVoxelized->Transform(scanPoseInWorld.matrix());
 
             // Buffer undistorted scan
             bufferScan(kf_T_scan, ptrPcdScanVoxelized);
@@ -659,10 +659,25 @@ namespace mapping
         // Create new keyframe
         // Merge buffered scans together & create new keyframe submap
         open3d::geometry::PointCloud newSubmap;
-        for (const ScanBuffer &scan : scanBuffer_)
+        /**
+         * NOTE: the scan buffer contains the undistorted scan pointclouds in their own scan origin frame,
+         * along with the pose that the scan has w.r.t. the last keyframe.
+         * In order to build the new submap at the new keyframe origin, all buffered scans need to be transformed
+         * by their pose w.r.t. the new keyframe first.
+         *
+         * This means inverting the pose of the last scan to the last keyframe, then composing it with each scan's
+         * pose to the last keyframe to get the pose of each scan w.r.t. the new keyframe.
+         *
+         * It is important that the scans in the buffer are not transformed before this.
+         */
+        const gtsam::Pose3 newKf_T_lastKf = scanBuffer_.rbegin()->kf_T_scan->inverse();
+        for (auto reverseIt = scanBuffer_.rbegin(); reverseIt != scanBuffer_.rend(); ++reverseIt)
         {
-            // Move all scans to same origin
-            scan.pcd->Transform(scan.kf_T_scan->matrix());
+            const ScanBuffer &scan = *reverseIt;
+            // pose of the scan w.r.t. the new keyframe
+            const gtsam::Pose3 newKf_T_scan = newKf_T_lastKf.compose(*(scan.kf_T_scan));
+            // move undistorted pcd to the origin of the new keyframe
+            scan.pcd->Transform(newKf_T_scan.matrix());
             newSubmap += *(scan.pcd);
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(kVoxelSize);

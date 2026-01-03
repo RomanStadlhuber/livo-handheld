@@ -158,7 +158,9 @@ namespace mapping
         /// @param newWorldPose New pose in world frame
         void updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &newWorldPose);
 
-        /// @brief Add a new (undistorted) scan pointcloud to the scan buffer
+        /// @brief Add a new (undistorted) scan pointcloud to the scan buffer (but don't apply pose transformation)
+        /// @details The scan pointcloud is expected to be undistorted already, but all points lie in the scan frame.
+        /// Use the scan buffer entries pose data to transform the scan to the desired frame.
         /// @param scanPoseToLastKeyframe Pose of the scan relative to last keyframe
         /// @param pcdScan Voxelized pointcloud of the scan
         void bufferScan(
@@ -234,7 +236,7 @@ namespace mapping
         static constexpr double kInitTimeWindow = 2.0;
         static constexpr double kVoxelSize = 2.0;
         static constexpr double kThreshNewKeyframeDist = 0.075, kThreshNewKeyframeAngle = 0.087; // ~ 5 [°]
-        static constexpr size_t kThreshNewKeyframeElapsedScans = 3;                              // number of scans to force new keyframe
+        static constexpr size_t kThreshNewKeyframeElapsedScans = 5;                              // number of scans to force new keyframe
         static constexpr double kMinPointDist = 2.5;
         static constexpr double kMaxPointDist = 100.0;
         static constexpr double kKnnRadius = 1.5;
