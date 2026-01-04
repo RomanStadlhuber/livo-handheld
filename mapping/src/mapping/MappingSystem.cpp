@@ -34,6 +34,11 @@ namespace mapping
         return pcd;
     }
 
+    MappingSystem::MappingSystem()
+        : MappingSystem(MappingConfig())
+    {
+    }
+
     MappingSystem::MappingSystem(const MappingConfig &config)
         : systemState_(SystemState::Initializing),
           keyframeCounter_(0),
@@ -62,6 +67,12 @@ namespace mapping
         const gtsam::Vector6 commonBias{gtsam::Vector6::Ones() * 0.0001};
         gtsam::imuBias::ConstantBias priorImuBias{commonBias};
         preintegrator_ = gtsam::PreintegratedCombinedMeasurements(params, priorImuBias);
+    }
+
+    void MappingSystem::setConfig(const MappingConfig &config)
+    {
+        config_ = config;
+        imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
     }
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
@@ -647,9 +658,9 @@ namespace mapping
         undistortScans();
         // check if a new keyframe is needed
         if (
-            positionDiff < config_.lidar_frontend.keyframe.thresh_distance                       // translation threshold
-            && angleDiff < config_.lidar_frontend.keyframe.thresh_angle                          // angle threshold
-            && scansSinceLastKeyframe_ < config_.lidar_frontend.keyframe.thresh_elapsed_scans    // number of elapsed scans since last keyframe
+            positionDiff < config_.lidar_frontend.keyframe.thresh_distance                    // translation threshold
+            && angleDiff < config_.lidar_frontend.keyframe.thresh_angle                       // angle threshold
+            && scansSinceLastKeyframe_ < config_.lidar_frontend.keyframe.thresh_elapsed_scans // number of elapsed scans since last keyframe
         )
             return;
         std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
@@ -846,6 +857,25 @@ namespace mapping
             std::cout << "\tCluster " << clusterId << ": " << clusterPoints.size() << " points" << std::endl;
             // << "thickness " << clusterPlaneThickness_.at(clusterId) << std::endl;
         }
+    }
+
+    SlidingWindowStates MappingSystem::getStates() const
+    {
+        SlidingWindowStates states;
+        for (auto const &[idxKf, _] : keyframeSubmaps_)
+        {
+            try
+            {
+                const gtsam::Pose3 kfPose = smoother_.calculateEstimate<gtsam::Pose3>(X(idxKf));
+                const gtsam::Vector3 kfVel = smoother_.calculateEstimate<gtsam::Vector3>(V(idxKf));
+                states[idxKf] = NavStateStamped{gtsam::NavState{kfPose, kfVel}, keyframeTimestamps_.at(idxKf)};
+            }
+            catch (const std::out_of_range &e)
+            {
+                std::cerr << "::: [WARNING] could not retrieve state for keyframe " << idxKf << " :::" << std::endl;
+            }
+        }
+        return states;
     }
 
 } // namespace mapping

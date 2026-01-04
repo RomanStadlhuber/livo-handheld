@@ -9,6 +9,11 @@
 // Mapping
 #include <mapping/MappingSystem.hpp>
 
+// publishing the state
+#include <tf2_ros/transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <nav_msgs/msg/path.hpp>
+
 // configuration form config_utilities
 #include <config_utilities/parsing/yaml.h>
 #include <config_utilities/printing.h>
@@ -29,31 +34,54 @@ void signalHandler(int signum)
     g_shutdown_requested = true;
 }
 
+mapping::MappingConfig loadConfig(const std::string &config_path)
+{
+    std::cout << "Loading config from: " << config_path << std::endl;
+    mapping::MappingConfig config = config::fromYamlFile<mapping::MappingConfig>(config_path);
+    config::checkValid(config);
+    std::cout << "Loaded config:\n"
+              << config::toString(config) << std::endl;
+    return config;
+}
+
 class MapperNode : public rclcpp::Node
 {
 public:
-    explicit MapperNode(const mapping::MappingConfig &config)
+    explicit MapperNode()
         : Node("mapper_node"),
-          slam_(config)
+          slam_()
     {
+
         RCLCPP_INFO(this->get_logger(), "MapperNode has been initialized.");
 
-        imu_subscription_ = this->create_subscription<sensor_msgs::msg::Imu>(
+        this->declare_parameter<std::string>("mapper_config", "");
+        std::string configPath = this->get_parameter("mapper_config").as_string();
+        RCLCPP_INFO(this->get_logger(), "Using mapper config file: %s",
+                    configPath.c_str());
+        mapping::MappingConfig config = loadConfig(configPath);
+        slam_.setConfig(config);
+
+        subImu_ = this->create_subscription<sensor_msgs::msg::Imu>(
             "/livox/imu", 10, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1));
 
-        lidar_subscription_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
+        subLidar_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
             "livox/lidar", 10, std::bind(&MapperNode::lidarCallback, this, std::placeholders::_1));
+
+        pubSlidingWindowPath_ = this->create_publisher<nav_msgs::msg::Path>(
+            "mapping/window_path", 10);
+
+        tfBroadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
 
 private:
     void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
     {
-        if (!has_start_time_)
+        if (!hasStartTime_)
         {
-            start_time_ = rclcpp::Time(msg->header.stamp);
-            has_start_time_ = true;
+            startTime_ = rclcpp::Time(msg->header.stamp);
+            hasStartTime_ = true;
         }
-        double timestamp = (rclcpp::Time(msg->header.stamp) - start_time_).seconds();
+        double timestamp = (rclcpp::Time(msg->header.stamp) - startTime_).seconds();
 
         // Build imu data container from msg
         auto imu_data = std::make_shared<mapping::ImuData>();
@@ -71,12 +99,12 @@ private:
 
     void lidarCallback(const livox_ros_driver2::msg::CustomMsg::SharedPtr msg)
     {
-        if (!has_start_time_)
+        if (!hasStartTime_)
         {
-            start_time_ = rclcpp::Time(msg->header.stamp);
-            has_start_time_ = true;
+            startTime_ = rclcpp::Time(msg->header.stamp);
+            hasStartTime_ = true;
         }
-        double timestamp = (rclcpp::Time(msg->header.stamp) - start_time_).seconds();
+        double timestamp = (rclcpp::Time(msg->header.stamp) - startTime_).seconds();
 
         // Build lidar data container from msg
         auto lidar_data = std::make_shared<mapping::LidarData>();
@@ -97,13 +125,68 @@ private:
         }
         slam_.feedLidar(lidar_data, timestamp);
         slam_.update();
+        publishStates();
     }
 
 private:
-    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
-    rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr lidar_subscription_;
-    rclcpp::Time start_time_;
-    bool has_start_time_ = false;
+    void publishStates()
+    {
+        auto states = slam_.getStates();
+        if (states.empty())
+            return;
+
+        mapping::NavStateStamped latestState = states.rbegin()->second;
+        geometry_msgs::msg::TransformStamped tfStampedMsg;
+        tfStampedMsg.header.stamp = this->now();
+        tfStampedMsg.header.frame_id = "map";
+        tfStampedMsg.child_frame_id = "base_link";
+
+        const gtsam::Pose3 &pose = latestState.state.pose();
+        tfStampedMsg.transform.translation.x = pose.translation().x();
+        tfStampedMsg.transform.translation.y = pose.translation().y();
+        tfStampedMsg.transform.translation.z = pose.translation().z();
+
+        const gtsam::Rot3 &rot = pose.rotation();
+        gtsam::Quaternion q = rot.toQuaternion();
+        tfStampedMsg.transform.rotation.x = q.x();
+        tfStampedMsg.transform.rotation.y = q.y();
+        tfStampedMsg.transform.rotation.z = q.z();
+        tfStampedMsg.transform.rotation.w = q.w();
+        tfBroadcaster_->sendTransform(tfStampedMsg);
+
+        nav_msgs::msg::Path pathMsg;
+        pathMsg.header.stamp = this->now();
+        pathMsg.header.frame_id = "map";
+        for (const auto &[_, navStateStamped] : states)
+        {
+            geometry_msgs::msg::PoseStamped poseStampedMsg;
+            const rclcpp::Time poseStamp{startTime_ + rclcpp::Duration::from_seconds(navStateStamped.timestamp)};
+            poseStampedMsg.header.stamp = poseStamp;
+            poseStampedMsg.header.frame_id = "map";
+
+            const gtsam::Pose3 &pose = navStateStamped.state.pose();
+            poseStampedMsg.pose.position.x = pose.translation().x();
+            poseStampedMsg.pose.position.y = pose.translation().y();
+            poseStampedMsg.pose.position.z = pose.translation().z();
+
+            const gtsam::Rot3 &rot = pose.rotation();
+            gtsam::Quaternion q = rot.toQuaternion();
+            poseStampedMsg.pose.orientation.x = q.x();
+            poseStampedMsg.pose.orientation.y = q.y();
+            poseStampedMsg.pose.orientation.z = q.z();
+            poseStampedMsg.pose.orientation.w = q.w();
+            pathMsg.poses.push_back(poseStampedMsg);
+        }
+        pubSlidingWindowPath_->publish(pathMsg);
+    }
+
+private:
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subImu_;
+    rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLidar_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubSlidingWindowPath_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
+    rclcpp::Time startTime_;
+    bool hasStartTime_ = false;
     static constexpr double kLivoxImuScale = 9.81;
 
     mapping::MappingSystem slam_;
@@ -202,16 +285,6 @@ void runFromBag(const std::string &bag_path, const mapping::MappingConfig &confi
     std::cout << "Finished processing bag file." << std::endl;
 }
 
-mapping::MappingConfig loadConfig(const std::string &config_path)
-{
-    std::cout << "Loading config from: " << config_path << std::endl;
-    mapping::MappingConfig config = config::fromYamlFile<mapping::MappingConfig>(config_path);
-    config::checkValid(config);
-    std::cout << "Loaded config:\n"
-              << config::toString(config) << std::endl;
-    return config;
-}
-
 int main(int argc, char **argv)
 {
     // Register signal handler for CTRL+C
@@ -238,26 +311,24 @@ int main(int argc, char **argv)
         }
     }
 
-    if (config_path.empty())
+    if (use_bag && config_path.empty())
     {
         std::cerr << "Error: --config <path> is required" << std::endl;
-        std::cerr << "Usage: " << argv[0] << " --config <config.yaml> [--bag <bag_path>]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << "--bag <bag_path> --config <config.yaml>" << std::endl;
         return 1;
     }
-
-    // Load configuration
-    mapping::MappingConfig config = loadConfig(config_path);
 
     // Check if running in standalone bag mode
     if (use_bag)
     {
         std::cout << "Running in standalone bag reader mode" << std::endl;
+        mapping::MappingConfig config = loadConfig(config_path);
         runFromBag(bag_path, config);
     }
     else
     {
         std::cout << "Running as ROS 2 node" << std::endl;
-        rclcpp::spin(std::make_shared<MapperNode>(config));
+        rclcpp::spin(std::make_shared<MapperNode>());
     }
 
     rclcpp::shutdown();

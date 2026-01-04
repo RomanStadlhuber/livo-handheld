@@ -1,0 +1,6 @@
+<launch>
+    <node pkg="mapping" exec="mapper" name="mapper_node" output="screen">
+        <param name="use_sim_time" value="true" />
+        <param name="mapper_config" value="/ros2_ws/src/livo/mapping/config/mapping_mid360.yaml" />
+    </node>
+</launch>

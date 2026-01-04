@@ -57,6 +57,15 @@ namespace mapping
         Recovery,
     };
 
+    /// @brief NavState with associated timestamp
+    struct NavStateStamped
+    {
+        gtsam::NavState state;
+        double timestamp;
+    };
+
+    using SlidingWindowStates = std::map<uint32_t, NavStateStamped>;
+
     /// @brief Indexing of points in a submap for building point clusters
     /// @details Uses `int` for point index because that's what Open3D's KNN search returns.
     using SubmapIdxPointIdx = std::pair<uint32_t, int>;
@@ -91,7 +100,15 @@ namespace mapping
     {
     public:
         explicit MappingSystem(const MappingConfig &config);
+        MappingSystem();
+
         ~MappingSystem() = default;
+
+        /// @brief  Set the config after initialization.
+        /// @details This should not be used to update the config during operation,
+        /// but rather before starting to feed data.
+        /// @param config
+        void setConfig(const MappingConfig &config);
 
         /// @brief Feed an IMU measurement to the system
         /// @param imu_data IMU acceleration and angular velocity
@@ -105,6 +122,9 @@ namespace mapping
 
         /// @brief Process buffered measurements and update state estimate
         void update();
+
+        /// @brief Get the timestamped states currently in the sliding window.
+        SlidingWindowStates getStates() const;
 
     private:
         /// @brief Static state (assumption-based) system initialization
@@ -227,10 +247,10 @@ namespace mapping
         ClusterId clusterIdCounter_;
 
         // Configuration
-        const MappingConfig config_;
+        MappingConfig config_;
 
         // Derived from config (cached for convenience)
-        const gtsam::Pose3 imu_T_lidar_;
+        gtsam::Pose3 imu_T_lidar_;
         double lidarTimeOffset_;
     };
 
