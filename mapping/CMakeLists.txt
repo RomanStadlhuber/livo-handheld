@@ -26,7 +26,7 @@ find_package(GTSAM REQUIRED)
 find_package(GTSAM_UNSTABLE REQUIRED)
 list(APPEND CMAKE_PREFIX_PATH "/install/open3d-devel/lib/cmake")
 find_package(Open3D REQUIRED)
-# list(APPEND CMAKE_PREFIX_PATH "/usr/local/lib/cmake/config_utilities")
+find_package(open3d_conversions REQUIRED) # for converting to ROS PointCloud2
 find_package(config_utilities REQUIRED)
 
 # remove this when done with debugging
@@ -65,7 +65,7 @@ add_executable(mapper src/mapper_node.cpp)
 ament_target_dependencies(mapper 
   rclcpp std_msgs geometry_msgs sensor_msgs
   livox_ros_driver2 rosbag2_cpp rosbag2_storage
-  tf2 tf2_ros nav_msgs
+  tf2 tf2_ros nav_msgs open3d_conversions
 )
 target_link_libraries(mapper mapping)
 

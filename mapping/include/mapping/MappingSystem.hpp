@@ -126,6 +126,10 @@ namespace mapping
         /// @brief Get the timestamped states currently in the sliding window.
         SlidingWindowStates getStates() const;
 
+        /// @brief Get the submap pointcloud of the latest keyframe.
+        /// May return `nullptr` if no keyframes exist.
+        std::shared_ptr<open3d::geometry::PointCloud> getCurrentSubmap() const;
+
     private:
         /// @brief Static state (assumption-based) system initialization
         /// @details

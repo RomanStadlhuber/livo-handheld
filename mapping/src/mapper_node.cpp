@@ -13,6 +13,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <open3d_conversions/open3d_conversions.hpp>
 
 // configuration form config_utilities
 #include <config_utilities/parsing/yaml.h>
@@ -53,22 +54,25 @@ public:
     {
 
         RCLCPP_INFO(this->get_logger(), "MapperNode has been initialized.");
-
         this->declare_parameter<std::string>("mapper_config", "");
         std::string configPath = this->get_parameter("mapper_config").as_string();
         RCLCPP_INFO(this->get_logger(), "Using mapper config file: %s",
                     configPath.c_str());
         mapping::MappingConfig config = loadConfig(configPath);
         slam_.setConfig(config);
-
         subImu_ = this->create_subscription<sensor_msgs::msg::Imu>(
             "/livox/imu", 10, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1));
-
         subLidar_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
             "livox/lidar", 10, std::bind(&MapperNode::lidarCallback, this, std::placeholders::_1));
-
         pubSlidingWindowPath_ = this->create_publisher<nav_msgs::msg::Path>(
-            "mapping/window_path", 10);
+            "mapping/window", 10);
+        pubHistoricalPosesPath_ = this->create_publisher<nav_msgs::msg::Path>(
+            "mapping/trajectory", 10);
+        pubKeyframeSubmap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+            "mapping/keyframe_submap", 10);
+        pubGlobalMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+            "mapping/map", 10);
+        globalMap_ = std::make_shared<open3d::geometry::PointCloud>();
 
         tfBroadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
@@ -135,9 +139,11 @@ private:
         if (states.empty())
             return;
 
+        // current pose TF
         mapping::NavStateStamped latestState = states.rbegin()->second;
         geometry_msgs::msg::TransformStamped tfStampedMsg;
-        tfStampedMsg.header.stamp = this->now();
+        const rclcpp::Time stamp{startTime_ + rclcpp::Duration::from_seconds(latestState.timestamp)};
+        tfStampedMsg.header.stamp = stamp;
         tfStampedMsg.header.frame_id = "map";
         tfStampedMsg.child_frame_id = "base_link";
 
@@ -154,10 +160,32 @@ private:
         tfStampedMsg.transform.rotation.w = q.w();
         tfBroadcaster_->sendTransform(tfStampedMsg);
 
-        nav_msgs::msg::Path pathMsg;
-        pathMsg.header.stamp = this->now();
-        pathMsg.header.frame_id = "map";
-        for (const auto &[_, navStateStamped] : states)
+        // current keyframe submap
+        std::shared_ptr<open3d::geometry::PointCloud> pcdSubmap = slam_.getCurrentSubmap();
+        if (pcdSubmap)
+        {
+            sensor_msgs::msg::PointCloud2 submapMsg;
+            // NOTE: keyframe submaps are placed in the global reference frame ("map")
+            open3d_conversions::open3dToRos(*pcdSubmap, submapMsg, "map");
+            submapMsg.header.stamp = stamp;
+            pubKeyframeSubmap_->publish(submapMsg);
+            // accumulate to global map
+            *globalMap_ += *pcdSubmap;
+            globalMap_->RemoveDuplicatedPoints();
+            sensor_msgs::msg::PointCloud2 globalMapMsg;
+            open3d_conversions::open3dToRos(*globalMap_, globalMapMsg, "map");
+            globalMapMsg.header.stamp = stamp;
+            pubGlobalMap_->publish(globalMapMsg);
+        }
+
+        // sliding window and global trajectory
+        nav_msgs::msg::Path slidingWindowPathMsg, historicalPosesPathMsg;
+        slidingWindowPathMsg.header.stamp = this->now();
+        slidingWindowPathMsg.header.frame_id = "map";
+        historicalPosesPathMsg.header = slidingWindowPathMsg.header;
+        historicalPosesPathMsg.header.frame_id = "map";
+        historicalPosesPathMsg.poses.reserve(historicalPoses.size());
+        for (const auto &[idxKf, navStateStamped] : states)
         {
             geometry_msgs::msg::PoseStamped poseStampedMsg;
             const rclcpp::Time poseStamp{startTime_ + rclcpp::Duration::from_seconds(navStateStamped.timestamp)};
@@ -175,16 +203,27 @@ private:
             poseStampedMsg.pose.orientation.y = q.y();
             poseStampedMsg.pose.orientation.z = q.z();
             poseStampedMsg.pose.orientation.w = q.w();
-            pathMsg.poses.push_back(poseStampedMsg);
+            slidingWindowPathMsg.poses.push_back(poseStampedMsg);
+
+            historicalPoses[idxKf] = poseStampedMsg;
         }
-        pubSlidingWindowPath_->publish(pathMsg);
+        for (auto const &[_, histPose] : historicalPoses)
+        {
+            historicalPosesPathMsg.poses.push_back(histPose);
+        }
+        pubSlidingWindowPath_->publish(slidingWindowPathMsg);
+        pubHistoricalPosesPath_->publish(historicalPosesPathMsg);
     }
 
 private:
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subImu_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLidar_;
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubSlidingWindowPath_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubSlidingWindowPath_, pubHistoricalPosesPath_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubKeyframeSubmap_, pubGlobalMap_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
+    std::map<u_int32_t, geometry_msgs::msg::PoseStamped> historicalPoses;
+    /// @brief Naive accumulation of keyframe submaps to form the global map.
+    std::shared_ptr<open3d::geometry::PointCloud> globalMap_;
     rclcpp::Time startTime_;
     bool hasStartTime_ = false;
     static constexpr double kLivoxImuScale = 9.81;

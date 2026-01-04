@@ -1,6 +1,12 @@
 <launch>
+    <!-- SLAM -->
     <node pkg="mapping" exec="mapper" name="mapper_node" output="screen">
         <param name="use_sim_time" value="true" />
         <param name="mapper_config" value="/ros2_ws/src/livo/mapping/config/mapping_mid360.yaml" />
+    </node>
+    <!-- Visualization -->
+    <node pkg="rviz2" exec="rviz2" name="rviz" output="screen">
+        <param name="use_sim_time" value="true" />
+        <param name="rviz_config" value="/ros2_ws/src/livo/mapping/config/mapping.rviz" />
     </node>
 </launch>

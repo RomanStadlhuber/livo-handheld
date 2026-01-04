@@ -50,7 +50,8 @@ RUN cd /install/config_utilities/config_utilities && mkdir build && \
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
-RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl*
+# also, open3d_conversions are used to convert between Open3D pointclouds and PointCloud2 message
+RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl* && ros-$ROS_DISTRO-open3d-conversions
 RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
     cd /ros2_ws/src/livox_ros_driver2 && ./build.sh humble
 # change to ROS2 workspace source

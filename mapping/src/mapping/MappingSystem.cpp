@@ -534,7 +534,7 @@ namespace mapping
             }
         }
 
-        return keyframeHasTracks; // is true at this point
+        return keyframeHasTracks; // indicates if we lost tracking
     }
 
     Clusters::iterator MappingSystem::eraseClusterAndTracks(Clusters::iterator &itCluster)
@@ -719,6 +719,8 @@ namespace mapping
 
         summarizeClusters();
 
+        // NOTE: will internally update factorsToRemove to drop outdated smart factors
+        // the outdated factors will be replaced by extended ones with additional tracks
         createAndUpdateFactors();
 
         // Add variables for the active keyframe
@@ -876,6 +878,16 @@ namespace mapping
             }
         }
         return states;
+    }
+
+    std::shared_ptr<open3d::geometry::PointCloud> MappingSystem::getCurrentSubmap() const
+    {
+        if (keyframeSubmaps_.empty())
+        {
+            std::cerr << "::: [WARNING] no keyframe submaps available :::" << std::endl;
+            return nullptr;
+        }
+        return keyframeSubmaps_.rbegin()->second;
     }
 
 } // namespace mapping
