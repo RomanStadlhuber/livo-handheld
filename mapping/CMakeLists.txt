@@ -18,6 +18,7 @@ find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2_storage REQUIRED)
@@ -29,9 +30,8 @@ find_package(Open3D REQUIRED)
 find_package(open3d_conversions REQUIRED) # for converting to ROS PointCloud2
 find_package(config_utilities REQUIRED)
 
-# remove this when done with debugging
-message(WARNING "Building in Debug mode")
-set(CMAKE_BUILD_TYPE Debug)
+
+set(CMAKE_BUILD_TYPE RelWithDebIInfo)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -66,6 +66,7 @@ ament_target_dependencies(mapper
   rclcpp std_msgs geometry_msgs sensor_msgs
   livox_ros_driver2 rosbag2_cpp rosbag2_storage
   tf2 tf2_ros nav_msgs open3d_conversions
+  visualization_msgs
 )
 target_link_libraries(mapper mapping)
 

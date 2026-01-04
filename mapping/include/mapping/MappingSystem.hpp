@@ -64,6 +64,14 @@ namespace mapping
         double timestamp;
     };
 
+    /// @brief Shorthand wrapped representation for a tracked cluster.
+    /// **only** used for external visualization and debugging.
+    struct PointCluster
+    {
+        std::shared_ptr<Eigen::Vector3d> center;
+        std::shared_ptr<Eigen::Vector3d> normal;
+    };
+
     using SlidingWindowStates = std::map<uint32_t, NavStateStamped>;
 
     /// @brief Indexing of points in a submap for building point clusters
@@ -129,6 +137,10 @@ namespace mapping
         /// @brief Get the submap pointcloud of the latest keyframe.
         /// May return `nullptr` if no keyframes exist.
         std::shared_ptr<open3d::geometry::PointCloud> getCurrentSubmap() const;
+
+        /// @brief Get a representation of the currently tracked clusters
+        /// (for visualization and debugging purposes).
+        std::map<ClusterId, PointCluster> getCurrentClusters() const;
 
     private:
         /// @brief Static state (assumption-based) system initialization

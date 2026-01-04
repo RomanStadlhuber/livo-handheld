@@ -890,4 +890,18 @@ namespace mapping
         return keyframeSubmaps_.rbegin()->second;
     }
 
+    std::map<ClusterId, PointCluster> MappingSystem::getCurrentClusters() const
+    {
+        std::map<ClusterId, PointCluster> pointClusters;
+        for (auto itCluster = clusters_.begin(); itCluster != clusters_.end(); ++itCluster)
+        {
+            auto const &[clusterId, clusterTracks] = *itCluster;
+            PointCluster pointCluster;
+            pointCluster.center = clusterCenters_.at(clusterId);
+            pointCluster.normal = clusterNormals_.at(clusterId);
+            pointClusters[clusterId] = pointCluster;
+        }
+        return pointClusters;
+    }
+
 } // namespace mapping

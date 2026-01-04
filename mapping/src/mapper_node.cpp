@@ -14,6 +14,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <open3d_conversions/open3d_conversions.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 // configuration form config_utilities
 #include <config_utilities/parsing/yaml.h>
@@ -73,6 +74,8 @@ public:
         pubGlobalMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
             "mapping/map", 10);
         globalMap_ = std::make_shared<open3d::geometry::PointCloud>();
+        pubClusters_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "mapping/clusters", 10);
 
         tfBroadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
@@ -178,6 +181,55 @@ private:
             pubGlobalMap_->publish(globalMapMsg);
         }
 
+        std::map<mapping::ClusterId, mapping::PointCluster> clusters = slam_.getCurrentClusters();
+
+        // if markers have been published before, check which need to be deleted
+        std::vector<visualization_msgs::msg::Marker> previousMarkers = clusterMarkersMsg_.markers;
+        clusterMarkersMsg_.markers.clear();
+        clusterMarkersMsg_.markers.reserve(clusters.size());
+        for (auto &marker : previousMarkers)
+        {
+            if (clusters.find(marker.id) == clusters.end())
+            {
+                // cluster no longer exists, delete the marker
+                marker.action = visualization_msgs::msg::Marker::DELETE;
+                clusterMarkersMsg_.markers.push_back(marker);
+            }
+        }
+
+        for (const auto &[clusterId, cluster] : clusters)
+        {
+            visualization_msgs::msg::Marker markerMsg;
+            markerMsg.header.stamp = stamp;
+            markerMsg.header.frame_id = "map";
+            markerMsg.ns = "clusters";
+            markerMsg.id = clusterId;
+            markerMsg.type = visualization_msgs::msg::Marker::ARROW;
+            markerMsg.action = visualization_msgs::msg::Marker::ADD;
+            // Arrow points from cluster center along normal direction
+            geometry_msgs::msg::Point startPoint, endPoint;
+            startPoint.x = cluster.center->x();
+            startPoint.y = cluster.center->y();
+            startPoint.z = cluster.center->z();
+            endPoint.x = startPoint.x + cluster.normal->x() * 1.0; // scale for visualization
+            endPoint.y = startPoint.y + cluster.normal->y() * 1.0;
+            endPoint.z = startPoint.z + cluster.normal->z() * 1.0;
+            // NOTE: direction of the plane normal arrow can be given from markerMsg.points, see also:
+            // https://ros2docs.robook.org/rolling/Tutorials/Intermediate/RViz/Marker-Display-types/Marker-Display-types.html#message-parameters
+            markerMsg.points.reserve(2);
+            markerMsg.points.push_back(startPoint);
+            markerMsg.points.push_back(endPoint);
+            markerMsg.scale.x = 0.1; // shaft diameter
+            markerMsg.scale.y = 0.2; // head diameter
+            markerMsg.scale.z = 0.2; // head length
+            markerMsg.color.r = 1.0f;
+            markerMsg.color.g = 0.0f;
+            markerMsg.color.b = 0.0f;
+            markerMsg.color.a = 1.0f;
+            clusterMarkersMsg_.markers.push_back(markerMsg);
+        }
+        pubClusters_->publish(clusterMarkersMsg_);
+
         // sliding window and global trajectory
         nav_msgs::msg::Path slidingWindowPathMsg, historicalPosesPathMsg;
         slidingWindowPathMsg.header.stamp = this->now();
@@ -220,6 +272,9 @@ private:
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLidar_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubSlidingWindowPath_, pubHistoricalPosesPath_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubKeyframeSubmap_, pubGlobalMap_;
+    // visualize the tracking factors as markers
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pubClusters_;
+    visualization_msgs::msg::MarkerArray clusterMarkersMsg_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
     std::map<u_int32_t, geometry_msgs::msg::PoseStamped> historicalPoses;
     /// @brief Naive accumulation of keyframe submaps to form the global map.
