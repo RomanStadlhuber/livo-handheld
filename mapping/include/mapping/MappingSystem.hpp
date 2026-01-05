@@ -10,6 +10,7 @@
 #include <gtsam/navigation/CombinedImuFactor.h>
 #include <gtsam/navigation/ImuFactor.h>
 #include <gtsam_unstable/nonlinear/BatchFixedLagSmoother.h>
+#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
@@ -172,6 +173,8 @@ namespace mapping
         Clusters::iterator eraseClusterAndTracks(Clusters::iterator &itCluster);
         /// @brief Summarize current clusters for debugging purposes.
         void summarizeClusters() const;
+        /// @brief Summarize current factors for debugging purposes.
+        void summarizeFactors() const;
         /// @brief Create new factors for previously unttracked clusters and update existing factors.
         void createAndUpdateFactors();
         /// @brief Reset factor graph buffers for next iteration
@@ -213,7 +216,7 @@ namespace mapping
         gtsam::PreintegratedCombinedMeasurements preintegrator_;
 
         // Fixed lag smoother
-        gtsam::BatchFixedLagSmoother smoother_;
+        gtsam::IncrementalFixedLagSmoother smoother_;
 
         // Factors, nodes and timestamps to add to the graph
         gtsam::NonlinearFactorGraph newSmootherFactors_;
@@ -244,8 +247,6 @@ namespace mapping
         std::unordered_map<ClusterId, double> clusterPlaneThickness_;
         /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing constraints.
         std::unordered_map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
-        /// @brief Factors associated with valid clusters tracks including their index in the smoothers factor graph
-        ClusterFactors clusterFactors_;
         gtsam::FactorIndices factorsToRemove_;
         size_t scansSinceLastKeyframe_ = 0;
 

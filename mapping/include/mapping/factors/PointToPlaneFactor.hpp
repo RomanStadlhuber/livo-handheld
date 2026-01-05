@@ -28,13 +28,15 @@ namespace mapping
         /// @param planeNormal Plane normal in the world frame
         /// @param planeNormalOffsetD Plane offset d in world frame (n^T * x - d = 0)
         /// @param noiseModel Point-to-plane noise model
+        /// @param clusterId Identifier for the cluster associated with this factor, used for lookup to replace/delete.
         PointToPlaneFactor(
             const gtsam::KeyVector &keys,
             const gtsam::Pose3 &imu_T_lidar,
             const std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> &scanPointsPerKey,
             const std::shared_ptr<Eigen::Vector3d> &planeNormal,
             double planeNormalOffsetD,
-            const gtsam::SharedNoiseModel &noiseModel);
+            const gtsam::SharedNoiseModel &noiseModel,
+            const u_int32_t &clusterId);
 
         /// @brief Evaluate unwhitened error for all poses involved in this factor
         /// @param values Current estimates of all variables in the factor graph
@@ -50,12 +52,18 @@ namespace mapping
         /// @brief Get the total number of point measurements in this factor
         size_t numPoints() const { return totalPoints_; }
 
+        void print(const std::string &s = "", const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
+
     private:
         gtsam::Pose3 imu_T_lidar_;
         std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey_;
         std::shared_ptr<Eigen::Vector3d> planeNormal_;
         double planeNormalOffsetD_;
         size_t totalPoints_;
+
+    public:
+        /// @brief Identifier for the cluster associated with this factor used for lookup to replace/delete.
+        const u_int32_t clusterId_;
     };
 
 } // namespace mapping

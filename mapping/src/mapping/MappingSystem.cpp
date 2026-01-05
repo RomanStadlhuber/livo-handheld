@@ -6,6 +6,7 @@
 #include <iostream>
 #include <set>
 #include <unordered_map>
+#include <memory>
 
 namespace mapping
 {
@@ -48,11 +49,10 @@ namespace mapping
           imu_T_lidar_(config.extrinsics.imu_T_lidar.toPose3()),
           lidarTimeOffset_(0.0)
     {
-        // TODO: use iSAM2 (IncrementalFixedLagSmoother) over BatchFixedLagSmoother for efficiency
-        gtsam::LevenbergMarquardtParams optimizerParams;
-        optimizerParams.verbosity = gtsam::NonlinearOptimizerParams::Verbosity::VALUES;
-        optimizerParams.verbosityLM = gtsam::LevenbergMarquardtParams::VerbosityLM::SUMMARY;
-        smoother_ = gtsam::BatchFixedLagSmoother(static_cast<double>(config_.backend.sliding_window_size), optimizerParams);
+        gtsam::ISAM2Params smootherParams;
+        smootherParams.optimizationParams = gtsam::ISAM2GaussNewtonParams();
+        smootherParams.findUnusedFactorSlots = true;
+        smoother_ = gtsam::IncrementalFixedLagSmoother(static_cast<double>(config_.backend.sliding_window_size), smootherParams);
         // Initialize IMU preintegration parameters
         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
         // noise values from:
@@ -87,9 +87,6 @@ namespace mapping
 
     void MappingSystem::update()
     {
-        std::cout << "SLAM has " << imuBuffer_.size() << " IMU messages and "
-                  << lidarBuffer_.size() << " LIDAR messages buffered." << std::endl;
-
         switch (systemState_)
         {
         case SystemState::Initializing:
@@ -230,9 +227,6 @@ namespace mapping
         // Lock the buffers for accessing values
         std::unique_lock<std::mutex> lockImuBuffer(mtxImuBuffer_);
 
-        std::cout << "::: [DEBUG] tracking with " << imuBuffer_.size() << " IMU measurements and "
-                  << lidarBuffer_.size() << " LiDAR scans :::" << std::endl;
-
         // Perform preintegration to decide whether a new keyframe is needed
         for (auto imuIt = imuBuffer_.begin(); imuIt != imuBuffer_.end(); ++imuIt)
         {
@@ -241,7 +235,6 @@ namespace mapping
             // Integrate measurement
             preintegrator_.integrateMeasurement(u->acceleration, u->angular_velocity, dt);
         }
-        std::cout << "::: [DEBUG] IMU preintegration completed :::" << std::endl;
 
         // Save last imu timestamp and clear the buffer
         tLastImu_ = imuBuffer_.rbegin()->first;
@@ -256,17 +249,13 @@ namespace mapping
     {
         // Iterator to the newest lidar scan that can still be processed (older than latest imu timestamp)
         std::unique_lock<std::mutex> lockLidarBuffer(mtxLidarBuffer_);
-        std::cout << "::: [DEBUG] tLastIMU " << tLastImu_ << ", tLastLiDAR "
-                  << (lidarBuffer_.size() ? lidarBuffer_.rbegin()->first : 0) << " :::" << std::endl;
 
         // Undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation
         // Delta pose to last submap at preintegrated state / last IMU time
         gtsam::Pose3 kf_T_prop = lastKeyframePose().inverse().compose(w_X_curr_.pose().compose(imu_T_lidar_));
-        std::cout << "::: [DEBUG] has " << keyframeTimestamps_.size() << " keyframes :::" << std::endl;
 
         const double tLastKeyframe = keyframeTimestamps_.rbegin()->second;
         const double dtPropToKeyframe = tLastImu_ - tLastKeyframe;
-        std::cout << "::: [DEBUG] begin undistorting " << lidarBuffer_.size() << " LiDAR scans :::" << std::endl;
 
         // Undistort between individual scans
         gtsam::Pose3 deltaPoseLastScanToKeyframe = gtsam::Pose3::Identity();
@@ -305,7 +294,6 @@ namespace mapping
                 const Eigen::Vector3d ptUndistorted = scan_T_pt.transformFrom(pt);
                 scan->points[i] = ptUndistorted;
             }
-            std::cout << "::: [DEBUG] undistorted LiDAR scan with " << scan->points.size() << " points :::" << std::endl;
 
             // Convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, config_.point_filter.min_distance, config_.point_filter.max_distance);
@@ -317,7 +305,6 @@ namespace mapping
             bufferScan(kf_T_scan, ptrPcdScanVoxelized);
             deltaPoseLastScanToKeyframe = kf_T_scan;
         }
-        std::cout << "::: [DEBUG] completed undistorting LiDAR scans, proceeding to identify keyframe :::" << std::endl;
 
         // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the PCD buffer
         // Erase processed raw scan data and release buffer lock
@@ -328,9 +315,6 @@ namespace mapping
     bool MappingSystem::trackScanPointsToClusters(const uint32_t &idxKeyframe)
     {
         clusters_.clear();
-
-        std::cout
-            << "::: [DEBUG] identifying same-plane point clusters among keyframe submaps :::" << std::endl;
 
         // Search for same-plane point clusters among all keyframes
         const std::shared_ptr<open3d::geometry::PointCloud> pcdQuery = keyframeSubmaps_[idxKeyframe];
@@ -589,6 +573,7 @@ namespace mapping
 
     void MappingSystem::createAndUpdateFactors()
     {
+        factorsToRemove_.clear();
         // Build residuals for active keyframe points from valid clusters
         for (auto itValidCluster = clusters_.begin(); itValidCluster != clusters_.end(); ++itValidCluster)
         {
@@ -635,16 +620,32 @@ namespace mapping
                 scanPointsPerKey,
                 clusterNormal,
                 clusterNormal->dot(*clusterCenter),
-                noiseModel);
+                noiseModel,
+                clusterId);
 
-            ClusterFactors::iterator itExistingFactor = clusterFactors_.find(clusterId);
-
-            if (itExistingFactor != clusterFactors_.end()) // copy and update if the factor exists
+            const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
+            bool isFactorAdded = true;
+            for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
             {
-                auto const &[existingFactor, existingFactorIdx] = itExistingFactor->second;
-                factorsToRemove_.push_back(existingFactorIdx);
+                const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
+                const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
+                if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                {
+                    // mark existing factor for removal
+                    factorsToRemove_.push_back(gtsam::Key{factorKey});
+                    isFactorAdded = false;
+                    break;
+                }
             }
+            // TODO: remove this when bad factors are fixed
+            // (print when the factor is a new add)
+            if (isFactorAdded)
+                ptpFactor->print();
+
+            newSmootherFactors_.add(ptpFactor);
         }
+        std::cout << "::: [INFO] adding " << newSmootherFactors_.size() - factorsToRemove_.size()
+                  << " LiDAR factors, updating " << factorsToRemove_.size() << " :::" << std::endl;
     }
 
     void MappingSystem::track()
@@ -717,8 +718,6 @@ namespace mapping
         std::cout << "::: [DEBUG] outlier rejection completed (keeping " << clusters_.size()
                   << " clusters), proceeding to formulate tracking constraints :::" << std::endl;
 
-        summarizeClusters();
-
         // NOTE: will internally update factorsToRemove to drop outdated smart factors
         // the outdated factors will be replaced by extended ones with additional tracks
         createAndUpdateFactors();
@@ -740,9 +739,8 @@ namespace mapping
         newSmootherIndices_[X(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
         newSmootherIndices_[V(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
         newSmootherIndices_[B(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
-
         smoother_.update(newSmootherFactors_, newValues_, newSmootherIndices_, factorsToRemove_);
-        smoother_.print("Smoother after update:\n");
+        summarizeFactors();
         resetNewFactors();
 
         // Extract estimated state
@@ -902,6 +900,29 @@ namespace mapping
             pointClusters[clusterId] = pointCluster;
         }
         return pointClusters;
+    }
+
+    void MappingSystem::summarizeFactors() const
+    {
+        const gtsam::NonlinearFactorGraph &factors = smoother_.getFactors();
+        size_t numImuFactors{0}, numLidarFactors{0};
+        for (size_t factorKey = 0; factorKey < factors.size(); ++factorKey)
+        {
+            const gtsam::NonlinearFactor::shared_ptr factor = factors[factorKey];
+            const auto imuFactor = boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(factor);
+            if (imuFactor)
+            {
+                numImuFactors++;
+                continue;
+            }
+            const auto ptpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+            if (ptpFactor)
+            {
+                numLidarFactors++;
+                continue;
+            }
+        }
+        std::cout << "::: [DEBUG] smoother has " << numImuFactors << " IMU factors, " << numLidarFactors << " LiDAR factors." << std::endl;
     }
 
 } // namespace mapping

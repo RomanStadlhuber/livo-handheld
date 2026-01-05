@@ -174,6 +174,7 @@ private:
             pubKeyframeSubmap_->publish(submapMsg);
             // accumulate to global map
             *globalMap_ += *pcdSubmap;
+            globalMap_->VoxelDownSample(0.05);
             globalMap_->RemoveDuplicatedPoints();
             sensor_msgs::msg::PointCloud2 globalMapMsg;
             open3d_conversions::open3dToRos(*globalMap_, globalMapMsg, "map");
