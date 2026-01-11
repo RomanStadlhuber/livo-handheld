@@ -606,9 +606,10 @@ namespace mapping
             {
                 auto const [keyframeId, pointIdx] = itTrack->first;
                 const size_t keyVecIdx = keyframeIdToKeyIdx[keyframeId];
-                // Point in LiDAR frame = world point - keyframe translation
+                // scan points are passed to factor in world frame
                 scanPointsPerKey[keyVecIdx].push_back(std::make_shared<Eigen::Vector3d>(
-                    keyframeSubmaps_[keyframeId]->points_[pointIdx] - keyframePoses_[keyframeId]->translation()));
+                    // transform point in keyframe from world frame to lidar frame
+                    keyframePoses_[keyframeId]->transformTo(keyframeSubmaps_[keyframeId]->points_[pointIdx])));
                 totalPoints++;
             }
 

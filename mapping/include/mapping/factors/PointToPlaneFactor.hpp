@@ -59,7 +59,10 @@ namespace mapping
         std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey_;
         std::shared_ptr<Eigen::Vector3d> planeNormal_;
         double planeNormalOffsetD_;
+        /// @brief Total number of points associated with this factor.
         size_t totalPoints_;
+        /// @brief Pre-computed mean factor 1/N for N points
+        double meanFactor_;
 
     public:
         /// @brief Identifier for the cluster associated with this factor used for lookup to replace/delete.
