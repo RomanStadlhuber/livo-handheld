@@ -17,13 +17,17 @@ RUN add-apt-repository ppa:borglab/gtsam-release-4.2
 RUN apt-get update && apt-get install -y -q libgtsam-dev libgtsam-unstable-dev
 ### Install Livox SDK & ROS driver
 WORKDIR /install
-RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git
+RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git && \
+    git clone https://github.com/MIT-SPARK/config_utilities.git
 RUN cd /install/Livox-SDK2 && mkdir build && cd build && \
     cmake .. && make -j 8 && make install
+# build & install config_utilities
+RUN cd /install/config_utilities/config_utilities && mkdir build && \
+    cd build && cmake .. && make -j 8 && make install
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
-RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl*
+RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl* ros-$ROS_DISTRO-open3d-conversions
 RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
     cd /ros2_ws/src/livox_ros_driver2 && ./build.sh humble
 ### Download Open3D C++ sources ###

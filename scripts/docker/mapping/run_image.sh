@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $(basename "$0") <data-dir>" >&2
+    exit 1
+fi
+
 echo "creating container with data-dir $1"
 
 xhost +
