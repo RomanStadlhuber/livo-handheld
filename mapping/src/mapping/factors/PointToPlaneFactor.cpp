@@ -35,65 +35,56 @@ namespace mapping
         const gtsam::Values &values,
         boost::optional<std::vector<gtsam::Matrix> &> H) const
     {
-        gtsam::Vector errorVec(totalPoints_);
+        const size_t numKeys = keys().size();
 
-        // If Jacobians requested, initialize them
+        // r is Nx1 where N is the number of keys (poses) connected to this factor
+        gtsam::Vector errorVec = gtsam::Vector::Zero(numKeys);
+
+        // H is a vector of jacobians for each variable
+        // H_i is (numKeys x 6) for pose i
         if (H)
         {
-            H->resize(keys().size());
-            for (size_t i = 0; i < keys().size(); ++i)
+            H->resize(numKeys);
+            for (size_t i = 0; i < numKeys; ++i)
             {
-                (*H)[i] = gtsam::Matrix::Zero(totalPoints_, 6);
+                (*H)[i] = gtsam::Matrix::Zero(numKeys, 6);
             }
         }
-
-        size_t errorIdx = 0;
-        double r_i = 0.0;
 
         // Iterate over each keyframe that has observations
         for (const auto &[keyIdx, scanPoints] : scanPointsPerKey_)
         {
-            // Get the pose estimate for this keyframe
+            // Get the pose estimate for this keyframe using the actual key
             const gtsam::Pose3 w_T_imu = values.at<gtsam::Pose3>(keys()[keyIdx]);
 
+            double r_i = 0.0; // mean error (1/N) * sum(r_i_k^2) for i-th keyframe
+
             // Compute error and Jacobian for each point from this keyframe
-            for (size_t ptIdx = 0; ptIdx < scanPoints.size(); ++ptIdx, ++errorIdx)
+            for (const std::shared_ptr<Eigen::Vector3d> &scanPointPtr : scanPoints)
             {
+                // ...existing code for computing r_i_k...
                 const gtsam::Point3
-                    // scan point in lidar frame
-                    l_p(*scanPoints[ptIdx]),
-                    // scan point in world frame
+                    l_p(*scanPointPtr),
                     w_p = w_T_imu.compose(imu_T_lidar_).transformFrom(l_p);
+                const double r_i_k = planeNormal_->dot(w_p) - planeNormalOffsetD_;
+                r_i += meanFactor_ * std::pow(r_i_k, 2);
 
-                // Point-to-plane distance error
-                r_i = planeNormal_->dot(w_p) - planeNormalOffsetD_;
-                errorVec(errorIdx) = meanFactor_ * r_i;
-
-                // Compute Jacobian if requested
                 if (H)
                 {
-                    // Jacobian w.r.t. the pose of this keyframe
                     const Eigen::Matrix<double, 1, 3> nT = planeNormal_->transpose();
-
                     const Eigen::Matrix3d
                         i_R_l = imu_T_lidar_.rotation().matrix(),
                         w_R_i = w_T_imu.rotation().matrix();
                     const Eigen::Vector3d i_t_l = imu_T_lidar_.translation();
 
-                    // Rotation component: 2/n * r(x_i) * -n^T * w_R_i * [i_R_l * i_p + i_t_l]_x (where [.]_x is skew-symmetric)
                     gtsam::Matrix16 D_error_D_pose = gtsam::Matrix16::Zero();
-                    // D_error_D_pose.head<3>() = 2 * meanFactor_ * r_i * -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
-                    D_error_D_pose.head<3>() = meanFactor_ * -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
-                    // Translation component: n^T * R
-                    // D_error_D_pose.tail<3>() = 2 * meanFactor_ * r_i * nT;
-                    D_error_D_pose.tail<3>() = meanFactor_ * nT;
-                    // Assign to the appropriate Jacobian matrix
-                    (*H)[keyIdx]
-                        .row(errorIdx) = D_error_D_pose;
+                    D_error_D_pose.head<3>() = 2 * meanFactor_ * r_i_k * -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
+                    D_error_D_pose.tail<3>() = 2 * meanFactor_ * r_i_k * nT;
+                    (*H)[keyIdx].row(keyIdx) += D_error_D_pose;
                 }
             }
+            errorVec(keyIdx) = r_i;
         }
-
         return errorVec;
     }
 

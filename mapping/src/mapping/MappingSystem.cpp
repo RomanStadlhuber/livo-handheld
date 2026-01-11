@@ -614,7 +614,7 @@ namespace mapping
             }
 
             // Noise model for point-to-plane factor (one sigma per point measurement)
-            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(totalPoints, std::sqrt(planeThickness));
+            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(keys.size(), planeThickness);
             const PointToPlaneFactor::shared_ptr ptpFactor = boost::make_shared<PointToPlaneFactor>(
                 keys,
                 imu_T_lidar_,
