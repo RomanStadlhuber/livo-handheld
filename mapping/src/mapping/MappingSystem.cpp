@@ -613,8 +613,8 @@ namespace mapping
                 totalPoints++;
             }
 
-            // Noise model for point-to-plane factor (one sigma per point measurement)
-            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(keys.size(), planeThickness);
+            // Noise model for cluster point factor
+            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, 10 * std::sqrt(planeThickness));
             const PointToPlaneFactor::shared_ptr ptpFactor = boost::make_shared<PointToPlaneFactor>(
                 keys,
                 imu_T_lidar_,
@@ -657,6 +657,7 @@ namespace mapping
             angleDiff = (lastKeyframePose().rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
         w_X_curr_ = w_X_propagated;
         // undistort all scans and move them to the scanBuffer
+        const double tLastScan = lidarBuffer_.rbegin()->first;
         undistortScans();
         // check if a new keyframe is needed
         if (
@@ -695,9 +696,10 @@ namespace mapping
             newSubmap += *(scan.pcd);
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
-        const uint32_t idxKeyframe = createKeyframeSubmap(w_X_curr_.pose().compose(imu_T_lidar_), tLastImu_, ptrNewSubmapVoxelized);
+        const gtsam::Pose3 world_T_lidar = w_X_curr_.pose().compose(imu_T_lidar_);
+        const uint32_t idxKeyframe = createKeyframeSubmap(world_T_lidar, tLastScan, ptrNewSubmapVoxelized);
 #ifndef DISABLEVIZ
-        visualizer.addSubmap(idxKeyframe, w_X_curr_.pose().matrix(), ptrNewSubmapVoxelized);
+        visualizer.addSubmap(idxKeyframe, world_T_lidar.matrix(), ptrNewSubmapVoxelized);
         visualizer.waitForSpacebar();
 #endif
 
@@ -715,19 +717,16 @@ namespace mapping
             systemState_ = SystemState::Recovery;
             return;
         }
-
         std::cout << "::: [DEBUG] outlier rejection completed (keeping " << clusters_.size()
                   << " clusters), proceeding to formulate tracking constraints :::" << std::endl;
-
+        // summarizeClusters();
         // NOTE: will internally update factorsToRemove to drop outdated smart factors
         // the outdated factors will be replaced by extended ones with additional tracks
         createAndUpdateFactors();
-
         // Add variables for the active keyframe
         newValues_.insert(X(idxKeyframe), w_X_curr_.pose());
         newValues_.insert(V(idxKeyframe), w_X_curr_.v());
         newValues_.insert(B(idxKeyframe), currBias_);
-
         // Preintegration factor
         newSmootherFactors_.add(
             gtsam::CombinedImuFactor(
@@ -735,15 +734,14 @@ namespace mapping
                 X(idxKeyframe), V(idxKeyframe),
                 B(idxKeyframe - 1), B(idxKeyframe),
                 preintegrator_));
-
         // Smoother indices used for marginalization
         newSmootherIndices_[X(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
         newSmootherIndices_[V(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
         newSmootherIndices_[B(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
+        // update estimator
         smoother_.update(newSmootherFactors_, newValues_, newSmootherIndices_, factorsToRemove_);
         summarizeFactors();
         resetNewFactors();
-
         // Extract estimated state
         w_X_curr_ = gtsam::NavState{
             smoother_.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
@@ -783,7 +781,11 @@ namespace mapping
         // Update the poses of the keyframe submaps
         for (auto const &[idxKf, _] : keyframeSubmaps_)
         {
-            const gtsam::Pose3 updatedPose = smoother_.calculateEstimate<gtsam::Pose3>(X(idxKf));
+            const gtsam::Pose3
+                // updated IMU pose in world frame
+                world_T_imu = smoother_.calculateEstimate<gtsam::Pose3>(X(idxKf)),
+                // updated lidar pose in world frame
+                updatedPose = world_T_imu.compose(imu_T_lidar_);
             updateKeyframeSubmapPose(idxKf, updatedPose);
 #ifndef DISABLEVIZ
             visualizer.updateSubmap(idxKf, updatedPose.matrix());
@@ -803,7 +805,7 @@ namespace mapping
     }
 
     uint32_t MappingSystem::createKeyframeSubmap(
-        const gtsam::Pose3 &keyframePose,
+        const gtsam::Pose3 &world_T_lidar,
         double keyframeTimestamp,
         std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap)
     {
@@ -811,9 +813,9 @@ namespace mapping
         const uint32_t idxNewKf = keyframeCounter_++;
 
         // Transform submap to its estimated pose in the world frame
-        ptrKeyframeSubmap->Transform(keyframePose.matrix());
+        ptrKeyframeSubmap->Transform(world_T_lidar.matrix());
         keyframeSubmaps_[idxNewKf] = ptrKeyframeSubmap;
-        keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(keyframePose);
+        keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_lidar);
         keyframeTimestamps_[idxNewKf] = keyframeTimestamp;
 
         std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " ("
@@ -834,11 +836,11 @@ namespace mapping
         return *keyframePoses_.rbegin()->second;
     }
 
-    void MappingSystem::updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &newWorldPose)
+    void MappingSystem::updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &w_T_l)
     {
-        const gtsam::Pose3 deltaPose = keyframePoses_[keyframeIdx]->between(newWorldPose);
+        const gtsam::Pose3 deltaPose = keyframePoses_[keyframeIdx]->between(w_T_l);
         keyframeSubmaps_[keyframeIdx]->Transform(deltaPose.matrix());
-        keyframePoses_[keyframeIdx] = std::make_shared<gtsam::Pose3>(newWorldPose);
+        keyframePoses_[keyframeIdx] = std::make_shared<gtsam::Pose3>(w_T_l);
     }
 
     void MappingSystem::bufferScan(
@@ -855,8 +857,8 @@ namespace mapping
         for (auto itCluster = clusters_.begin(); itCluster != clusters_.end(); ++itCluster)
         {
             auto const &[clusterId, clusterPoints] = *itCluster;
-            std::cout << "\tCluster " << clusterId << ": " << clusterPoints.size() << " points" << std::endl;
-            // << "thickness " << clusterPlaneThickness_.at(clusterId) << std::endl;
+            std::cout << "\tCluster " << clusterId << ": " << clusterPoints.size() << " points, "
+                      << "thickness " << clusterPlaneThickness_.at(clusterId) << std::endl;
         }
     }
 

@@ -31,7 +31,7 @@ find_package(open3d_conversions REQUIRED) # for converting to ROS PointCloud2
 find_package(config_utilities REQUIRED)
 
 
-set(CMAKE_BUILD_TYPE Debug)
+# set(CMAKE_BUILD_TYPE Release)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

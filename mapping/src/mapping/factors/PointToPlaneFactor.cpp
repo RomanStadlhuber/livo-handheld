@@ -20,7 +20,6 @@ namespace mapping
           planeNormal_(planeNormal),
           planeNormalOffsetD_(planeNormalOffsetD),
           totalPoints_(0),
-          meanFactor_(1.0),
           clusterId_(clusterId)
     {
         // Calculate total number of points for dimensionality
@@ -28,7 +27,6 @@ namespace mapping
         {
             totalPoints_ += points.size();
         }
-        meanFactor_ = 1.0 / static_cast<double>(totalPoints_);
     }
 
     gtsam::Vector PointToPlaneFactor::unwhitenedError(
@@ -37,17 +35,17 @@ namespace mapping
     {
         const size_t numKeys = keys().size();
 
-        // r is Nx1 where N is the number of keys (poses) connected to this factor
-        gtsam::Vector errorVec = gtsam::Vector::Zero(numKeys);
+        // r is a scalar
+        gtsam::Vector errorVec = gtsam::Vector::Zero(1);
 
         // H is a vector of jacobians for each variable
-        // H_i is (numKeys x 6) for pose i
+        // H_i is (1 x 6) for pose i
         if (H)
         {
             H->resize(numKeys);
             for (size_t i = 0; i < numKeys; ++i)
             {
-                (*H)[i] = gtsam::Matrix::Zero(numKeys, 6);
+                (*H)[i] = gtsam::Matrix::Zero(1, 6);
             }
         }
 
@@ -57,17 +55,17 @@ namespace mapping
             // Get the pose estimate for this keyframe using the actual key
             const gtsam::Pose3 w_T_imu = values.at<gtsam::Pose3>(keys()[keyIdx]);
 
-            double r_i = 0.0; // mean error (1/N) * sum(r_i_k^2) for i-th keyframe
-
+            // accumulator for Jacobian terms
+            gtsam::Matrix16 accumulatedJacobian = gtsam::Matrix16::Zero();
             // Compute error and Jacobian for each point from this keyframe
             for (const std::shared_ptr<Eigen::Vector3d> &scanPointPtr : scanPoints)
             {
-                // ...existing code for computing r_i_k...
+                // Transform point from lidar frame to world frame
                 const gtsam::Point3
                     l_p(*scanPointPtr),
                     w_p = w_T_imu.compose(imu_T_lidar_).transformFrom(l_p);
-                const double r_i_k = planeNormal_->dot(w_p) - planeNormalOffsetD_;
-                r_i += meanFactor_ * std::pow(r_i_k, 2);
+                // Point-to-plane distance (signed)
+                errorVec(0) += planeNormal_->dot(w_p) - planeNormalOffsetD_;
 
                 if (H)
                 {
@@ -75,16 +73,17 @@ namespace mapping
                     const Eigen::Matrix3d
                         i_R_l = imu_T_lidar_.rotation().matrix(),
                         w_R_i = w_T_imu.rotation().matrix();
-                    const Eigen::Vector3d i_t_l = imu_T_lidar_.translation();
-
-                    gtsam::Matrix16 D_error_D_pose = gtsam::Matrix16::Zero();
-                    D_error_D_pose.head<3>() = 2 * meanFactor_ * r_i_k * -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
-                    D_error_D_pose.tail<3>() = 2 * meanFactor_ * r_i_k * nT;
-                    (*H)[keyIdx].row(keyIdx) += D_error_D_pose;
+                    const gtsam::Point3 i_t_l = imu_T_lidar_.translation();
+                    gtsam::Matrix16 D_r_D_X = gtsam::Matrix16::Zero();
+                    D_r_D_X.head<3>() = -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
+                    D_r_D_X.tail<3>() = nT;
+                    accumulatedJacobian += D_r_D_X;
                 }
             }
-            errorVec(keyIdx) = r_i;
+            if (H)
+                (*H)[keyIdx] = accumulatedJacobian / static_cast<double>(totalPoints_);
         }
+        errorVec /= static_cast<double>(totalPoints_);
         return errorVec;
     }
 

@@ -14,7 +14,11 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
+// Visualization with Open3D
+#ifndef DISABLEVIZ
 #include <Visualization.hpp>
+#endif
+
 #include <mapping/factors/PointToPlaneFactor.hpp>
 #include <mapping/Config.hpp>
 

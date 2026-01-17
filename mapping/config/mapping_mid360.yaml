@@ -12,9 +12,9 @@ lidar_frontend:
     max_points: 20
     max_plane_thickness: 0.1 # [m]
   keyframe:
-    thresh_distance: 0.075 # [m]
-    thresh_angle: 0.087 # [rad], ~5 degrees
-    thresh_elapsed_scans: 5
+    thresh_distance: 0.1 # [m]
+    thresh_angle: 0.174 # [rad], ~10 degrees
+    thresh_elapsed_scans: 10
 
 point_filter:
   min_distance: 2.5 # [m]
