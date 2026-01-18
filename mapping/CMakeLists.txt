@@ -46,6 +46,7 @@ if(BUILD_TESTING)
 endif()
 
 add_library(mapping
+  src/mapping/factors/PlanarClusterFactor.cpp
   src/mapping/factors/PointToPlaneFactor.cpp
   src/mapping/Visualization.cpp
   src/mapping/MappingSystem.cpp
