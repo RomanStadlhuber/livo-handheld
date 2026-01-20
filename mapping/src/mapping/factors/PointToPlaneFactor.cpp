@@ -30,10 +30,19 @@ namespace mapping
     }
 
     gtsam::Vector PointToPlaneFactor::unwhitenedError(
-        const gtsam::Values &_,
-        boost::optional<std::vector<gtsam::Matrix> &> __) const
+        const gtsam::Values &x,
+        boost::optional<std::vector<gtsam::Matrix> &> H) const
     {
-        throw std::runtime_error("PointToPlaneFactor::unwhitenedError is deprecated. Use computeErrorAndJacobians instead.");
+        auto [errorVec, Hs] = computeErrorAndJacobians(x);
+        if (H)
+        {
+            // Copy computed Jacobians to output
+            for (size_t i = 0; i < Hs.size(); ++i)
+            {
+                (*H)[i] = Hs[i];
+            }
+        }
+        return errorVec;
     }
 
     boost::shared_ptr<gtsam::GaussianFactor> PointToPlaneFactor::linearize(const gtsam::Values &x) const
@@ -46,6 +55,7 @@ namespace mapping
         {
             terms.emplace_back(keys()[i], Hs[i]);
         }
+        // std::cout << "P2P factor error: " << errorVec.transpose() << std::endl;
         return boost::make_shared<gtsam::JacobianFactor>(terms, b);
     }
 
@@ -84,10 +94,9 @@ namespace mapping
                 D_r_D_X.tail<3>() = 2 * meanFactor * r_i * nT * w_R_i;
                 Hx += D_r_D_X;
             }
-            errorVec *= meanFactor;
-            Hx *= meanFactor;
             Hs.push_back(Hx);
         }
+        errorVec *= meanFactor;
         return {errorVec, Hs};
     }
 
