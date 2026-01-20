@@ -32,7 +32,7 @@ namespace mapping
         PointToPlaneFactor(
             const gtsam::KeyVector &keys,
             const gtsam::Pose3 &imu_T_lidar,
-            const std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> &scanPointsPerKey,
+            const std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> &scanPointsPerKey,
             const std::shared_ptr<Eigen::Vector3d> &planeNormal,
             double planeNormalOffsetD,
             const gtsam::SharedNoiseModel &noiseModel,
@@ -46,6 +46,8 @@ namespace mapping
             const gtsam::Values &values,
             boost::optional<std::vector<gtsam::Matrix> &> H = boost::none) const override;
 
+        boost::shared_ptr<gtsam::GaussianFactor> linearize(const gtsam::Values &x) const override;
+
         /// @brief Clone method required for GTSAM factor copying
         gtsam::NonlinearFactor::shared_ptr clone() const override;
 
@@ -55,8 +57,11 @@ namespace mapping
         void print(const std::string &s = "", const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
 
     private:
+        std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> computeErrorAndJacobians(const gtsam::Values &values) const;
+
+    private:
         gtsam::Pose3 imu_T_lidar_;
-        std::unordered_map<size_t, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey_;
+        std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey_;
         std::shared_ptr<Eigen::Vector3d> planeNormal_;
         double planeNormalOffsetD_;
         /// @brief Total number of points associated with this factor.
