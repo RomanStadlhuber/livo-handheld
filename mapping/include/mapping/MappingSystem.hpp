@@ -172,6 +172,7 @@ namespace mapping
         // create new clusters from points
         void createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints);
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
+        void augmentClustersFromKeyframe(const uint32_t &idxKeyframe);
         void removeKeyframeFromClusters(const u_int32_t &idxKeyframe);
         /// @brief Summarize current clusters for debugging purposes.
         void summarizeClusters() const;

@@ -165,6 +165,11 @@ namespace mapping
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
+        std::vector<SubmapIdxPointIdx> clusterPoints; // empty for initial keyframe
+        clusterPoints.reserve(keyframeSubmaps_.at(idxNewKF)->points_.size());
+        for (size_t i = 0; i < keyframeSubmaps_.at(idxNewKF)->points_.size(); ++i)
+            clusterPoints.emplace_back(idxNewKF, static_cast<int>(i));
+        createNewClusters(idxNewKF, clusterPoints);
         // Clear lidar buffer
         lidarBuffer_.clear();
 
@@ -375,6 +380,11 @@ namespace mapping
         // compute the actual cluster parameters (updated centroid, normal, thickness) based on all associated points
         for (auto const &cluster : clusters_)
         {
+            if (cluster.second.size() < config_.lidar_frontend.clustering.min_points)
+            {
+                clusterValidity_[cluster.first] = false;
+                continue;
+            }
             auto const &[clusterId, clusterPointIdxs] = cluster;
             // collect all points associated with this cluster
             std::vector<Eigen::Vector3d> clusterPoints;
@@ -449,12 +459,27 @@ namespace mapping
         }
     }
 
+    void MappingSystem::augmentClustersFromKeyframe(const uint32_t &idxKeyframe)
+    {
+        // naive implementation that just adqs a subsampled set of points as new clusters
+        // these points may already be associated with an existing cluster,
+        // the papers do not mention any deduplication strategy.
+        // I will keep it like this now for simplicity
+        constexpr std::size_t stride = 5;
+        for (std::size_t i = 0; i < keyframeSubmaps_[idxKeyframe]->points_.size(); i += stride)
+        {
+            std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, i}});
+            clusters_.emplace(++clusterIdCounter_, newCluster);
+        }
+    }
+
     void MappingSystem::createAndUpdateFactors()
     {
         for (auto itValidCluster = clusters_.begin(); itValidCluster != clusters_.end(); ++itValidCluster)
         {
             auto const &[clusterId, clusterPoints] = *itValidCluster;
-            if (!(clusterPoints.size() >= 2)) // need at least 2 keyframes to factor in a constraint
+            // skip if cluster is invalid or too small
+            if (!clusterValidity_[clusterId] || clusterPoints.size() < config_.lidar_frontend.clustering.min_points) // need at least 2 keyframes to factor in a constraint
                 continue;
             const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
             const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
@@ -580,7 +605,7 @@ namespace mapping
         newValues_.insert(X(idxKeyframe), w_X_curr_.pose());
         newValues_.insert(V(idxKeyframe), w_X_curr_.v());
         newValues_.insert(B(idxKeyframe), currBias_);
-        // summarizeClusters();
+        summarizeClusters();
         // NOTE: will internally update factorsToRemove to drop outdated smart factors
         // the outdated factors will be replaced by extended ones with additional tracks
         createAndUpdateFactors();
@@ -610,6 +635,9 @@ namespace mapping
 
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
+
+        // augment clusters with new points from this keyframes so we don't lose tracking
+        augmentClustersFromKeyframe(idxKeyframe);
 
         if (idxKeyframe > static_cast<uint32_t>(config_.backend.sliding_window_size))
         {
