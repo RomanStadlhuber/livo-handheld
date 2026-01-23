@@ -26,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+// NOTE: used for stopwatches, remove when done debugging
 #include <chrono>
 
 namespace mapping
@@ -168,13 +169,10 @@ namespace mapping
         /// @param idxKeyframe Index of the current keyframe
         /// @return True if the keyframe was tracked successfully
         bool trackScanPointsToClusters(const uint32_t &idxKeyframe);
-        /// @brief Remove all tracks associated with a keyframe and sanitize the clusters pointing to them.
-        /// @param idxKeyframe Index of the keyframe to remove tracks for.
-        void removeTracksFromClusters(const u_int32_t &idxKeyframe);
-        /// @brief Erase all tracks associated with a cluster, erase the cluster itself.
-        /// @param itCluster Iterator to the cluster to erase.
-        /// @return Iterator to the next cluster after the erased one.
-        Clusters::iterator eraseClusterAndTracks(Clusters::iterator &itCluster);
+        // create new clusters from points
+        void createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints);
+        void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
+        void removeKeyframeFromClusters(const u_int32_t &idxKeyframe);
         /// @brief Summarize current clusters for debugging purposes.
         void summarizeClusters() const;
         /// @brief Summarize current factors for debugging purposes.
@@ -242,15 +240,16 @@ namespace mapping
 
         // Mapping data
         std::list<ScanBuffer> scanBuffer_;
-        /// @brief Cluster tracks are built up with candidates (including invalid ones) during searach
-        /// and are pruned during cluster validation (num. points, plane fit).
-        ClusterTracks clusterTracks_;
-        /// @brief Clusters are built from associated track candidates and point back to them for access of point data.
-        Clusters clusters_;
+        // LiDAR Same Plane Point Clusters
+        std::map<ClusterId, std::map<u_int32_t, std::size_t>> clusters_;
+        /// @brief The thickness of each added cluster track
+        std::map<ClusterId, std::vector<double>> clusterPlaneThicknessHistory_;
         /// @brief The thickness of a clusters fitted plane, used for validation and modelling noise characteristics.
-        std::unordered_map<ClusterId, double> clusterPlaneThickness_;
+        std::map<ClusterId, double> clusterPlaneThickness_;
+        std::map<ClusterId, double> clusterSigmas_;
+        std::map<ClusterId, bool> clusterValidity_;
         /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing constraints.
-        std::unordered_map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
+        std::map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
         gtsam::FactorIndices factorsToRemove_;
         size_t scansSinceLastKeyframe_ = 0;
 
