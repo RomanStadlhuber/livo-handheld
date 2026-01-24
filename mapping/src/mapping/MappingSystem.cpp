@@ -355,7 +355,6 @@ namespace mapping
                 if (pointToPlaneDist > config_.lidar_frontend.clustering.max_plane_thickness)
                     continue; // invalid track
             }
-            continue; // plane fit not good enough
             // associate the nearest point as a track to this cluster
             std::size_t idxKnnNearest = knnIndices[0];
             for (std::size_t i = 1; i < knnIndices.size(); ++i)
@@ -377,6 +376,7 @@ namespace mapping
         auto stopwatchKNNEnd = std::chrono::high_resolution_clock::now();
         auto durationKNN = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchKNNEnd - stopwatchKNNStart).count();
         std::cout << "::: [DEBUG] KNN search and cluster association took " << durationKNN << " ms :::" << std::endl;
+        std::size_t numValidClusters = 0;
         // compute the actual cluster parameters (updated centroid, normal, thickness) based on all associated points
         for (auto const &cluster : clusters_)
         {
@@ -422,12 +422,14 @@ namespace mapping
                 const double pointToPlaneDist = std::abs(clusterNormal.dot(clusterPointsMat.col(i)));
                 if (pointToPlaneDist > 6.0 * adaptiveSigma)
                 {
-                    std::cout << "::: [WARNING] Cluster " << clusterId << " failed 6-sigma test with point-to-plane distance " << pointToPlaneDist << " :::" << std::endl;
+                    // std::cout << "::: [WARNING] Cluster " << clusterId << " failed 6-sigma test with point-to-plane distance " << pointToPlaneDist << " :::" << std::endl;
                     clusterValidity_[clusterId] = false;
                 }
             }
+            if (clusterValidity_[clusterId])
+                numValidClusters++;
         }
-        std::cout << "::: [INFO] Tracked " << validTracks << " cluster points in keyframe " << idxKeyframe << " :::" << std::endl;
+        std::cout << "::: [INFO] keyframe " << idxKeyframe << " had " << validTracks << " tracks and " << numValidClusters << " valid clusters :::" << std::endl;
         return validTracks > 0;
     }
 
@@ -436,7 +438,9 @@ namespace mapping
         for (auto const &[idxSubmap, idxPoint] : clusterPoints)
         {
             std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
-            clusters_.emplace(++clusterIdCounter_, newCluster);
+            auto const clusterId = clusterIdCounter_++;
+            clusters_.emplace(clusterId, newCluster);
+            clusterValidity_.emplace(clusterId, false);
         }
     }
 
@@ -470,6 +474,7 @@ namespace mapping
         {
             std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, i}});
             clusters_.emplace(++clusterIdCounter_, newCluster);
+            clusterValidity_.emplace(clusterIdCounter_, false);
         }
     }
 
@@ -479,7 +484,7 @@ namespace mapping
         {
             auto const &[clusterId, clusterPoints] = *itValidCluster;
             // skip if cluster is invalid or too small
-            if (!clusterValidity_[clusterId] || clusterPoints.size() < config_.lidar_frontend.clustering.min_points) // need at least 2 keyframes to factor in a constraint
+            if (!clusterValidity_.at(clusterId) || clusterPoints.size() < config_.lidar_frontend.clustering.min_points) // need at least 2 keyframes to factor in a constraint
                 continue;
             const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
             const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
@@ -529,10 +534,13 @@ namespace mapping
                     break;
                 }
             }
+
+            /*
             // TODO: remove this when bad factors are fixed
             // (print when the factor is a new add)
             if (isFactorAdded)
                 ptpFactor->print();
+            */
 
             newSmootherFactors_.add(ptpFactor);
         }
@@ -740,10 +748,19 @@ namespace mapping
 
     void MappingSystem::summarizeClusters() const
     {
+        std::cout << "::: [DEBUG] Cluster summary :::" << std::endl;
         for (auto const &cluster : clusters_)
         {
-            std::cout << "::: [DEBUG] Cluster summary :::" << std::endl;
             auto const &[clusterId, clusterPoints] = cluster;
+            // skip invalid clusters, otherwise it's too much logging going on
+            if (!clusterValidity_.at(clusterId))
+                continue;
+            bool hasParams = clusterPlaneThickness_.find(clusterId) != clusterPlaneThickness_.end() && clusterSigmas_.find(clusterId) != clusterSigmas_.end() && clusterValidity_.find(clusterId) != clusterValidity_.end();
+            if (!hasParams)
+            {
+                std::cout << "\tId: " << clusterId << " size: " << clusterPoints.size() << " (no params)" << std::endl;
+                continue;
+            }
             std::cout << "\tId: " << clusterId << " size: " << clusterPoints.size() << " thickness: " << clusterPlaneThickness_.at(clusterId)
                       << " sigma: " << clusterSigmas_.at(clusterId)
                       << " valid: " << (clusterValidity_.at(clusterId) ? "true" : "false") << std::endl;
