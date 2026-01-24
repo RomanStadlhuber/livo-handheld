@@ -174,6 +174,7 @@ namespace mapping
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
         void augmentClustersFromKeyframe(const uint32_t &idxKeyframe);
         void removeKeyframeFromClusters(const u_int32_t &idxKeyframe);
+        void pruneClusters(const uint32_t &idxKeyframe);
         /// @brief Summarize current clusters for debugging purposes.
         void summarizeClusters() const;
         /// @brief Summarize current factors for debugging purposes.
@@ -256,7 +257,6 @@ namespace mapping
 
         // Keyframe data
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
-        std::map<uint32_t, std::shared_ptr<open3d::geometry::KDTreeFlann>> submapKDTrees_;
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
         std::map<uint32_t, double> keyframeTimestamps_;
 
