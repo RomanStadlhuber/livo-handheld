@@ -33,6 +33,11 @@ namespace mapping
         const gtsam::Values &x,
         boost::optional<std::vector<gtsam::Matrix> &> H) const
     {
+        if (invalid)
+        {
+            throw std::runtime_error("Attempting to compute error for an invalid PointToPlaneFactor.");
+        }
+
         auto [errorVec, Hs] = computeErrorAndJacobians(x);
         if (H)
         {
@@ -47,6 +52,10 @@ namespace mapping
 
     boost::shared_ptr<gtsam::GaussianFactor> PointToPlaneFactor::linearize(const gtsam::Values &x) const
     {
+        if (invalid)
+        {
+            throw std::runtime_error("Attempting to linearize an invalid PointToPlaneFactor.");
+        }
         auto [errorVec, Hs] = computeErrorAndJacobians(x);
         gtsam::Vector b = -errorVec;
         noiseModel()->WhitenSystem(Hs, b);

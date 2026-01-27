@@ -79,6 +79,24 @@ namespace mapping
         std::shared_ptr<Eigen::Vector3d> normal;
     };
 
+    /// @brief State of a point cluster in the tracking system.
+    /// See detail descriptoin for relationship to managing factors.
+    enum class ClusterState
+    {
+        /// @brief When the cluster does not yet contain enough points. New clusters start out at this state.
+        /// @details No factor can be created yet.
+        Premature,
+        /// @brief When the cluster was tracked successfully in a new keyframe.
+        /// @details Create a new factor and add it to the graph.
+        Tracked,
+        /// @brief  When the cluster could not be tracked in the new keyframe.
+        /// @details A factor must already exist for this cluster. It is updated incl. the new keyframe association.
+        Idle,
+        /// @brief Marked for removal, e.g. when failing the 6-sigma test or marginalized out.
+        /// @details Any factors associated with this cluster must be removed from the graph.
+        Pruned,
+    };
+
     using SlidingWindowStates = std::map<uint32_t, NavStateStamped>;
 
     /// @brief Indexing of points in a submap for building point clusters
@@ -90,10 +108,6 @@ namespace mapping
 
     using ClusterTracks = std::map<SubmapIdxPointIdx, ClusterId>;
     using Clusters = std::map<ClusterId, std::vector<ClusterTracks::iterator>>;
-
-    /// @brief Factors associated with valid clusters tracks including their index in the smoothers factor graph
-    using ClusterFactors = std::map<ClusterId, std::pair<PointToPlaneFactor::shared_ptr, size_t>>;
-
     /// @brief Invalid cluster ID sentinel value
     constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
 
@@ -189,6 +203,11 @@ namespace mapping
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
         void removeKeyframeFromClusters(const u_int32_t &idxKeyframe);
         void pruneClusters(const uint32_t &idxKeyframe);
+        // Shorthand check for whether a cluster is valid (= tracking or idle).
+        bool isClusterValid(const ClusterId &clusterId) const
+        {
+            return !(clusterStates_.at(clusterId) == ClusterState::Premature || clusterStates_.at(clusterId) == ClusterState::Pruned);
+        };
         /// @brief Summarize current clusters for debugging purposes.
         void summarizeClusters() const;
         /// @brief Summarize current factors for debugging purposes.
@@ -263,7 +282,8 @@ namespace mapping
         /// @brief The thickness of a clusters fitted plane, used for validation and modelling noise characteristics.
         std::map<ClusterId, double> clusterPlaneThickness_;
         std::map<ClusterId, double> clusterSigmas_;
-        std::map<ClusterId, bool> clusterValidity_;
+        std::map<ClusterId, ClusterState> clusterStates_;
+        std::map<ClusterId, PointToPlaneFactor::shared_ptr> clusterFactors_;
         /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing constraints.
         std::map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
         gtsam::FactorIndices factorsToRemove_;

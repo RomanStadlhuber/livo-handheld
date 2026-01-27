@@ -56,6 +56,9 @@ namespace mapping
 
         void print(const std::string &s = "", const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
 
+        // trigger, cannot (and should not) be undone
+        void markInvalid() const { invalid = true; }
+
     private:
         std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> computeErrorAndJacobians(const gtsam::Values &values) const;
 
@@ -66,6 +69,8 @@ namespace mapping
         double planeNormalOffsetD_;
         /// @brief Total number of points associated with this factor.
         size_t totalPoints_;
+        // safeguard flag to avoid optimizing invalid factors that are not yet removed
+        mutable bool invalid = false;
 
     public:
         /// @brief Identifier for the cluster associated with this factor used for lookup to replace/delete.

@@ -371,8 +371,8 @@ namespace mapping
         for (auto const &cluster : clusters_)
         {
             auto const &[clusterId, clusterPointIdxs] = cluster;
-            // skip tracking invalid clusters (i.e. where tracking was already lost)
-            if (clusterPointIdxs.size() > config_.lidar_frontend.clustering.min_points && clusterValidity_[clusterId] == false)
+            // skip tracking clusters that are marked for removal
+            if (clusterStates_.at(clusterId) == ClusterState::Pruned)
                 continue;
             auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.rbegin(); // get the cluster point from the latest keyframe
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps_[idxClusterKF]->points_[idxSubmapPt];
@@ -434,13 +434,9 @@ namespace mapping
              * - they are not associated with the current keyframe (tracking lost)
              */
             auto const &[clusterId, clusterPointIdxs] = cluster;
-            if (
-                clusterPointIdxs.size() < config_.lidar_frontend.clustering.min_points // premature
-                || clusterPointIdxs.find(idxKeyframe) == clusterPointIdxs.end())       // no association with current KF
-            {
-                clusterValidity_[clusterId] = false;
-                continue;
-            }
+            const bool clusterTooSmall = clusterPointIdxs.size() < config_.lidar_frontend.clustering.min_points;
+            if (clusterTooSmall || clusterStates_.at(clusterId) == ClusterState::Pruned)
+                continue; // skip
             // collect all points associated with this cluster
             std::vector<Eigen::Vector3d> clusterPoints;
             clusterPoints.reserve(clusterPointIdxs.size());
@@ -452,9 +448,9 @@ namespace mapping
             // fit plane to all points
             const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat] = planeFitSVD(clusterPoints);
             // skip if plane fit is degenerate (collinear or non-planar points)
-            if (!planeValid)
+            if (!planeValid) // mark for removal if plane is invalid
             {
-                clusterValidity_[clusterId] = false;
+                clusterStates_[clusterId] = ClusterState::Pruned;
                 continue;
             }
             // average plane thickness from historical tracks
@@ -469,19 +465,18 @@ namespace mapping
             clusterNormals_[clusterId] = std::make_shared<Eigen::Vector3d>(planeNormal);
             clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
             clusterSigmas_[clusterId] = adaptiveSigma;
-            // check if all point-to-plane distances pass the 6-sigma test
-            clusterValidity_[clusterId] = true; // reset validity
+            clusterStates_[clusterId] = ClusterState::Tracked;
             for (long int i = 0; i < clusterPointsMat.rows(); ++i)
             {
                 const double pointToPlaneDist = std::abs(planeNormal.dot(clusterPointsMat.row(i)));
                 if (pointToPlaneDist > 3.0 * adaptiveSigma)
                 {
                     // std::cout << "::: [WARNING] Cluster " << clusterId << " failed 6-sigma test with point-to-plane distance " << pointToPlaneDist << " :::" << std::endl;
-                    clusterValidity_[clusterId] = false;
+                    clusterStates_[clusterId] = ClusterState::Idle;
                     break;
                 }
             }
-            if (clusterValidity_[clusterId])
+            if (clusterStates_.at(clusterId) == ClusterState::Tracked)
                 numValidClusters++;
         }
         std::cout << "::: [INFO] keyframe " << idxKeyframe << " had " << validTracks << " tracks and " << numValidClusters << " valid clusters :::" << std::endl;
@@ -548,7 +543,7 @@ namespace mapping
             std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
             auto const clusterId = clusterIdCounter_++;
             clusters_.emplace(clusterId, newCluster);
-            clusterValidity_.emplace(clusterId, false);
+            clusterStates_.emplace(clusterId, ClusterState::Premature);
             numCreated++;
 
             knnIndices.clear();
@@ -573,6 +568,8 @@ namespace mapping
             if (itPoint != clusterPoints.end())
             {
                 clusterPoints.erase(itPoint);
+                if (clusterPoints.size() < config_.lidar_frontend.clustering.min_points)
+                    clusterStates_[clusterId] = ClusterState::Pruned;
             }
         }
     }
@@ -582,24 +579,15 @@ namespace mapping
         if (idxKeyframe < static_cast<size_t>(config_.backend.sliding_window_size))
             return;
         std::set<ClusterId> clustersToErase;
-        for (auto const &cluster : clusters_)
-        {
-            const auto &[clusterId, clusterPoints] = cluster;
+        for (const auto &[clusterId, clusterPoints] : clusters_)
             // erase if cluster has enough points but is invalid
-            if (!clusterValidity_.at(clusterId) && clusterPoints.size() > config_.lidar_frontend.clustering.min_points)
-            {
+            if (clusterStates_.at(clusterId) == ClusterState::Pruned)
                 clustersToErase.insert(clusterId);
-            }
-            else if (clusterPoints.rbegin()->first != idxKeyframe)
-            {
-                // erase if the cluster is not associated with the latest keyframe
-                clustersToErase.insert(clusterId);
-            }
-        }
+
         for (const auto &clusterId : clustersToErase)
         {
             clusters_.erase(clusterId);
-            clusterValidity_.erase(clusterId);
+            clusterStates_.erase(clusterId);
             clusterCenters_.erase(clusterId);
             clusterNormals_.erase(clusterId);
             clusterPlaneThickness_.erase(clusterId);
@@ -613,64 +601,96 @@ namespace mapping
     {
         for (auto const &[clusterId, clusterPoints] : clusters_)
         {
-            // skip if cluster is invalid or too small
-            if (!clusterValidity_.at(clusterId) || clusterPoints.size() < config_.lidar_frontend.clustering.min_points) // need at least 2 keyframes to factor in a constraint
+            const ClusterState clusterState = clusterStates_.at(clusterId);
+            // skip premature clusters, but pruned clusters need to be handled explicitly
+            if (clusterState == ClusterState::Premature)
                 continue;
-            const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
-            const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
-            const double adaptiveSigma = clusterSigmas_[clusterId];
-
-            // 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
-            gtsam::KeyVector keys;
-            keys.reserve(clusterPoints.size());
-            std::unordered_map<uint32_t, gtsam::Key> keyframeToGraphKeyMapping;
-            // 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
-            std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
-            size_t totalPoints = 0;
-            for (auto const &[idxKeyframe, idxPoint] : clusterPoints)
+            // decide what to do based on the cluster state
+            switch (clusterStates_.at(clusterId))
             {
-                const gtsam::Key key = X(idxKeyframe);
-                keys.push_back(key);
-                keyframeToGraphKeyMapping[idxKeyframe] = key;
-                // scan points are passed to factor in world frame
-                scanPointsPerKey[key].push_back(std::make_shared<Eigen::Vector3d>(
-                    // transform point in keyframe from world frame to lidar frame
-                    keyframePoses_[idxKeyframe]->transformTo(keyframeSubmaps_[idxKeyframe]->points_[idxPoint])));
-                totalPoints++;
-            }
-
-            // Noise model for cluster point factor
-            gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
-            const PointToPlaneFactor::shared_ptr ptpFactor = boost::make_shared<PointToPlaneFactor>(
-                keys,
-                imu_T_lidar_,
-                scanPointsPerKey,
-                clusterNormal,
-                clusterNormal->dot(*clusterCenter),
-                noiseModel,
-                clusterId);
-
-            const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
-            bool isFactorAdded = true;
-            for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+            case ClusterState::Tracked:
             {
-                const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
-                const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
-                if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
+                const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
+                const double adaptiveSigma = clusterSigmas_[clusterId];
+                // 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
+                gtsam::KeyVector keys;
+                keys.reserve(clusterPoints.size());
+                std::unordered_map<uint32_t, gtsam::Key> keyframeToGraphKeyMapping;
+                // 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
+                std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
+                size_t totalPoints = 0;
+                for (auto const &[idxKeyframe, idxPoint] : clusterPoints)
                 {
-                    // mark existing factor for removal
-                    factorsToRemove_.push_back(gtsam::Key{factorKey});
-                    isFactorAdded = false;
-                    break;
+                    const gtsam::Key key = X(idxKeyframe);
+                    keys.push_back(key);
+                    keyframeToGraphKeyMapping[idxKeyframe] = key;
+                    // scan points are passed to factor in world frame
+                    scanPointsPerKey[key].push_back(std::make_shared<Eigen::Vector3d>(
+                        // transform point in keyframe from world frame to lidar frame
+                        keyframePoses_[idxKeyframe]->transformTo(keyframeSubmaps_[idxKeyframe]->points_[idxPoint])));
+                    totalPoints++;
+                }
+                gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                const PointToPlaneFactor::shared_ptr ptpFactor = boost::make_shared<PointToPlaneFactor>(
+                    keys,
+                    imu_T_lidar_,
+                    scanPointsPerKey,
+                    clusterNormal,
+                    clusterNormal->dot(*clusterCenter),
+                    noiseModel,
+                    clusterId);
+                if (clusterFactors_.find(clusterId) == clusterFactors_.end()) // factor is new and must be added
+                {
+                    ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId));
+                    newSmootherFactors_.add(ptpFactor);
+                    clusterFactors_.emplace(clusterId, ptpFactor);
+                    continue;
+                }
+                else
+                {
+                    // existing factors need to be updated explicitly
+                    const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
+                    for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+                    {
+                        const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(smootherFactors[factorKey]);
+                        if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                        {
+                            factorsToRemove_.push_back(gtsam::Key{factorKey});
+                            break;
+                        }
+                    }
+                    /**
+                     * TODO: in the future, extend factor class to allow in-place modificaiton
+                     */
+                    clusterFactors_[clusterId] = ptpFactor; // update factor cache
+                    newSmootherFactors_.add(ptpFactor);
                 }
             }
-
-            // TODO: remove this when bad factors are fixed
-            // (print when the factor is a new add)
-            if (isFactorAdded)
-                ptpFactor->print();
-
-            newSmootherFactors_.add(ptpFactor);
+            break;
+            case ClusterState::Idle:
+                // skip adding/updating factor
+                continue;
+            case ClusterState::Pruned: // factor must be removed from the smoother
+            {
+                const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
+                for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+                {
+                    const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
+                    const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
+                    if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                    {
+                        existingPtpFactor->markInvalid(); // mark factor as invalid to avoid further optimization
+                        // mark existing factor for removal
+                        factorsToRemove_.push_back(gtsam::Key{factorKey});
+                        break;
+                    }
+                }
+            }
+            default:
+                // should not reach here due to earlier checks
+                continue;
+            }
         }
         std::cout << "::: [INFO] adding " << newSmootherFactors_.size() - factorsToRemove_.size()
                   << " LiDAR factors, updating " << factorsToRemove_.size() << " :::" << std::endl;
@@ -884,18 +904,24 @@ namespace mapping
         for (auto const &cluster : clusters_)
         {
             auto const &[clusterId, clusterPoints] = cluster;
-            // skip invalid clusters, otherwise it's too much logging going on
-            if (!clusterValidity_.at(clusterId))
+            if (!isClusterValid(clusterId)) // skip invalid clusters, otherwise it's too much logging going on
                 continue;
-            bool hasParams = clusterPlaneThickness_.find(clusterId) != clusterPlaneThickness_.end() && clusterSigmas_.find(clusterId) != clusterSigmas_.end() && clusterValidity_.find(clusterId) != clusterValidity_.end();
-            if (!hasParams)
+            std::string stateStr;
+            switch (clusterStates_.at(clusterId))
             {
-                std::cout << "\tId: " << clusterId << " size: " << clusterPoints.size() << " (no params)" << std::endl;
-                continue;
+            case ClusterState::Tracked:
+                stateStr = "tracked";
+                break;
+            case ClusterState::Idle:
+                stateStr = "idle";
+                break;
+            default: // safeguard (shoud not happen)
+                stateStr = "premature or marked for removal";
+                break;
             }
             std::cout << "\tId: " << clusterId << " size: " << clusterPoints.size() << " thickness: " << clusterPlaneThickness_.at(clusterId)
                       << " sigma: " << clusterSigmas_.at(clusterId)
-                      << " valid: " << (clusterValidity_.at(clusterId) ? "true" : "false") << std::endl;
+                      << " state: " << stateStr << std::endl;
         }
     }
 
@@ -934,7 +960,7 @@ namespace mapping
         for (auto clusterIt = clusters_.begin(); clusterIt != clusters_.end(); ++clusterIt)
         {
             auto const &[clusterId, clusterPoints] = *clusterIt;
-            if (!clusterValidity_.at(clusterId))
+            if (!isClusterValid(clusterId))
                 continue;
             PointCluster clusterRepresentation{clusterCenters_.at(clusterId), clusterNormals_.at(clusterId)};
             currentClusters.emplace(clusterId, clusterRepresentation);
