@@ -317,6 +317,44 @@ namespace mapping
         lockLidarBuffer.unlock();
     }
 
+    std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd> MappingSystem::planeFitSVD(
+        const std::vector<Eigen::Vector3d> &points,
+        double planarityThreshold,
+        double linearityThreshold) const
+    {
+        const size_t numPoints = points.size();
+
+        // Compute centroid
+        Eigen::Vector3d planeCenter = Eigen::Vector3d::Zero();
+        for (const auto &pt : points)
+            planeCenter += pt;
+        planeCenter /= static_cast<double>(numPoints);
+
+        // Build centered points matrix (Nx3)
+        Eigen::MatrixXd planePoints(numPoints, 3);
+        for (size_t i = 0; i < numPoints; ++i)
+            planePoints.row(i) = (points[i] - planeCenter).transpose();
+
+        // SVD to find plane normal (smallest singular vector)
+        Eigen::JacobiSVD<Eigen::MatrixXd> svd(planePoints, Eigen::ComputeThinV);
+        Eigen::Vector3d planeNormal = svd.matrixV().col(2).normalized();
+
+        // Get singular values: σ₁ >= σ₂ >= σ₃
+        const Eigen::VectorXd singularValues = svd.singularValues();
+        const double sigma1 = singularValues(0);
+        const double sigma2 = singularValues(1);
+        const double sigma3 = singularValues(2);
+
+        // Check validity:
+        // 1. Planarity: σ₃/σ₂ <= threshold (points are flat, not a blob)
+        // 2. Non-linearity: σ₂/σ₁ >= threshold (points have 2D spread, not a line)
+        const bool isPlanar = (sigma2 > 1e-10) && (sigma3 / sigma2) <= planarityThreshold;
+        const bool notLinear = (sigma1 > 1e-10) && (sigma2 / sigma1) >= linearityThreshold;
+        const bool isValid = isPlanar && notLinear;
+
+        return {isValid, planeNormal, planeCenter, planePoints};
+    }
+
     bool MappingSystem::trackScanPointsToClusters(const uint32_t &idxKeyframe)
     {
         // Search for same-plane point clusters among all keyframes
@@ -347,24 +385,22 @@ namespace mapping
             if (knnFound < config_.lidar_frontend.knn_neighbors)
                 continue; // not enough neighbors found, skip this cluster
             const double nKnn = static_cast<double>(knnFound);
-            // fit a plane to the NN points
-            Eigen::Vector3d knnCenter = Eigen::Vector3d::Zero();
+            // collect KNN points and fit a plane
+            std::vector<Eigen::Vector3d> knnPoints;
+            knnPoints.reserve(knnFound);
             for (int i = 0; i < knnFound; ++i)
-                knnCenter += keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]];
-            knnCenter /= nKnn;
-            Eigen::MatrixXd knnPointsMat(3, knnFound);
-            for (int i = 0; i < knnFound; ++i)
-                knnPointsMat.col(i) = keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]] - knnCenter;
-            Eigen::JacobiSVD<Eigen::MatrixXd> svd(knnPointsMat, Eigen::ComputeThinU | Eigen::ComputeThinV);
-            Eigen::Vector3d planeNormal = svd.matrixU().col(2).normalized();
+                knnPoints.push_back(keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]]);
+            const auto [planeValid, planeNormal, knnCenter, knnPointsMat] = planeFitSVD(knnPoints);
+            // skip if plane fit is degenerate (collinear or non-planar points)
+            if (!planeValid)
+                continue;
             // validate plane fit by checking point-to-plane distances
             // (+ compute plane thickness during check)
             bool validPlane = true;
             double planeThickness = 0.0;
             for (int i = 0; i < knnFound; ++i)
             {
-                const Eigen::Vector3d ptDiff = keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]] - knnCenter;
-                const double pointToPlaneDist = std::abs(planeNormal.dot(ptDiff));
+                const double pointToPlaneDist = std::abs(planeNormal.dot(knnPointsMat.row(i)));
                 if (pointToPlaneDist > config_.lidar_frontend.clustering.max_plane_thickness)
                 {
                     validPlane = false;
@@ -407,21 +443,20 @@ namespace mapping
             }
             // collect all points associated with this cluster
             std::vector<Eigen::Vector3d> clusterPoints;
+            clusterPoints.reserve(clusterPointIdxs.size());
             for (auto const &pointIdxPair : clusterPointIdxs)
             {
                 const auto &[idxSubmap, idxPoint] = pointIdxPair;
                 clusterPoints.push_back(keyframeSubmaps_[idxSubmap]->points_[idxPoint]);
             }
             // fit plane to all points
-            Eigen::Vector3d clusterCenter = Eigen::Vector3d::Zero();
-            for (const auto &pt : clusterPoints)
-                clusterCenter += pt;
-            clusterCenter /= static_cast<double>(clusterPoints.size());
-            Eigen::MatrixXd clusterPointsMat(3, clusterPoints.size());
-            for (std::size_t i = 0; i < clusterPoints.size(); ++i)
-                clusterPointsMat.col(i) = clusterPoints[i] - clusterCenter;
-            Eigen::JacobiSVD<Eigen::MatrixXd> svd(clusterPointsMat, Eigen::ComputeThinU | Eigen::ComputeThinV);
-            Eigen::Vector3d planeNormal = svd.matrixU().col(2).normalized();
+            const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat] = planeFitSVD(clusterPoints);
+            // skip if plane fit is degenerate (collinear or non-planar points)
+            if (!planeValid)
+            {
+                clusterValidity_[clusterId] = false;
+                continue;
+            }
             // average plane thickness from historical tracks
             double planeThicknessCovariance = 0.0;
             // MSC-LIO, Eq. 19 (plane thickness covariance and adaptive sigma)
@@ -436,9 +471,9 @@ namespace mapping
             clusterSigmas_[clusterId] = adaptiveSigma;
             // check if all point-to-plane distances pass the 6-sigma test
             clusterValidity_[clusterId] = true; // reset validity
-            for (long int i = 0; i < clusterPointsMat.cols(); ++i)
+            for (long int i = 0; i < clusterPointsMat.rows(); ++i)
             {
-                const double pointToPlaneDist = std::abs(planeNormal.dot(clusterPointsMat.col(i)));
+                const double pointToPlaneDist = std::abs(planeNormal.dot(clusterPointsMat.row(i)));
                 if (pointToPlaneDist > 3.0 * adaptiveSigma)
                 {
                     // std::cout << "::: [WARNING] Cluster " << clusterId << " failed 6-sigma test with point-to-plane distance " << pointToPlaneDist << " :::" << std::endl;
@@ -455,16 +490,72 @@ namespace mapping
 
     void MappingSystem::createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints)
     {
-        std::size_t numCreated = 0;
+        std::size_t numCreated = 0, numRejected = 0;
+        const open3d::geometry::KDTreeFlann kdTree{*keyframeSubmaps_[idxKeyframe]};
+        std::vector<int> knnIndices(config_.lidar_frontend.knn_neighbors);
+        std::vector<double> knnDists(config_.lidar_frontend.knn_neighbors);
+
         for (auto const &[idxSubmap, idxPoint] : clusterPoints)
         {
+            // find nearest neighbors for the candidate point
+            const Eigen::Vector3d &queryPoint = keyframeSubmaps_[idxKeyframe]->points_[idxPoint];
+            const int knnFound = kdTree.SearchKNN(
+                queryPoint,
+                config_.lidar_frontend.knn_neighbors,
+                knnIndices,
+                knnDists);
+
+            if (knnFound < config_.lidar_frontend.knn_neighbors)
+            {
+                numRejected++;
+                continue; // not enough neighbors, skip this point
+            }
+
+            // collect neighbor points and fit a plane
+            std::vector<Eigen::Vector3d> knnPoints;
+            knnPoints.reserve(knnFound);
+            for (int i = 0; i < knnFound; ++i)
+                knnPoints.push_back(keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]]);
+
+            const auto [planeValid, planeNormal, planeCenter, planePointsMat] = planeFitSVD(knnPoints);
+
+            // skip if plane fit is degenerate (collinear or non-planar points)
+            if (!planeValid)
+            {
+                numRejected++;
+                continue;
+            }
+
+            // validate plane fit by checking all point-to-plane distances
+            bool validThickness = true;
+            for (int i = 0; i < knnFound; ++i)
+            {
+                const double pointToPlaneDist = std::abs(planeNormal.dot(planePointsMat.row(i)));
+                if (pointToPlaneDist > config_.lidar_frontend.clustering.max_plane_thickness)
+                {
+                    validThickness = false;
+                    break;
+                }
+            }
+
+            if (!validThickness)
+            {
+                numRejected++;
+                continue;
+            }
+
+            // plane fit is valid, create new cluster
             std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
             auto const clusterId = clusterIdCounter_++;
             clusters_.emplace(clusterId, newCluster);
             clusterValidity_.emplace(clusterId, false);
             numCreated++;
+
+            knnIndices.clear();
+            knnDists.clear();
         }
-        std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe << " :::" << std::endl;
+        std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe
+                  << " (" << numRejected << " rejected due to plane fit) :::" << std::endl;
     }
 
     void MappingSystem::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness)
@@ -484,24 +575,6 @@ namespace mapping
                 clusterPoints.erase(itPoint);
             }
         }
-    }
-
-    void MappingSystem::augmentClustersFromKeyframe(const uint32_t &idxKeyframe)
-    {
-        // naive implementation that just adqs a subsampled set of points as new clusters
-        // these points may already be associated with an existing cluster,
-        // the papers do not mention any deduplication strategy.
-        // I will keep it like this now for simplicity
-        constexpr std::size_t stride = 10;
-        std::size_t numAugmented = 0;
-        for (std::size_t i = 0; i < keyframeSubmaps_[idxKeyframe]->points_.size(); i += stride)
-        {
-            std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, i}});
-            clusters_.emplace(++clusterIdCounter_, newCluster);
-            clusterValidity_.emplace(clusterIdCounter_, false);
-            numAugmented++;
-        }
-        std::cout << "::: [INFO] Augmented " << numAugmented << " new clusters from keyframe " << idxKeyframe << " :::" << std::endl;
     }
 
     void MappingSystem::pruneClusters(const uint32_t &idxKeyframe)
@@ -708,8 +781,8 @@ namespace mapping
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
 
-        // augment clusters with new points from this keyframes so we don't lose tracking
-        // augmentClustersFromKeyframe(idxKeyframe);
+        // TODO: supplement new clusters from the current keyframe to avoid tracking loss
+        // --> only do this when tracking shows reasonable results in the first place ..
 
         if (idxKeyframe > static_cast<uint32_t>(config_.backend.sliding_window_size))
         {

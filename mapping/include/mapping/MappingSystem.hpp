@@ -26,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <tuple>
 // NOTE: used for stopwatches, remove when done debugging
 #include <chrono>
 
@@ -169,10 +170,23 @@ namespace mapping
         /// @param idxKeyframe Index of the current keyframe
         /// @return True if the keyframe was tracked successfully
         bool trackScanPointsToClusters(const uint32_t &idxKeyframe);
+
+        /// @brief Fit a plane to a set of 3D points using SVD
+        /// @param points Input points to fit the plane to
+        /// @param planarityThreshold Maximum ratio σ₃/σ₂ for valid plane (default 0.3)
+        /// @param linearityThreshold Minimum ratio σ₂/σ₁ to reject collinear points (default 0.1)
+        /// @return Tuple of (isValid, planeNormal, planeCenter, planePoints) where:
+        ///         - isValid: true if plane passes planarity and non-linearity checks
+        ///         - planeNormal: fitted plane normal vector
+        ///         - planeCenter: centroid of input points
+        ///         - planePoints: Nx3 matrix of centered points (w_p - w_planeCenter)
+        std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd> planeFitSVD(
+            const std::vector<Eigen::Vector3d> &points,
+            double planarityThreshold = 0.3,
+            double linearityThreshold = 0.1) const;
         // create new clusters from points
         void createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints);
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
-        void augmentClustersFromKeyframe(const uint32_t &idxKeyframe);
         void removeKeyframeFromClusters(const u_int32_t &idxKeyframe);
         void pruneClusters(const uint32_t &idxKeyframe);
         /// @brief Summarize current clusters for debugging purposes.
