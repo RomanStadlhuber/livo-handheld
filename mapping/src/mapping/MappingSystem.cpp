@@ -57,13 +57,22 @@ namespace mapping
         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
         // noise values from:
         // https://github.com/RomanStadlhuber/mid360_docker/blob/main/mid360_runner/config/mapping_mid360.yaml#L13
-        constexpr double accelerometerNoise = 0.1;
-        constexpr double gyroscopeNoise = 0.1;
-        params->accelerometerCovariance = gtsam::I_3x3 * accelerometerNoise;
-        params->gyroscopeCovariance = gtsam::I_3x3 * gyroscopeNoise;
+        constexpr double
+            // sensor readout noise
+            accelerometerNoise = 0.05,
+            gyroscopeNoise = 0.005,
+            // bias random walk noise
+            accelBiasRandomWalk = 0.0005,
+            gyroBiasRandomWalk = 0.00005;
+        // sensor readout noise
+        params->accelerometerCovariance = gtsam::I_3x3 * std::pow(accelerometerNoise, 2);
+        params->gyroscopeCovariance = gtsam::I_3x3 * std::pow(gyroscopeNoise, 2);
+        // bias random walk noise
+        params->biasAccCovariance = gtsam::I_3x3 * std::pow(accelBiasRandomWalk, 2);
+        params->biasOmegaCovariance = gtsam::I_3x3 * std::pow(gyroBiasRandomWalk, 2);
         // bias value from:
         // https://github.com/hku-mars/FAST_LIO/blob/7cc4175de6f8ba2edf34bab02a42195b141027e9/include/use-ikfom.hpp#L35
-        params->integrationCovariance = gtsam::I_3x3 * 1e-4;
+        params->integrationCovariance = gtsam::I_3x3 * 1e-8;
         const gtsam::Vector6 commonBias{gtsam::Vector6::Ones() * 0.0001};
         gtsam::imuBias::ConstantBias priorImuBias{commonBias};
         preintegrator_ = gtsam::PreintegratedCombinedMeasurements(params, priorImuBias);
@@ -199,13 +208,23 @@ namespace mapping
         // Construct Navigation State prior (mean & covariance)
         resetNewFactors();
         gtsam::Vector6 priorPoseSigma;
-        priorPoseSigma << 1e-6, 1e-6, 1e-6, 1e-3, 1e-3, 1e-3;
+        priorPoseSigma << 0.1, 0.1, 0.1, 0.0175, 0.0175, 0.0873;
 
         // Pose prior should be certain
         newSmootherFactors_.addPrior(X(idxNewKF), w_T_i0, gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
-        newSmootherFactors_.addPrior(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()), gtsam::noiseModel::Isotropic::Sigma(3, 1e-6));
+        newSmootherFactors_.addPrior(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()), gtsam::noiseModel::Isotropic::Sigma(3, 1e-2));
         // Bias prior, very noisy
-        newSmootherFactors_.addPrior(B(idxNewKF), priorImuBias, gtsam::noiseModel::Isotropic::Sigma(6, 3.0 * std::max(accVariance, gyroVariance)));
+        const gtsam::noiseModel::Diagonal::shared_ptr biasPriorNoise =
+            gtsam::noiseModel::Diagonal::Sigmas(
+                (gtsam::Vector(6) << 0.01, 0.01, 0.01, // gyro bias (rad/s)
+                 0.1, 0.1, 0.1                         // accel bias (m/s^2)
+                 )
+                    .finished());
+        newSmootherFactors_.addPrior(
+            B(idxNewKF),
+            priorImuBias,
+            biasPriorNoise);
+        // initial estimates
         newValues_.insert(X(idxNewKF), w_T_i0);
         newValues_.insert(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()));
         newValues_.insert(B(idxNewKF), priorImuBias);
@@ -642,7 +661,7 @@ namespace mapping
                     clusterId);
                 if (clusterFactors_.find(clusterId) == clusterFactors_.end()) // factor is new and must be added
                 {
-                    ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId));
+                    // ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId));
                     newSmootherFactors_.add(ptpFactor);
                     clusterFactors_.emplace(clusterId, ptpFactor);
                     continue;
@@ -762,7 +781,7 @@ namespace mapping
         newValues_.insert(X(idxKeyframe), w_X_curr_.pose());
         newValues_.insert(V(idxKeyframe), w_X_curr_.v());
         newValues_.insert(B(idxKeyframe), currBias_);
-        summarizeClusters();
+        // summarizeClusters();
         auto stopwatchFactorsStart = std::chrono::high_resolution_clock::now();
         // NOTE: will internally update factorsToRemove to drop outdated smart factors
         // the outdated factors will be replaced by extended ones with additional tracks
@@ -789,6 +808,14 @@ namespace mapping
         std::cout << "::: [DEBUG] smoother update took " << durationSmoother << " ms :::" << std::endl;
         summarizeFactors();
         resetNewFactors();
+        // supplement the cluster map with new clusters from the current keyframe
+        /*
+        std::vector<SubmapIdxPointIdx> clusterPoints; // empty for initial keyframe
+        clusterPoints.reserve(keyframeSubmaps_.at(idxKeyframe)->points_.size());
+        for (size_t i = 0; i < keyframeSubmaps_.at(idxKeyframe)->points_.size(); ++i)
+            clusterPoints.emplace_back(idxKeyframe, static_cast<int>(i));
+        createNewClusters(idxKeyframe, clusterPoints);
+        */
         // Extract estimated state
         w_X_curr_ = gtsam::NavState{
             smoother_.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
@@ -797,6 +824,8 @@ namespace mapping
         w_X_curr_.print();
         std::cout << "Current bias: ";
         currBias_.print();
+        auto marginals = smoother_.marginalCovariance(B(idxKeyframe));
+        std::cout << "::: [DEBUG] marginal trace " << marginals.trace() << " :::" << std::endl;
 
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
