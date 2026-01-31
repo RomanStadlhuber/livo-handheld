@@ -51,7 +51,12 @@ namespace mapping
     {
         gtsam::ISAM2Params smootherParams;
         smootherParams.optimizationParams = gtsam::ISAM2GaussNewtonParams();
-        smootherParams.findUnusedFactorSlots = true;
+        // for some guidance, see:
+        // https://github.com/MIT-SPARK/Kimera-VIO/blob/master/include/kimera-vio/backend/VioBackendParams.h
+        smootherParams.relinearizeThreshold = 0.01;   // relinearsize more often for better estimates?
+        smootherParams.relinearizeSkip = 1;           // only (check) relinearize after that many update calls
+        smootherParams.evaluateNonlinearError = true; // only for debugging
+        smootherParams.findUnusedFactorSlots = true;  // should be enabled when using smoother
         smoother_ = gtsam::IncrementalFixedLagSmoother(static_cast<double>(config_.backend.sliding_window_size), smootherParams);
         // Initialize IMU preintegration parameters
         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
@@ -466,12 +471,6 @@ namespace mapping
             }
             // fit plane to all points
             const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat] = planeFitSVD(clusterPoints);
-            // skip if plane fit is degenerate (collinear or non-planar points)
-            if (!planeValid) // mark for removal if plane is invalid
-            {
-                clusterStates_[clusterId] = ClusterState::Pruned;
-                continue;
-            }
             // average plane thickness from historical tracks
             double planeThicknessCovariance = 0.0;
             // MSC-LIO, Eq. 19 (plane thickness covariance and adaptive sigma)
@@ -490,7 +489,6 @@ namespace mapping
                 const double pointToPlaneDist = std::abs(planeNormal.dot(clusterPointsMat.row(i)));
                 if (pointToPlaneDist > 3.0 * adaptiveSigma)
                 {
-                    // std::cout << "::: [WARNING] Cluster " << clusterId << " failed 6-sigma test with point-to-plane distance " << pointToPlaneDist << " :::" << std::endl;
                     clusterStates_[clusterId] = ClusterState::Idle;
                     break;
                 }
@@ -505,68 +503,13 @@ namespace mapping
     void MappingSystem::createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints)
     {
         std::size_t numCreated = 0, numRejected = 0;
-        const open3d::geometry::KDTreeFlann kdTree{*keyframeSubmaps_[idxKeyframe]};
-        std::vector<int> knnIndices(config_.lidar_frontend.knn_neighbors);
-        std::vector<double> knnDists(config_.lidar_frontend.knn_neighbors);
-
         for (auto const &[idxSubmap, idxPoint] : clusterPoints)
-        {
-            // find nearest neighbors for the candidate point
-            const Eigen::Vector3d &queryPoint = keyframeSubmaps_[idxKeyframe]->points_[idxPoint];
-            const int knnFound = kdTree.SearchKNN(
-                queryPoint,
-                config_.lidar_frontend.knn_neighbors,
-                knnIndices,
-                knnDists);
-
-            if (knnFound < config_.lidar_frontend.knn_neighbors)
-            {
-                numRejected++;
-                continue; // not enough neighbors, skip this point
-            }
-
-            // collect neighbor points and fit a plane
-            std::vector<Eigen::Vector3d> knnPoints;
-            knnPoints.reserve(knnFound);
-            for (int i = 0; i < knnFound; ++i)
-                knnPoints.push_back(keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]]);
-
-            const auto [planeValid, planeNormal, planeCenter, planePointsMat] = planeFitSVD(knnPoints);
-
-            // skip if plane fit is degenerate (collinear or non-planar points)
-            if (!planeValid)
-            {
-                numRejected++;
-                continue;
-            }
-
-            // validate plane fit by checking all point-to-plane distances
-            bool validThickness = true;
-            for (int i = 0; i < knnFound; ++i)
-            {
-                const double pointToPlaneDist = std::abs(planeNormal.dot(planePointsMat.row(i)));
-                if (pointToPlaneDist > config_.lidar_frontend.clustering.max_plane_thickness)
-                {
-                    validThickness = false;
-                    break;
-                }
-            }
-
-            if (!validThickness)
-            {
-                numRejected++;
-                continue;
-            }
-
-            // plane fit is valid, create new cluster
+        { // plane fit is valid, create new cluster
             std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
             auto const clusterId = clusterIdCounter_++;
             clusters_.emplace(clusterId, newCluster);
             clusterStates_.emplace(clusterId, ClusterState::Premature);
             numCreated++;
-
-            knnIndices.clear();
-            knnDists.clear();
         }
         std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe
                   << " (" << numRejected << " rejected due to plane fit) :::" << std::endl;
@@ -587,7 +530,7 @@ namespace mapping
             if (itPoint != clusterPoints.end())
             {
                 clusterPoints.erase(itPoint);
-                if (clusterPoints.size() < config_.lidar_frontend.clustering.min_points)
+                if (clusterPoints.size() < 3)
                     clusterStates_[clusterId] = ClusterState::Pruned;
             }
         }
@@ -618,6 +561,7 @@ namespace mapping
     }
     void MappingSystem::createAndUpdateFactors()
     {
+        std::size_t numFactorsAdded{0}, numFactorsUpdated{0}, numFactorsRemoved{0};
         for (auto const &[clusterId, clusterPoints] : clusters_)
         {
             const ClusterState clusterState = clusterStates_.at(clusterId);
@@ -664,6 +608,7 @@ namespace mapping
                     // ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId));
                     newSmootherFactors_.add(ptpFactor);
                     clusterFactors_.emplace(clusterId, ptpFactor);
+                    numFactorsAdded++;
                     continue;
                 }
                 else
@@ -676,6 +621,7 @@ namespace mapping
                         if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
                         {
                             factorsToRemove_.push_back(gtsam::Key{factorKey});
+                            numFactorsUpdated++;
                             break;
                         }
                     }
@@ -702,6 +648,7 @@ namespace mapping
                         existingPtpFactor->markInvalid(); // mark factor as invalid to avoid further optimization
                         // mark existing factor for removal
                         factorsToRemove_.push_back(gtsam::Key{factorKey});
+                        numFactorsRemoved++;
                         break;
                     }
                 }
@@ -712,7 +659,8 @@ namespace mapping
             }
         }
         std::cout << "::: [INFO] adding " << newSmootherFactors_.size() - factorsToRemove_.size()
-                  << " LiDAR factors, updating " << factorsToRemove_.size() << " :::" << std::endl;
+                  << " LiDAR factors, updating " << factorsToRemove_.size()
+                  << " removing " << numFactorsRemoved << " :::" << std::endl;
     }
 
     void MappingSystem::track()
@@ -803,25 +751,35 @@ namespace mapping
         // update estimator
         auto stopwatchSmootherStart = std::chrono::high_resolution_clock::now();
         smoother_.update(newSmootherFactors_, newValues_, newSmootherIndices_, factorsToRemove_);
+        gtsam::ISAM2Result result = smoother_.getISAM2Result();
+        if (result.errorBefore.has_value() && result.errorAfter.has_value())
+            std::cout << "::: [INFO] smoother error before update " << result.errorBefore.value()
+                      << ", after update " << result.errorAfter.value() << " :::" << std::endl;
+        /**
+         * NOTE: iSAM2 update performs only one GN step,
+         * multiple updates to assure convergence, see also
+         * - https://github.com/borglab/gtsam/blob/develop/gtsam/nonlinear/IncrementalFixedLagSmoother.cpp#L128
+         * - https://groups.google.com/g/gtsam-users/c/Cz2RoY3dN14/m/3Ka6clsdBgAJ
+         * TODO: in the future, make the number of GN iterations configurable
+         */
+        for (std::size_t updateIters = 1; updateIters < 2; updateIters++)
+        {
+            smoother_.update();
+            result = smoother_.getISAM2Result();
+            if (result.errorBefore.has_value() && result.errorAfter.has_value())
+                std::cout << "::: [INFO] smoother error before update " << result.errorBefore.value()
+                          << ", after update " << result.errorAfter.value() << " :::" << std::endl;
+        }
         auto stopwatchSmootherEnd = std::chrono::high_resolution_clock::now();
         auto durationSmoother = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchSmootherEnd - stopwatchSmootherStart).count();
         std::cout << "::: [DEBUG] smoother update took " << durationSmoother << " ms :::" << std::endl;
         summarizeFactors();
         resetNewFactors();
-        // supplement the cluster map with new clusters from the current keyframe
-        /*
-        std::vector<SubmapIdxPointIdx> clusterPoints; // empty for initial keyframe
-        clusterPoints.reserve(keyframeSubmaps_.at(idxKeyframe)->points_.size());
-        for (size_t i = 0; i < keyframeSubmaps_.at(idxKeyframe)->points_.size(); ++i)
-            clusterPoints.emplace_back(idxKeyframe, static_cast<int>(i));
-        createNewClusters(idxKeyframe, clusterPoints);
-        */
         // Extract estimated state
         w_X_curr_ = gtsam::NavState{
             smoother_.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
             smoother_.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
         currBias_ = smoother_.calculateEstimate<gtsam::imuBias::ConstantBias>(B(idxKeyframe));
-        w_X_curr_.print();
         std::cout << "Current bias: ";
         currBias_.print();
         auto marginals = smoother_.marginalCovariance(B(idxKeyframe));
@@ -895,10 +853,6 @@ namespace mapping
         keyframeSubmaps_[idxNewKf] = ptrKeyframeSubmap;
         keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_lidar);
         keyframeTimestamps_[idxNewKf] = keyframeTimestamp;
-
-        std::cout << "::: [DEBUG] created keyframe " << idxNewKf << " ("
-                  << ptrKeyframeSubmap->points_.size() << " pts) at timestamp "
-                  << keyframeTimestamp << " :::" << std::endl;
 
         // Clear scan buffer
         scanBuffer_.clear();
