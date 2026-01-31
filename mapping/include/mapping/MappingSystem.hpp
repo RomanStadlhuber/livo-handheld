@@ -196,8 +196,8 @@ namespace mapping
         ///         - planePoints: Nx3 matrix of centered points (w_p - w_planeCenter)
         std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd> planeFitSVD(
             const std::vector<Eigen::Vector3d> &points,
-            double planarityThreshold = 0.3,
-            double linearityThreshold = 0.1) const;
+            double planarityThreshold = 0.1,
+            double linearityThreshold = 0.5) const;
         // create new clusters from points
         void createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints);
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
