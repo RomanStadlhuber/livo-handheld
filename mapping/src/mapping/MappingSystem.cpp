@@ -435,15 +435,15 @@ namespace mapping
             if (!validPlane)
                 continue;
             planeThickness /= nKnn;
-            // associate the nearest point as a track to this cluster
-            std::size_t idxKnnNearest = knnIndices[0];
-            for (std::size_t i = 1; i < knnIndices.size(); ++i)
-                if (knnDists[i] < knnDists[idxKnnNearest])
-                    idxKnnNearest = knnIndices[i];
-            addPointToCluster(clusterId, {idxKeyframe, idxKnnNearest}, planeThickness);
+            // associate the second-nearest point with the cluster to increase stability
+            addPointToCluster(clusterId, {idxKeyframe, knnIndices[1]}, planeThickness);
             validTracks++;
             knnIndices.clear();
             knnDists.clear();
+        }
+        if (validTracks == 0) // abort if the latest frame could not be tracked
+        {
+            return false;
         }
         auto stopwatchKNNEnd = std::chrono::high_resolution_clock::now();
         auto durationKNN = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchKNNEnd - stopwatchKNNStart).count();
@@ -490,6 +490,7 @@ namespace mapping
                 if (pointToPlaneDist > 3.0 * adaptiveSigma)
                 {
                     clusterStates_[clusterId] = ClusterState::Idle;
+                    clusters_[clusterId].erase(idxKeyframe); // remove latest association
                     break;
                 }
             }
@@ -497,7 +498,7 @@ namespace mapping
                 numValidClusters++;
         }
         std::cout << "::: [INFO] keyframe " << idxKeyframe << " had " << validTracks << " tracks and " << numValidClusters << " valid clusters :::" << std::endl;
-        return validTracks > 0;
+        return idxKeyframe < config_.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
 
     void MappingSystem::createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints)
@@ -603,7 +604,7 @@ namespace mapping
                     clusterId);
                 if (clusterFactors_.find(clusterId) == clusterFactors_.end()) // factor is new and must be added
                 {
-                    ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId));
+                    ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId) + " ");
                     newSmootherFactors_.add(ptpFactor);
                     clusterFactors_.emplace(clusterId, ptpFactor);
                     numFactorsAdded++;
@@ -628,7 +629,7 @@ namespace mapping
                      */
                     clusterFactors_[clusterId] = ptpFactor; // update factor cache
                     newSmootherFactors_.add(ptpFactor);
-                    ptpFactor->print("updating existing factor for cluster " + std::to_string(clusterId));
+                    ptpFactor->print("updating existing factor for cluster " + std::to_string(clusterId) + "");
                 }
             }
             break;
@@ -761,7 +762,7 @@ namespace mapping
          * - https://groups.google.com/g/gtsam-users/c/Cz2RoY3dN14/m/3Ka6clsdBgAJ
          * TODO: in the future, make the number of GN iterations configurable
          */
-        for (std::size_t updateIters = 1; updateIters < 2; updateIters++)
+        for (std::size_t updateIters = 1; updateIters < 5; updateIters++)
         {
             smoother_.update();
             result = smoother_.getISAM2Result();
