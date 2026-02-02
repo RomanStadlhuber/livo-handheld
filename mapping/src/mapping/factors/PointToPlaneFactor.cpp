@@ -64,7 +64,6 @@ namespace mapping
         {
             terms.emplace_back(keys()[i], Hs[i]);
         }
-        // std::cout << "P2P factor error: " << errorVec.transpose() << std::endl;
         return boost::make_shared<gtsam::JacobianFactor>(terms, b);
     }
 
@@ -72,7 +71,7 @@ namespace mapping
     {
         const double meanFactor = 1.0 / static_cast<double>(totalPoints_);
         std::vector<gtsam::Matrix> Hs;
-        Hs.reserve(values.size());
+        Hs.reserve(keys().size());
         // the returned error is a scalar
         gtsam::Vector errorVec = gtsam::Vector::Zero(1);
         // accumulate mean-squared error and its jacobians w.r.t. the values

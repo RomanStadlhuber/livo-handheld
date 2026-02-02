@@ -579,7 +579,6 @@ namespace mapping
                 // 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
                 gtsam::KeyVector keys;
                 keys.reserve(clusterPoints.size());
-                std::unordered_map<uint32_t, gtsam::Key> keyframeToGraphKeyMapping;
                 // 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
                 std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
                 size_t totalPoints = 0;
@@ -587,7 +586,6 @@ namespace mapping
                 {
                     const gtsam::Key key = X(idxKeyframe);
                     keys.push_back(key);
-                    keyframeToGraphKeyMapping[idxKeyframe] = key;
                     // scan points are passed to factor in world frame
                     scanPointsPerKey[key].push_back(std::make_shared<Eigen::Vector3d>(
                         // transform point in keyframe from world frame to lidar frame
@@ -605,7 +603,7 @@ namespace mapping
                     clusterId);
                 if (clusterFactors_.find(clusterId) == clusterFactors_.end()) // factor is new and must be added
                 {
-                    // ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId));
+                    ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId));
                     newSmootherFactors_.add(ptpFactor);
                     clusterFactors_.emplace(clusterId, ptpFactor);
                     numFactorsAdded++;
@@ -630,6 +628,7 @@ namespace mapping
                      */
                     clusterFactors_[clusterId] = ptpFactor; // update factor cache
                     newSmootherFactors_.add(ptpFactor);
+                    ptpFactor->print("updating existing factor for cluster " + std::to_string(clusterId));
                 }
             }
             break;
