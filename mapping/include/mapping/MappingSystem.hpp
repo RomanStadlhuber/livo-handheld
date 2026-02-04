@@ -15,7 +15,6 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include <mapping/types.hpp>
-
 // Visualization with Open3D
 #ifndef DISABLEVIZ
 #include <Visualization.hpp>
@@ -117,10 +116,11 @@ namespace mapping
             const std::vector<Eigen::Vector3d> &points,
             double planarityThreshold = 0.1,
             double linearityThreshold = 0.5) const;
+
         // create new clusters from points
         void createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints);
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
-        void removeKeyframeFromClusters(const u_int32_t &idxKeyframe);
+        void removeKeyframeFromClusters(const uint32_t &idxKeyframe);
         void pruneClusters(const uint32_t &idxKeyframe);
         // Shorthand check for whether a cluster is valid (= tracking or idle).
         bool isClusterValid(const ClusterId &clusterId) const
@@ -179,6 +179,10 @@ namespace mapping
         gtsam::Values newValues_;
         gtsam::FixedLagSmoother::KeyTimestampMap newSmootherIndices_;
 
+        // Robust kernel for point-to-plane factors
+        // see also: https://gtsam.org/doxygen/a03860.html
+        gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_;
+
         // Lifecycle management & state estimation
         SystemState systemState_;
         uint32_t keyframeCounter_;
@@ -195,7 +199,7 @@ namespace mapping
         // Mapping data
         std::list<ScanBuffer> scanBuffer_;
         // LiDAR Same Plane Point Clusters
-        std::map<ClusterId, std::map<u_int32_t, std::size_t>> clusters_;
+        std::map<ClusterId, std::map<uint32_t, std::size_t>> clusters_;
         /// @brief The thickness of each added cluster track
         std::map<ClusterId, std::vector<double>> clusterPlaneThicknessHistory_;
         /// @brief The thickness of a clusters fitted plane, used for validation and modelling noise characteristics.

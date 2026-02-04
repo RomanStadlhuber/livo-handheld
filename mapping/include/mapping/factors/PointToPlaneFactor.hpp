@@ -36,7 +36,7 @@ namespace mapping
             const std::shared_ptr<Eigen::Vector3d> &planeNormal,
             double planeNormalOffsetD,
             const gtsam::SharedNoiseModel &noiseModel,
-            const u_int32_t &clusterId);
+            const uint32_t &clusterId);
 
         /// @brief Evaluate unwhitened error for all poses involved in this factor
         /// @param values Current estimates of all variables in the factor graph
@@ -74,7 +74,7 @@ namespace mapping
 
     public:
         /// @brief Identifier for the cluster associated with this factor used for lookup to replace/delete.
-        const u_int32_t clusterId_;
+        const uint32_t clusterId_;
     };
 
 } // namespace mapping

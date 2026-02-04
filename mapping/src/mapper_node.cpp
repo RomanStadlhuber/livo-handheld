@@ -277,7 +277,7 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pubClusters_;
     visualization_msgs::msg::MarkerArray clusterMarkersMsg_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
-    std::map<u_int32_t, geometry_msgs::msg::PoseStamped> historicalPoses;
+    std::map<uint32_t, geometry_msgs::msg::PoseStamped> historicalPoses;
     /// @brief Naive accumulation of keyframe submaps to form the global map.
     std::shared_ptr<open3d::geometry::PointCloud> globalMap_;
     rclcpp::Time startTime_;

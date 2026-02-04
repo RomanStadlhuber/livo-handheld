@@ -21,7 +21,7 @@ namespace mapping
     }
 
     void Visualization::addSubmap(
-        const u_int32_t keyframeId,
+        const uint32_t keyframeId,
         const Eigen::Matrix4d &pose,
         const std::shared_ptr<open3d::geometry::PointCloud> &pcdSubmap)
     {
@@ -38,7 +38,7 @@ namespace mapping
     }
 
     void Visualization::updateSubmap(
-        const u_int32_t keyframeId,
+        const uint32_t keyframeId,
         const Eigen::Matrix4d &pose)
     {
         // Update the pose frame
@@ -52,7 +52,7 @@ namespace mapping
     }
 
     void Visualization::removeSubmap(
-        const u_int32_t keyframeId)
+        const uint32_t keyframeId)
     {
         // Remove point cloud
         if (submapPCDs.find(keyframeId) != submapPCDs.end())

@@ -29,18 +29,18 @@ namespace mapping
         }
 
         void addSubmap(
-            const u_int32_t keyframeId,
+            const uint32_t keyframeId,
             const Eigen::Matrix4d &pose,
             const std::shared_ptr<open3d::geometry::PointCloud> &pcdSubmap);
 
         void updateSubmap(
-            const u_int32_t keyframeId,
+            const uint32_t keyframeId,
             const Eigen::Matrix4d &pose
             // NOTE: pointcloud should be updated from mapping system via smart pointer
         );
 
         void removeSubmap(
-            const u_int32_t keyframeId);
+            const uint32_t keyframeId);
 
         void refreshWindow();
 
@@ -50,8 +50,8 @@ namespace mapping
     private:
         bool windowRunning = false;
         open3d::visualization::VisualizerWithKeyCallback o3dVisualizer;
-        std::map<u_int32_t, std::shared_ptr<open3d::geometry::PointCloud>> submapPCDs;
-        std::map<u_int32_t, std::shared_ptr<open3d::geometry::TriangleMesh>> submapPoseFrames;
+        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> submapPCDs;
+        std::map<uint32_t, std::shared_ptr<open3d::geometry::TriangleMesh>> submapPoseFrames;
         std::shared_ptr<open3d::geometry::TriangleMesh> worldFrame;
         // ASCII code for spacebar
         static constexpr int SPACEBAR = 32;

@@ -13,7 +13,7 @@ namespace mapping
         const std::shared_ptr<Eigen::Vector3d> &planeNormal,
         double planeNormalOffsetD,
         const gtsam::SharedNoiseModel &noiseModel,
-        const u_int32_t &clusterId)
+        const uint32_t &clusterId)
         : NoiseModelFactor(noiseModel, keys),
           imu_T_lidar_(imu_T_lidar),
           scanPointsPerKey_(scanPointsPerKey),

@@ -18,7 +18,7 @@ namespace mapping
         PlanarClusterFactor(
             const gtsam::KeyVector &keys,
             const gtsam::Pose3 &imu_T_lidar,
-            const u_int32_t &clusterId,
+            const uint32_t &clusterId,
             const ClusteringConfig &clusteringConfig = ClusteringConfig());
 
         /// @brief Add LiDAR points associated with this cluster from a specific keyframe
@@ -52,7 +52,7 @@ namespace mapping
     private:
         /// @brief Extrinsic IMU-LiDAR calibration.
         const gtsam::Pose3 imu_T_lidar_;
-        const u_int32_t clusterId_;
+        const uint32_t clusterId_;
         /// @brief LiDAR points in local frame (immutable after add())
         std::map<gtsam::Key, std::vector<Eigen::Vector3d &>> lidar_points_;
         /// @brief Number of points associated with this cluster across all keyframes.

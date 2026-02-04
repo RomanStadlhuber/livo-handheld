@@ -5,7 +5,7 @@ namespace mapping
     PlanarClusterFactor::PlanarClusterFactor(
         const gtsam::KeyVector &keys,
         const gtsam::Pose3 &imu_T_lidar,
-        const u_int32_t &clusterId,
+        const uint32_t &clusterId,
         const ClusteringConfig &clusteringConfig)
         : NoiseModelFactor(nullptr, keys),
           imu_T_lidar_(imu_T_lidar),

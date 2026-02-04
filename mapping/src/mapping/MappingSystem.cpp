@@ -41,7 +41,8 @@ namespace mapping
     }
 
     MappingSystem::MappingSystem(const MappingConfig &config)
-        : systemState_(SystemState::Initializing),
+        : kernel_(gtsam::noiseModel::mEstimator::GemanMcClure::Create(1.0)), // c = 1.0
+          systemState_(SystemState::Initializing),
           keyframeCounter_(0),
           tLastImu_(0.0),
           clusterIdCounter_(0),
@@ -213,7 +214,7 @@ namespace mapping
         // Construct Navigation State prior (mean & covariance)
         resetNewFactors();
         gtsam::Vector6 priorPoseSigma;
-        priorPoseSigma << 0.1, 0.1, 0.1, 0.0175, 0.0175, 0.0873;
+        priorPoseSigma << 0.0175, 0.0175, 0.0873, 0.1, 0.1, 0.1; // rpy xyz
 
         // Pose prior should be certain
         newSmootherFactors_.addPrior(X(idxNewKF), w_T_i0, gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
@@ -506,7 +507,7 @@ namespace mapping
         std::size_t numCreated = 0, numRejected = 0;
         for (auto const &[idxSubmap, idxPoint] : clusterPoints)
         { // plane fit is valid, create new cluster
-            std::map<u_int32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
+            std::map<uint32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
             auto const clusterId = clusterIdCounter_++;
             clusters_.emplace(clusterId, newCluster);
             clusterStates_.emplace(clusterId, ClusterState::Premature);
@@ -523,7 +524,7 @@ namespace mapping
         clusterPlaneThicknessHistory_[clusterId].push_back(planeThickness);
     }
 
-    void MappingSystem::removeKeyframeFromClusters(const u_int32_t &idxKeyframe)
+    void MappingSystem::removeKeyframeFromClusters(const uint32_t &idxKeyframe)
     {
         for (auto &[clusterId, clusterPoints] : clusters_)
         {
@@ -593,14 +594,15 @@ namespace mapping
                         keyframePoses_[idxKeyframe]->transformTo(keyframeSubmaps_[idxKeyframe]->points_[idxPoint])));
                     totalPoints++;
                 }
-                gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, 3.0 * adaptiveSigma);
+                auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                 const PointToPlaneFactor::shared_ptr ptpFactor = boost::make_shared<PointToPlaneFactor>(
                     keys,
                     imu_T_lidar_,
                     scanPointsPerKey,
                     clusterNormal,
                     clusterNormal->dot(*clusterCenter),
-                    noiseModel,
+                    robustNoise,
                     clusterId);
                 if (clusterFactors_.find(clusterId) == clusterFactors_.end()) // factor is new and must be added
                 {
@@ -621,15 +623,15 @@ namespace mapping
                         {
                             factorsToRemove_.push_back(gtsam::Key{factorKey});
                             numFactorsUpdated++;
+                            /**
+                             * TODO: in the future, extend factor class to allow in-place modificaiton
+                             */
+                            clusterFactors_[clusterId] = ptpFactor; // update factor cache
+                            newSmootherFactors_.add(ptpFactor);
+                            ptpFactor->print("updating existing factor for cluster " + std::to_string(clusterId) + "");
                             break;
                         }
                     }
-                    /**
-                     * TODO: in the future, extend factor class to allow in-place modificaiton
-                     */
-                    clusterFactors_[clusterId] = ptpFactor; // update factor cache
-                    newSmootherFactors_.add(ptpFactor);
-                    ptpFactor->print("updating existing factor for cluster " + std::to_string(clusterId) + "");
                 }
             }
             break;
