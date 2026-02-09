@@ -8,7 +8,7 @@
 #include <gtsam/nonlinear/NonlinearFactor.h>
 
 #include <memory>
-#include <unordered_map>
+#include <map>
 #include <vector>
 
 namespace mapping
@@ -26,15 +26,15 @@ namespace mapping
         /// @param imu_T_lidar Fixed extrinsic calibration from IMU to LiDAR frame
         /// @param scanPointsPerKey Map from key index (in keys vector) to scan points in that keyframe's LiDAR frame
         /// @param planeNormal Plane normal in the world frame
-        /// @param planeNormalOffsetD Plane offset d in world frame (n^T * x - d = 0)
+        /// @param planeCenter Plane center in the world frame
         /// @param noiseModel Point-to-plane noise model
         /// @param clusterId Identifier for the cluster associated with this factor, used for lookup to replace/delete.
         PointToPlaneFactor(
             const gtsam::KeyVector &keys,
             const gtsam::Pose3 &imu_T_lidar,
-            const std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> &scanPointsPerKey,
+            const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
             const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-            double planeNormalOffsetD,
+            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
             const gtsam::SharedNoiseModel &noiseModel,
             const uint32_t &clusterId);
 
@@ -51,26 +51,47 @@ namespace mapping
         /// @brief Clone method required for GTSAM factor copying
         gtsam::NonlinearFactor::shared_ptr clone() const override;
 
-        /// @brief Get the total number of point measurements in this factor
-        size_t numPoints() const { return totalPoints_; }
+        ///@brief Add a new keyframe to the cluster factor.
+        void add(
+            const gtsam::Key &key,
+            const Eigen::Vector3d &lidar_point,
+            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+            const gtsam::SharedNoiseModel &noiseModel);
+
+        ///@brief Remove a keyframe from the cluster factor.
+        void remove(
+            const gtsam::Key &key,
+            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+            const gtsam::SharedNoiseModel &noiseModel);
+
+
+        /// @brief Keys did not change, but new estiamtes lead to updated plane parameters.
+        void updatePlaneParameters(
+            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+            const gtsam::SharedNoiseModel &noiseModel);
+
+        /// @brief Diagnostic usage for evaluating error. Use for debugging.
+        double evaluateErrorDiagnostic(const gtsam::Values &values) const;
 
         void print(const std::string &s = "", const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
 
         // trigger, cannot (and should not) be undone
-        void markInvalid() const { invalid = true; }
+        void markInvalid() const { isInvalid_ = true; }
 
     private:
         std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> computeErrorAndJacobians(const gtsam::Values &values) const;
 
     private:
         gtsam::Pose3 imu_T_lidar_;
-        std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey_;
+        std::map<gtsam::Key, Eigen::Vector3d> lidar_points_;
         std::shared_ptr<Eigen::Vector3d> planeNormal_;
-        double planeNormalOffsetD_;
-        /// @brief Total number of points associated with this factor.
-        size_t totalPoints_;
+        std::shared_ptr<Eigen::Vector3d> planeCenter_;
         // safeguard flag to avoid optimizing invalid factors that are not yet removed
-        mutable bool invalid = false;
+        mutable bool isInvalid_ = false;
+        gtsam::SharedNoiseModel adaptiveNoiseModel_;
 
     public:
         /// @brief Identifier for the cluster associated with this factor used for lookup to replace/delete.

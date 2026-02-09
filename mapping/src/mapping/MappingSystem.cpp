@@ -54,10 +54,9 @@ namespace mapping
         smootherParams.optimizationParams = gtsam::ISAM2GaussNewtonParams();
         // for some guidance, see:
         // https://github.com/MIT-SPARK/Kimera-VIO/blob/master/include/kimera-vio/backend/VioBackendParams.h
-        smootherParams.relinearizeThreshold = 0.01;   // relinearsize more often for better estimates?
-        smootherParams.relinearizeSkip = 1;           // only (check) relinearize after that many update calls
-        smootherParams.evaluateNonlinearError = true; // only for debugging
-        smootherParams.findUnusedFactorSlots = true;  // should be enabled when using smoother
+        smootherParams.relinearizeThreshold = 0.01;  // relinearsize more often for better estimates?
+        smootherParams.relinearizeSkip = 1;          // only (check) relinearize after that many update calls
+        smootherParams.findUnusedFactorSlots = true; // should be enabled when using smoother
         smoother_ = gtsam::IncrementalFixedLagSmoother(static_cast<double>(config_.backend.sliding_window_size), smootherParams);
         // Initialize IMU preintegration parameters
         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
@@ -182,7 +181,7 @@ namespace mapping
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
         std::vector<SubmapIdxPointIdx> clusterPoints; // empty for initial keyframe
         clusterPoints.reserve(keyframeSubmaps_.at(idxNewKF)->points_.size());
-        for (size_t i = 0; i < keyframeSubmaps_.at(idxNewKF)->points_.size(); ++i)
+        for (size_t i = 0; i < keyframeSubmaps_.at(idxNewKF)->points_.size(); i++) // TEST: larger stride, fewer clusters
             clusterPoints.emplace_back(idxNewKF, static_cast<int>(i));
         createNewClusters(idxNewKF, clusterPoints);
         // Clear lidar buffer
@@ -342,7 +341,7 @@ namespace mapping
         lockLidarBuffer.unlock();
     }
 
-    std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd> MappingSystem::planeFitSVD(
+    std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double> MappingSystem::planeFitSVD(
         const std::vector<Eigen::Vector3d> &points,
         double planarityThreshold,
         double linearityThreshold) const
@@ -377,7 +376,18 @@ namespace mapping
         const bool notLinear = (sigma1 > 1e-10) && (sigma2 / sigma1) >= linearityThreshold;
         const bool isValid = isPlanar && notLinear;
 
-        return {isValid, planeNormal, planeCenter, planePoints};
+        double planeThickness = 0.0;
+        if(isValid){
+            // Compute plane thickness as mean squared point-to-plane distance
+            for (size_t i = 0; i < numPoints; ++i)
+            {
+                const double pointToPlaneDist = std::abs(planeNormal.dot(planePoints.row(i)));
+                planeThickness += std::pow(pointToPlaneDist, 2.0);
+            }
+            planeThickness /= static_cast<double>(numPoints);
+        }
+
+        return {isValid, planeNormal, planeCenter, planePoints, planeThickness};
     }
 
     bool MappingSystem::trackScanPointsToClusters(const uint32_t &idxKeyframe)
@@ -387,7 +397,7 @@ namespace mapping
         knnIndices.reserve(config_.lidar_frontend.knn_neighbors);
         std::vector<double> knnDists(config_.lidar_frontend.knn_neighbors);
         knnDists.reserve(config_.lidar_frontend.knn_neighbors);
-        std::size_t validTracks = 0;
+        std::size_t validTracks = 0, numValidClusters = 0;
         // TODO: remove stopwatch after slowdown was diagnosed
         auto stopwatchKNNStart = std::chrono::high_resolution_clock::now();
         // KD-Tree of the current submap, used for cluster tracking
@@ -396,69 +406,39 @@ namespace mapping
         for (auto const &cluster : clusters_)
         {
             auto const &[clusterId, clusterPointIdxs] = cluster;
-            // skip tracking clusters that are marked for removal
-            if (clusterStates_.at(clusterId) == ClusterState::Pruned)
+            const ClusterState clusterState = clusterStates_.at(clusterId);
+            // --- ignore pruned clusters ---
+            if (clusterState == ClusterState::Pruned)
                 continue;
-            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.rbegin(); // get the cluster point from the latest keyframe
+            // --- tracking: KNN search & SVD plane fit ---
+            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.begin(); // get the oldest point in the cluster
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps_[idxClusterKF]->points_[idxSubmapPt];
             const int knnFound = kdTree.SearchKNN(
                 world_clusterPt,
-                // config_.lidar_frontend.knn_radius,
                 config_.lidar_frontend.knn_neighbors,
                 knnIndices,
                 knnDists);
-            if (knnFound < config_.lidar_frontend.knn_neighbors)
-                continue; // not enough neighbors found, skip this cluster
-            const double nKnn = static_cast<double>(knnFound);
             // collect KNN points and fit a plane
             std::vector<Eigen::Vector3d> knnPoints;
             knnPoints.reserve(knnFound);
             for (int i = 0; i < knnFound; ++i)
                 knnPoints.push_back(keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]]);
-            const auto [planeValid, planeNormal, knnCenter, knnPointsMat] = planeFitSVD(knnPoints);
-            // skip if plane fit is degenerate (collinear or non-planar points)
-            if (!planeValid)
-                continue;
-            // validate plane fit by checking point-to-plane distances
-            // (+ compute plane thickness during check)
-            bool validPlane = true;
-            double planeThickness = 0.0;
-            for (int i = 0; i < knnFound; ++i)
+            const auto [validPlaneTrack, planeTrackNormal, knnCenter, knnPointsMat, planeTrackThickness] = planeFitSVD(knnPoints);
+            // --- tracking failed (KNN plane fit invalid): update cluster center & normal, keep thickness ---
+            if(!validPlaneTrack || planeTrackThickness > config_.lidar_frontend.clustering.max_plane_thickness)
             {
-                const double pointToPlaneDist = std::abs(planeNormal.dot(knnPointsMat.row(i)));
-                if (pointToPlaneDist > config_.lidar_frontend.clustering.max_plane_thickness)
-                {
-                    validPlane = false;
-                    break;
-                }
-                planeThickness += std::pow(pointToPlaneDist, 2.0);
-            }
-            if (!validPlane)
+                if(clusterState == ClusterState::Premature) // don't update premature clusters
+                    continue;
+                clusterStates_[clusterId] = ClusterState::Idle;
+                updateClusterParameters(clusterId, false); // update cluster, keep thickness (no new KF association)
                 continue;
-            planeThickness /= nKnn;
+            }
+            // --- tracking valid: add point to cluster ---
             // associate the second-nearest point with the cluster to increase stability
-            addPointToCluster(clusterId, {idxKeyframe, knnIndices[1]}, planeThickness);
+            addPointToCluster(clusterId, {idxKeyframe, knnIndices[1]}, planeTrackThickness);
             validTracks++;
             knnIndices.clear();
             knnDists.clear();
-        }
-        if (validTracks == 0) // abort if the latest frame could not be tracked
-        {
-            return false;
-        }
-        auto stopwatchKNNEnd = std::chrono::high_resolution_clock::now();
-        auto durationKNN = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchKNNEnd - stopwatchKNNStart).count();
-        std::cout << "::: [DEBUG] KNN search and cluster association took " << durationKNN << " ms :::" << std::endl;
-        std::size_t numValidClusters = 0;
-        // compute the actual cluster parameters (updated centroid, normal, thickness) based on all associated points
-        for (auto const &cluster : clusters_)
-        {
-            /**
-             * NOTE: mark clusters invalid and skip parameters if
-             * - they are premature (not enough keyframe associations yet)
-             * - they are not associated with the current keyframe (tracking lost)
-             */
-            auto const &[clusterId, clusterPointIdxs] = cluster;
             const bool clusterTooSmall = clusterPointIdxs.size() < config_.lidar_frontend.clustering.min_points;
             if (clusterTooSmall || clusterStates_.at(clusterId) == ClusterState::Pruned)
                 continue; // skip
@@ -470,8 +450,7 @@ namespace mapping
                 const auto &[idxSubmap, idxPoint] = pointIdxPair;
                 clusterPoints.push_back(keyframeSubmaps_[idxSubmap]->points_[idxPoint]);
             }
-            // fit plane to all points
-            const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat] = planeFitSVD(clusterPoints);
+            const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(clusterPoints);
             // average plane thickness from historical tracks
             double planeThicknessCovariance = 0.0;
             // MSC-LIO, Eq. 19 (plane thickness covariance and adaptive sigma)
@@ -479,25 +458,31 @@ namespace mapping
                 planeThicknessCovariance += std::pow(thickness, 2.0);
             planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
             const double adaptiveSigma = std::pow(0.5 * planeThicknessCovariance, 0.25);
-            // update cached cluster parameters
-            clusterCenters_[clusterId] = std::make_shared<Eigen::Vector3d>(clusterCenter);
-            clusterNormals_[clusterId] = std::make_shared<Eigen::Vector3d>(planeNormal);
-            clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-            clusterSigmas_[clusterId] = adaptiveSigma;
-            clusterStates_[clusterId] = ClusterState::Tracked;
-            for (long int i = 0; i < clusterPointsMat.rows(); ++i)
+            // --- 6-sigma test for newly added point ---
+            const double pointToPlaneDist = std::abs(planeNormal.dot(clusterPointsMat.row(clusterPointsMat.rows() - 1)));
+            if (pointToPlaneDist > 3.0 * adaptiveSigma)
             {
-                const double pointToPlaneDist = std::abs(planeNormal.dot(clusterPointsMat.row(i)));
-                if (pointToPlaneDist > 3.0 * adaptiveSigma)
-                {
-                    clusterStates_[clusterId] = ClusterState::Idle;
-                    clusters_[clusterId].erase(idxKeyframe); // remove latest association
-                    break;
-                }
+                if(clusterState == ClusterState::Premature) // must not go from premature to idle
+                    continue;
+                clusterStates_[clusterId] = ClusterState::Idle; // idle - no valid track in newest KF
+                removePointFromCluster(clusterId, idxKeyframe); // remove latest association
+                updateClusterParameters(clusterId, false); // update location, thickness shouldn't change (no new KF association) 
+                continue;
             }
-            if (clusterStates_.at(clusterId) == ClusterState::Tracked)
+            else{
+                clusterStates_[clusterId] = ClusterState::Tracked;
+                // Note: internally uses thickness history to update covariance
+                updateClusterParameters(clusterId, planeNormal, clusterCenter);
                 numValidClusters++;
+            }
         }
+        if (validTracks == 0) // abort if the latest frame could not be tracked
+        {
+            return false;
+        }
+        auto stopwatchKNNEnd = std::chrono::high_resolution_clock::now();
+        auto durationKNN = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchKNNEnd - stopwatchKNNStart).count();
+        std::cout << "::: [DEBUG] KNN search and cluster association took " << durationKNN << " ms :::" << std::endl;
         std::cout << "::: [INFO] keyframe " << idxKeyframe << " had " << validTracks << " tracks and " << numValidClusters << " valid clusters :::" << std::endl;
         return idxKeyframe < config_.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
@@ -506,11 +491,13 @@ namespace mapping
     {
         std::size_t numCreated = 0, numRejected = 0;
         for (auto const &[idxSubmap, idxPoint] : clusterPoints)
-        { // plane fit is valid, create new cluster
+        {
             std::map<uint32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
             auto const clusterId = clusterIdCounter_++;
             clusters_.emplace(clusterId, newCluster);
             clusterStates_.emplace(clusterId, ClusterState::Premature);
+            clusterCenters_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps_[idxKeyframe]->points_[idxPoint]));
+            clusterNormals_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
             numCreated++;
         }
         std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe
@@ -524,6 +511,55 @@ namespace mapping
         clusterPlaneThicknessHistory_[clusterId].push_back(planeThickness);
     }
 
+    void MappingSystem::removePointFromCluster(const ClusterId & clusterId, const uint32_t &idxKeyframe){
+        { // erase cluster
+            auto it = clusters_[clusterId].find(idxKeyframe);
+            if (it != clusters_[clusterId].end())
+                clusters_[clusterId].erase(it);
+        }
+        { // remove thickness entry
+            auto it = clusterPlaneThicknessHistory_.find(clusterId);
+            // 2nd: vector<double> cluster thickness history (last entry should be latest keyframe)
+            if (it != clusterPlaneThicknessHistory_.end() && !it->second.empty())
+                it->second.pop_back();
+        }
+    }
+
+    void MappingSystem::updateClusterParameters(const ClusterId &clusterId, bool recalcPlaneThickness){
+        std::vector<Eigen::Vector3d> clusterPoints;
+        clusterPoints.reserve(clusters_[clusterId].size());
+        for (auto const &[idxSubmap, idxPoint]: clusters_.at(clusterId)){
+            clusterPoints.push_back(keyframeSubmaps_[idxSubmap]->points_[idxPoint]);
+        }
+        const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(clusterPoints);
+        *clusterCenters_[clusterId] = clusterCenter;
+        *clusterNormals_[clusterId] = planeNormal;
+        // explicitly recalculate plane thickness when a point was added or removed
+        if (recalcPlaneThickness){
+            double planeThicknessCovariance = 0.0;
+            for (const double &thickness : clusterPlaneThicknessHistory_[clusterId])
+                planeThicknessCovariance += std::pow(thickness, 2.0);
+            planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
+            clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
+            clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
+        }
+    }
+
+    void MappingSystem::updateClusterParameters(
+        const ClusterId &clusterId,
+        const Eigen::Vector3d &planeNormal,
+        const Eigen::Vector3d &clusterCenter)
+    {
+        *clusterCenters_[clusterId] = clusterCenter;
+        *clusterNormals_[clusterId] = planeNormal;
+        double planeThicknessCovariance = 0.0;
+        for (const double &thickness : clusterPlaneThicknessHistory_[clusterId])
+            planeThicknessCovariance += std::pow(thickness, 2.0);
+        planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
+        clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
+        clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
+    }
+
     void MappingSystem::removeKeyframeFromClusters(const uint32_t &idxKeyframe)
     {
         for (auto &[clusterId, clusterPoints] : clusters_)
@@ -532,8 +568,24 @@ namespace mapping
             if (itPoint != clusterPoints.end())
             {
                 clusterPoints.erase(itPoint);
-                if (clusterPoints.size() < 3)
+                if (clusterPoints.size() < 3){ // TODO: use min-points size or 3?
                     clusterStates_[clusterId] = ClusterState::Pruned;
+                    auto existingFactorIt = clusterFactors_.find(clusterId);
+                    if (existingFactorIt != clusterFactors_.end())
+                    {
+                        boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
+                        updateClusterParameters(clusterId, true); // recalculate plane parameters incl. thickness
+                        const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, clusterSigmas_[clusterId]);
+                        auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
+                        // remove keyframe from factor & update plane parameters
+                        factor->remove(
+                            idxKeyframe,
+                            clusterNormals_.at(clusterId),
+                            clusterCenters_.at(clusterId),
+                            robustNoise
+                        );
+                    }
+                }
             }
         }
     }
@@ -561,7 +613,7 @@ namespace mapping
         std::cout << "::: [INFO] Pruned " << clustersToErase.size() << " clusters, "
                   << clusters_.size() << " clusters remain :::" << std::endl;
     }
-    void MappingSystem::createAndUpdateFactors()
+    void MappingSystem::createAndUpdateFactors(const uint32_t &idxKeyframe)
     {
         std::size_t numFactorsAdded{0}, numFactorsUpdated{0}, numFactorsRemoved{0};
         for (auto const &[clusterId, clusterPoints] : clusters_)
@@ -570,74 +622,85 @@ namespace mapping
             // skip premature clusters, but pruned clusters need to be handled explicitly
             if (clusterState == ClusterState::Premature)
                 continue;
+            auto existingFactorIt = clusterFactors_.find(clusterId);
             // decide what to do based on the cluster state
-            switch (clusterStates_.at(clusterId))
+            switch (clusterState)
             {
             case ClusterState::Tracked:
             {
+                // cluster parameters from new track
                 const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
                 const double adaptiveSigma = clusterSigmas_[clusterId];
-                // 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
-                gtsam::KeyVector keys;
-                keys.reserve(clusterPoints.size());
-                // 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
-                std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> scanPointsPerKey;
-                size_t totalPoints = 0;
-                for (auto const &[idxKeyframe, idxPoint] : clusterPoints)
+                if (existingFactorIt == clusterFactors_.end()) // factor does not exist, create
                 {
-                    const gtsam::Key key = X(idxKeyframe);
-                    keys.push_back(key);
-                    // scan points are passed to factor in world frame
-                    scanPointsPerKey[key].push_back(std::make_shared<Eigen::Vector3d>(
-                        // transform point in keyframe from world frame to lidar frame
-                        keyframePoses_[idxKeyframe]->transformTo(keyframeSubmaps_[idxKeyframe]->points_[idxPoint])));
-                    totalPoints++;
-                }
-                const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, 3.0 * adaptiveSigma);
-                auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
-                const PointToPlaneFactor::shared_ptr ptpFactor = boost::make_shared<PointToPlaneFactor>(
-                    keys,
-                    imu_T_lidar_,
-                    scanPointsPerKey,
-                    clusterNormal,
-                    clusterNormal->dot(*clusterCenter),
-                    robustNoise,
-                    clusterId);
-                if (clusterFactors_.find(clusterId) == clusterFactors_.end()) // factor is new and must be added
-                {
-                    ptpFactor->print("adding new factor for cluster " + std::to_string(clusterId) + " ");
-                    newSmootherFactors_.add(ptpFactor);
-                    clusterFactors_.emplace(clusterId, ptpFactor);
-                    numFactorsAdded++;
-                    continue;
-                }
-                else
-                {
-                    // existing factors need to be updated explicitly
-                    const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
-                    for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+
+                    // 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
+                    gtsam::KeyVector keys;
+                    keys.reserve(clusterPoints.size());
+                    // 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
+                    std::map<gtsam::Key, Eigen::Vector3d> lidar_points;
+                    for (auto const &[idxKeyframe, idxPoint] : clusterPoints)
                     {
-                        const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(smootherFactors[factorKey]);
-                        if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
-                        {
-                            factorsToRemove_.push_back(gtsam::Key{factorKey});
-                            numFactorsUpdated++;
-                            /**
-                             * TODO: in the future, extend factor class to allow in-place modificaiton
-                             */
-                            clusterFactors_[clusterId] = ptpFactor; // update factor cache
-                            newSmootherFactors_.add(ptpFactor);
-                            ptpFactor->print("updating existing factor for cluster " + std::to_string(clusterId) + "");
-                            break;
-                        }
+                        const gtsam::Key key = X(idxKeyframe);
+                        keys.push_back(key);
+                        // scan points are passed to factor in world frame
+                        lidar_points[key] = keyframePoses_[idxKeyframe]->transformTo(keyframeSubmaps_[idxKeyframe]->points_[idxPoint]);
                     }
+                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                    auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
+                    const auto factor = boost::make_shared<PointToPlaneFactor>(
+                        keys,
+                        imu_T_lidar_,
+                        lidar_points,
+                        clusterNormal,
+                        clusterCenter,
+                        robustNoise,
+                        clusterId);
+                    newSmootherFactors_.add(factor);
+                    factor->print();
+                    clusterFactors_[clusterId] = factor;
+                    numFactorsAdded++;
+                }
+                else // cluster factor exists, needs update
+                {
+                    auto pointIt = clusters_[clusterId].find(idxKeyframe);
+                    if (pointIt == clusters_[clusterId].end()) // should not happen
+                    {
+                        std::cerr << "::: [ERROR] existing factor for cluster " << clusterId
+                                  << " but no point association for keyframe " << idxKeyframe << " :::" << std::endl;
+                        continue;
+                    }
+                    Eigen::Vector3d lidar_point = keyframePoses_[idxKeyframe]->transformTo(keyframeSubmaps_[idxKeyframe]->points_[pointIt->second]);
+                    boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
+                    // noise model
+                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                    auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
+                    const gtsam::Key key = X(idxKeyframe);
+                    std::cout << "::: [DEBUG] adding key x" << idxKeyframe << " to cluster factor " << clusterId << " :::" << std::endl;
+                    factor->add(
+                        key,
+                        lidar_point,
+                        clusterNormal,
+                        clusterCenter,
+                        robustNoise);
+                    factor->print();
+                    numFactorsUpdated++;
                 }
             }
             break;
-            case ClusterState::Idle:
-                // skip adding/updating factor
-                continue;
+            case ClusterState::Idle: // key associations did not change but new state estimates cause updated plane parameters
+            {
+                if (existingFactorIt != clusterFactors_.end())
+                {
+                    boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
+                    const double adaptiveSigma = clusterSigmas_[clusterId];
+                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                    auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
+                    factor->updatePlaneParameters(clusterNormals_[clusterId], clusterCenters_[clusterId], robustNoise);
+                }
+            }
+            break;
             case ClusterState::Pruned: // factor must be removed from the smoother
             {
                 const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
@@ -660,8 +723,8 @@ namespace mapping
                 continue;
             }
         }
-        std::cout << "::: [INFO] adding " << newSmootherFactors_.size() - factorsToRemove_.size()
-                  << " LiDAR factors, updating " << factorsToRemove_.size()
+        std::cout << "::: [INFO] adding " << numFactorsAdded
+                  << " LiDAR factors, updating " << numFactorsUpdated
                   << " removing " << numFactorsRemoved << " :::" << std::endl;
     }
 
@@ -731,11 +794,11 @@ namespace mapping
         newValues_.insert(X(idxKeyframe), w_X_curr_.pose());
         newValues_.insert(V(idxKeyframe), w_X_curr_.v());
         newValues_.insert(B(idxKeyframe), currBias_);
-        // summarizeClusters();
+        summarizeClusters();
         auto stopwatchFactorsStart = std::chrono::high_resolution_clock::now();
         // NOTE: will internally update factorsToRemove to drop outdated smart factors
         // the outdated factors will be replaced by extended ones with additional tracks
-        createAndUpdateFactors();
+        createAndUpdateFactors(idxKeyframe);
         auto stopwatchFactorsEnd = std::chrono::high_resolution_clock::now();
         auto durationFactors = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchFactorsEnd - stopwatchFactorsStart).count();
         std::cout << "::: [DEBUG] factor creation and update took " << durationFactors << " ms :::" << std::endl;
@@ -747,16 +810,18 @@ namespace mapping
                 B(idxKeyframe - 1), B(idxKeyframe),
                 preintegrator_));
         // Smoother indices used for marginalization
-        newSmootherIndices_[X(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
-        newSmootherIndices_[V(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
-        newSmootherIndices_[B(idxKeyframe - 1)] = static_cast<double>(idxKeyframe - 1);
+        const double
+            tSmootherLast{static_cast<double>(idxKeyframe - 1)},
+            tSmootherCurr{static_cast<double>(idxKeyframe)};
+        newSmootherIndices_[X(idxKeyframe - 1)] = tSmootherLast;
+        newSmootherIndices_[V(idxKeyframe - 1)] = tSmootherLast;
+        newSmootherIndices_[B(idxKeyframe - 1)] = tSmootherLast;
+        newSmootherIndices_[X(idxKeyframe)] = tSmootherCurr;
+        newSmootherIndices_[V(idxKeyframe)] = tSmootherCurr;
+        newSmootherIndices_[B(idxKeyframe)] = tSmootherCurr;
         // update estimator
         auto stopwatchSmootherStart = std::chrono::high_resolution_clock::now();
         smoother_.update(newSmootherFactors_, newValues_, newSmootherIndices_, factorsToRemove_);
-        gtsam::ISAM2Result result = smoother_.getISAM2Result();
-        if (result.errorBefore.has_value() && result.errorAfter.has_value())
-            std::cout << "::: [INFO] smoother error before update " << result.errorBefore.value()
-                      << ", after update " << result.errorAfter.value() << " :::" << std::endl;
         /**
          * NOTE: iSAM2 update performs only one GN step,
          * multiple updates to assure convergence, see also
@@ -765,13 +830,7 @@ namespace mapping
          * TODO: in the future, make the number of GN iterations configurable
          */
         for (std::size_t updateIters = 1; updateIters < 5; updateIters++)
-        {
             smoother_.update();
-            result = smoother_.getISAM2Result();
-            if (result.errorBefore.has_value() && result.errorAfter.has_value())
-                std::cout << "::: [INFO] smoother error before update " << result.errorBefore.value()
-                          << ", after update " << result.errorAfter.value() << " :::" << std::endl;
-        }
         auto stopwatchSmootherEnd = std::chrono::high_resolution_clock::now();
         auto durationSmoother = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchSmootherEnd - stopwatchSmootherStart).count();
         std::cout << "::: [DEBUG] smoother update took " << durationSmoother << " ms :::" << std::endl;
@@ -974,6 +1033,9 @@ namespace mapping
             }
         }
         std::cout << "::: [DEBUG] smoother has " << numImuFactors << " IMU factors, " << numLidarFactors << " LiDAR factors." << std::endl;
+        std::cout << "::: [DEBUG] keys currently in the smoother :::" << std::endl;
+        smoother_.getFactors().keys().print("  ");
+        std::cout << "\n";
     }
 
 } // namespace mapping

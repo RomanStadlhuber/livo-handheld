@@ -9,56 +9,82 @@ namespace mapping
     PointToPlaneFactor::PointToPlaneFactor(
         const gtsam::KeyVector &keys,
         const gtsam::Pose3 &imu_T_lidar,
-        const std::unordered_map<gtsam::Key, std::vector<std::shared_ptr<Eigen::Vector3d>>> &scanPointsPerKey,
+        const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
         const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-        double planeNormalOffsetD,
+        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
         const gtsam::SharedNoiseModel &noiseModel,
         const uint32_t &clusterId)
         : NoiseModelFactor(noiseModel, keys),
           imu_T_lidar_(imu_T_lidar),
-          scanPointsPerKey_(scanPointsPerKey),
+          lidar_points_(lidar_points),
           planeNormal_(planeNormal),
-          planeNormalOffsetD_(planeNormalOffsetD),
-          totalPoints_(0),
+          planeCenter_(planeCenter),
+          adaptiveNoiseModel_(noiseModel),
           clusterId_(clusterId)
     {
-        // Calculate total number of points for dimensionality
-        for (const auto &[key, points] : scanPointsPerKey_)
+    }
+
+    void PointToPlaneFactor::add(
+        const gtsam::Key &key,
+        const Eigen::Vector3d &lidar_point,
+        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+        const gtsam::SharedNoiseModel &noiseModel)
+    {
+        keys().push_back(key);
+        lidar_points_[key] = lidar_point;
+        updatePlaneParameters(planeNormal, planeCenter, noiseModel);
+    }
+
+    void PointToPlaneFactor::remove(
+        const gtsam::Key &key,
+        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+        const gtsam::SharedNoiseModel &noiseModel)
+    {
+        // erase variable key connection
+        auto it = std::find(keys().begin(), keys().end(), key);
+        if (it != keys().end())
         {
-            totalPoints_ += points.size();
+            keys().erase(it);
         }
+        // erase lidar points associated with this key
+        auto it_map = lidar_points_.find(key);
+        if (it_map != lidar_points_.end())
+            lidar_points_.erase(it_map);
+        updatePlaneParameters(planeNormal, planeCenter, noiseModel);
+    }
+
+    void PointToPlaneFactor::updatePlaneParameters(
+        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+        const gtsam::SharedNoiseModel &noiseModel)
+    {
+        planeNormal_ = planeNormal;
+        planeCenter_ = planeCenter;
+        adaptiveNoiseModel_ = noiseModel;
     }
 
     gtsam::Vector PointToPlaneFactor::unwhitenedError(
         const gtsam::Values &x,
         boost::optional<std::vector<gtsam::Matrix> &> H) const
     {
-        if (invalid)
-        {
-            throw std::runtime_error("Attempting to compute error for an invalid PointToPlaneFactor.");
-        }
-
-        auto [errorVec, Hs] = computeErrorAndJacobians(x);
-        if (H)
-        {
-            // Copy computed Jacobians to output
-            for (size_t i = 0; i < Hs.size(); ++i)
-            {
-                (*H)[i] = Hs[i];
-            }
-        }
-        return errorVec;
+        // reference x and H to silence compiler warnings (usused variables)
+        x.size();
+        H.has_value();
+        throw std::runtime_error(
+            "PointToPlaneFactor::unwhitenedError should not be called directly! Use linearize() instead.");
     }
 
     boost::shared_ptr<gtsam::GaussianFactor> PointToPlaneFactor::linearize(const gtsam::Values &x) const
     {
-        if (invalid)
+        if (isInvalid_)
         {
             throw std::runtime_error("Attempting to linearize an invalid PointToPlaneFactor.");
         }
         auto [errorVec, Hs] = computeErrorAndJacobians(x);
         gtsam::Vector b = -errorVec;
-        noiseModel()->WhitenSystem(Hs, b);
+        adaptiveNoiseModel_->WhitenSystem(Hs, b);
         std::vector<std::pair<gtsam::Key, gtsam::Matrix>> terms;
         for (size_t i = 0; i < keys().size(); ++i)
         {
@@ -69,7 +95,7 @@ namespace mapping
 
     std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> PointToPlaneFactor::computeErrorAndJacobians(const gtsam::Values &values) const
     {
-        const double meanFactor = 1.0 / static_cast<double>(totalPoints_);
+        const double meanFactor = 1.0 / static_cast<double>(lidar_points_.size());
         std::vector<gtsam::Matrix> Hs;
         Hs.reserve(keys().size());
         // the returned error is a scalar
@@ -82,14 +108,13 @@ namespace mapping
             // accumulator for Jacobian terms
             gtsam::Matrix16 Hx = gtsam::Matrix16::Zero();
             // Compute error and Jacobian for each point from this keyframe
-            std::vector<std::shared_ptr<Eigen::Vector3d>> scanPoints = scanPointsPerKey_.at(key);
-            for (const std::shared_ptr<Eigen::Vector3d> &scanPointPtr : scanPoints)
+            for (auto const& [_, lidar_point] : lidar_points_)
             {
                 // Transform point from lidar frame to world frame
                 const gtsam::Point3
-                    l_p(*scanPointPtr),
+                    l_p(lidar_point),
                     w_p = w_T_imu.compose(imu_T_lidar_).transformFrom(l_p);
-                const double r_i = planeNormal_->dot(w_p) - planeNormalOffsetD_;
+                const double r_i = planeNormal_->dot(w_p - *planeCenter_);
                 // Point-to-plane distance (signed)
                 errorVec(0) += std::pow(r_i, 2);
                 const Eigen::Matrix<double, 1, 3> nT = planeNormal_->transpose();
@@ -111,21 +136,22 @@ namespace mapping
     gtsam::NonlinearFactor::shared_ptr PointToPlaneFactor::clone() const
     {
         return boost::make_shared<PointToPlaneFactor>(
-            keys(), imu_T_lidar_, scanPointsPerKey_, planeNormal_, planeNormalOffsetD_, noiseModel(), clusterId_);
+            keys(), imu_T_lidar_, lidar_points_, planeNormal_, planeCenter_, noiseModel(), clusterId_);
     }
 
     void PointToPlaneFactor::print(const std::string &s, const gtsam::KeyFormatter &keyFormatter) const
     {
-        std::cout << s << "PointToPlaneFactor (cluster id:" << clusterId_ << ") connecting keys: ";
+        std::cout << s << "PointToPlaneFactor (cluster id: " << clusterId_ << ") connecting keys: ";
         for (const auto &key : keys())
         {
             std::cout << keyFormatter(key) << " ";
         }
         std::cout << "\n\tCluster Id: " << clusterId_ << "\n"
-                  << "\tPlane normal: [" << planeNormal_->transpose() << "], d: " << planeNormalOffsetD_ << "\n"
-                  << "\tTotal points: " << totalPoints_ << "\n"
+                  << "\tPlane normal: [" << planeNormal_->transpose() << "]\n"
+                  << "\tPlane center: [" << planeCenter_->transpose() << "]\n"
+                  << "\tTotal points: " << lidar_points_.size() << "\n"
                   << "\tNoise model: ";
-        noiseModel()->print("");
+        adaptiveNoiseModel_->print("");
     }
 
 } // namespace mapping

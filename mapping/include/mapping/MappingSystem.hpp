@@ -112,7 +112,8 @@ namespace mapping
         ///         - planeNormal: fitted plane normal vector
         ///         - planeCenter: centroid of input points
         ///         - planePoints: Nx3 matrix of centered points (w_p - w_planeCenter)
-        std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd> planeFitSVD(
+        ///         - planeThickness: mean squared point-to-plane distance (lower is better)
+        std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double> planeFitSVD(
             const std::vector<Eigen::Vector3d> &points,
             double planarityThreshold = 0.1,
             double linearityThreshold = 0.5) const;
@@ -120,6 +121,15 @@ namespace mapping
         // create new clusters from points
         void createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints);
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
+        /// @brief Remove a point when 6-sigma test fails.
+        /// Note that after this, "updateClusterParameters" still needs to be called explicitly (with recalcPlaneThickness=true).
+        void removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe);
+        /// @brief Update cluster parameters from scratch
+        /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
+        void updateClusterParameters(const ClusterId &clusterId, bool recalcPlaneThickness);
+        /// @brief Set new cluster parameters including thickness (i.e. valid tracking and point was added)
+        /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
+        void updateClusterParameters(const ClusterId &clusterId, const Eigen::Vector3d &newNormal, const Eigen::Vector3d &newCenter);
         void removeKeyframeFromClusters(const uint32_t &idxKeyframe);
         void pruneClusters(const uint32_t &idxKeyframe);
         // Shorthand check for whether a cluster is valid (= tracking or idle).
@@ -132,7 +142,7 @@ namespace mapping
         /// @brief Summarize current factors for debugging purposes.
         void summarizeFactors() const;
         /// @brief Create new factors for previously unttracked clusters and update existing factors.
-        void createAndUpdateFactors();
+        void createAndUpdateFactors(const uint32_t &idxKeyframe);
         /// @brief Reset factor graph buffers for next iteration
         void resetNewFactors();
 
@@ -210,7 +220,7 @@ namespace mapping
         std::map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
         size_t scansSinceLastKeyframe_ = 0;
 
-        std::map<ClusterId, PointToPlaneFactor::shared_ptr> clusterFactors_;
+        std::map<ClusterId, boost::shared_ptr<PointToPlaneFactor>> clusterFactors_;
         gtsam::FactorIndices factorsToRemove_;
 
         // Keyframe data
