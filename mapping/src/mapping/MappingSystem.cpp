@@ -181,7 +181,7 @@ namespace mapping
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
         std::vector<SubmapIdxPointIdx> clusterPoints; // empty for initial keyframe
         clusterPoints.reserve(keyframeSubmaps_.at(idxNewKF)->points_.size());
-        for (size_t i = 0; i < keyframeSubmaps_.at(idxNewKF)->points_.size(); i++) // TEST: larger stride, fewer clusters
+        for (size_t i = 0; i < keyframeSubmaps_.at(idxNewKF)->points_.size(); i++)
             clusterPoints.emplace_back(idxNewKF, static_cast<int>(i));
         createNewClusters(idxNewKF, clusterPoints);
         // Clear lidar buffer
@@ -570,21 +570,12 @@ namespace mapping
                 clusterPoints.erase(itPoint);
                 if (clusterPoints.size() < 3){ // TODO: use min-points size or 3?
                     clusterStates_[clusterId] = ClusterState::Pruned;
-                    auto existingFactorIt = clusterFactors_.find(clusterId);
-                    if (existingFactorIt != clusterFactors_.end())
-                    {
-                        boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
-                        updateClusterParameters(clusterId, true); // recalculate plane parameters incl. thickness
-                        const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, clusterSigmas_[clusterId]);
-                        auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
-                        // remove keyframe from factor & update plane parameters
-                        factor->remove(
-                            idxKeyframe,
-                            clusterNormals_.at(clusterId),
-                            clusterCenters_.at(clusterId),
-                            robustNoise
-                        );
-                    }
+                    // NOTE: Do NOT call factor->remove() here.
+                    // This function runs AFTER smoother_.update(), during marginalization cleanup.
+                    // The smoother has already marginalized the relevant variable internally.
+                    // Mutating the factor's keys in-place would desync ISAM2's VariableIndex.
+                    // The factor will be properly replaced (remove-and-readd) in the next
+                    // iteration's createAndUpdateFactors().
                 }
             }
         }
@@ -609,6 +600,7 @@ namespace mapping
             clusterPlaneThickness_.erase(clusterId);
             clusterSigmas_.erase(clusterId);
             clusterPlaneThicknessHistory_.erase(clusterId);
+            clusterFactors_.erase(clusterId);
         }
         std::cout << "::: [INFO] Pruned " << clustersToErase.size() << " clusters, "
                   << clusters_.size() << " clusters remain :::" << std::endl;
@@ -662,29 +654,46 @@ namespace mapping
                     clusterFactors_[clusterId] = factor;
                     numFactorsAdded++;
                 }
-                else // cluster factor exists, needs update
+                else // cluster factor exists, remove old and readd with updated keys
                 {
-                    auto pointIt = clusters_[clusterId].find(idxKeyframe);
-                    if (pointIt == clusters_[clusterId].end()) // should not happen
+                    // 1: Remove old factor from smoother (if still present)
+                    const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
+                    for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
                     {
-                        std::cerr << "::: [ERROR] existing factor for cluster " << clusterId
-                                  << " but no point association for keyframe " << idxKeyframe << " :::" << std::endl;
-                        continue;
+                        const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
+                        const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
+                        if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                        {
+                            existingPtpFactor->markInvalid();
+                            factorsToRemove_.push_back(gtsam::Key{factorKey});
+                            numFactorsRemoved++;
+                            break;
+                        }
                     }
-                    Eigen::Vector3d lidar_point = keyframePoses_[idxKeyframe]->transformTo(keyframeSubmaps_[idxKeyframe]->points_[pointIt->second]);
-                    boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
-                    // noise model
+                    // 2: Create new factor from ALL current clusterPoints
+                    gtsam::KeyVector keys;
+                    keys.reserve(clusterPoints.size());
+                    std::map<gtsam::Key, Eigen::Vector3d> lidar_points;
+                    for (auto const &[kfIdx, ptIdx] : clusterPoints)
+                    {
+                        const gtsam::Key key = X(kfIdx);
+                        keys.push_back(key);
+                        lidar_points[key] = keyframePoses_[kfIdx]->transformTo(keyframeSubmaps_[kfIdx]->points_[ptIdx]);
+                    }
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
-                    const gtsam::Key key = X(idxKeyframe);
-                    std::cout << "::: [DEBUG] adding key x" << idxKeyframe << " to cluster factor " << clusterId << " :::" << std::endl;
-                    factor->add(
-                        key,
-                        lidar_point,
+                    const auto newFactor = boost::make_shared<PointToPlaneFactor>(
+                        keys,
+                        imu_T_lidar_,
+                        lidar_points,
                         clusterNormal,
                         clusterCenter,
-                        robustNoise);
-                    factor->print();
+                        robustNoise,
+                        clusterId);
+                    newSmootherFactors_.add(newFactor);
+                    clusterFactors_[clusterId] = newFactor;
+                    std::cout << "::: [DEBUG] replaced factor for cluster " << clusterId << " with " << keys.size() << " keys :::" << std::endl;
+                    newFactor->print();
                     numFactorsUpdated++;
                 }
             }

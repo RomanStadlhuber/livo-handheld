@@ -142,6 +142,11 @@ namespace mapping
         /// @brief Summarize current factors for debugging purposes.
         void summarizeFactors() const;
         /// @brief Create new factors for previously unttracked clusters and update existing factors.
+        /// **Warning:** re-keying (i.e. modifying factor-key associations in-place) is not tracked by
+        /// GTSAM, i.e. the factor graph is treated as static after initialization for the solver.
+        /// While iSAM2 does keep state (bayes-tree) to track which variables need to be relinearized,
+        /// it does not re-key internally ([see also](https://github.com/borglab/gtsam/issues/149)).
+        /// This means that updates to factor-key associations can only be passed through copy-add-remove.
         void createAndUpdateFactors(const uint32_t &idxKeyframe);
         /// @brief Reset factor graph buffers for next iteration
         void resetNewFactors();
