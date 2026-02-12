@@ -127,7 +127,8 @@ namespace mapping
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
         /// @brief Remove a point when 6-sigma test fails.
         /// Note that after this, "updateClusterParameters" still needs to be called explicitly (with recalcPlaneThickness=true).
-        void removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe);
+        /// @param firstInHistory Set this to true if you are marginalizing the oldest keyframe from the cluster.
+        void removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe, bool firstInHistory = false);
         /// @brief Update cluster parameters from scratch
         /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
         void updateClusterParameters(const ClusterId &clusterId, bool recalcPlaneThickness);

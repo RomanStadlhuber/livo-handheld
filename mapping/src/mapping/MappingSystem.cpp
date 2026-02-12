@@ -412,7 +412,7 @@ namespace mapping
             if (clusterState == ClusterState::Pruned)
                 continue;
             // --- tracking: KNN search & SVD plane fit ---
-            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.begin(); // get the oldest point in the cluster
+            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.rbegin(); // get the oldest point in the cluster
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps_[idxClusterKF]->points_[idxSubmapPt];
             const int knnFound = kdTree.SearchKNN(
                 world_clusterPt,
@@ -513,7 +513,7 @@ namespace mapping
         clusterPlaneThicknessHistory_[clusterId].push_back(planeThickness);
     }
 
-    void MappingSystem::removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe)
+    void MappingSystem::removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe, bool firstInHistory)
     {
         { // remove keyframe point from cluster
             auto it = clusters_[clusterId].find(idxKeyframe);
@@ -524,7 +524,12 @@ namespace mapping
             auto it = clusterPlaneThicknessHistory_.find(clusterId);
             // 2nd: vector<double> cluster thickness history (last entry should be latest keyframe)
             if (it != clusterPlaneThicknessHistory_.end() && !it->second.empty())
-                it->second.pop_back();
+            {
+                if (firstInHistory)
+                    it->second.erase(it->second.begin());
+                else
+                    it->second.pop_back();
+            }
         }
     }
 
@@ -573,14 +578,15 @@ namespace mapping
             auto itPoint = clusterPoints.find(idxKeyframe);
             if (itPoint != clusterPoints.end())
             {
-                removePointFromCluster(clusterId, idxKeyframe); // remove point and thickness history entry
+                removePointFromCluster(clusterId, idxKeyframe, /*firstInHistory=*/true); // remove point and thickness history entry
                 if (clusterPoints.size() < 3)
                 { // TODO: use min-points size or 3?
                     // NOTE: Do NOT call factor->remove() here, since the smoother won't re-key factors
                     clusterStates_[clusterId] = ClusterState::Pruned;
                     continue;
                 }
-                if (clusterStates_[clusterId] == ClusterState::Idle){
+                if (clusterStates_[clusterId] == ClusterState::Idle)
+                {
                     // shift cluster associations, means that the entire factor needs to be replaced
                     // to reflect the removed keyframe association
                     clusterStates_[clusterId] = ClusterState::ShiftedIdle;
