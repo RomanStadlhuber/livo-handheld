@@ -102,7 +102,11 @@ namespace mapping
         /// @param idxKeyframe Index of the current keyframe
         /// @return True if the keyframe was tracked successfully
         bool trackScanPointsToClusters(const uint32_t &idxKeyframe);
-
+        /// @brief "Marginalize" (i.e. remove) old keyframes and their associations with clusters.
+        /// Do this **before** tracking clusters so that parameters will be updated with old points already removed.
+        /// Does not touch clusters as parameters will be updated during tracking.
+        /// @param idxKeyframe Index of the current (newly created) keyframe, used to determine which keyframes to marginalize.
+        void marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe);
         /// @brief Fit a plane to a set of 3D points using SVD
         /// @param points Input points to fit the plane to
         /// @param planarityThreshold Maximum ratio σ₃/σ₂ for valid plane (default 0.3)

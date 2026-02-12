@@ -377,7 +377,8 @@ namespace mapping
         const bool isValid = isPlanar && notLinear;
 
         double planeThickness = 0.0;
-        if(isValid){
+        if (isValid)
+        {
             // Compute plane thickness as mean squared point-to-plane distance
             for (size_t i = 0; i < numPoints; ++i)
             {
@@ -425,9 +426,9 @@ namespace mapping
                 knnPoints.push_back(keyframeSubmaps_[idxKeyframe]->points_[knnIndices[i]]);
             const auto [validPlaneTrack, planeTrackNormal, knnCenter, knnPointsMat, planeTrackThickness] = planeFitSVD(knnPoints);
             // --- tracking failed (KNN plane fit invalid): update cluster center & normal, keep thickness ---
-            if(!validPlaneTrack || planeTrackThickness > config_.lidar_frontend.clustering.max_plane_thickness)
+            if (!validPlaneTrack || planeTrackThickness > config_.lidar_frontend.clustering.max_plane_thickness)
             {
-                if(clusterState == ClusterState::Premature) // don't update premature clusters
+                if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
                 clusterStates_[clusterId] = ClusterState::Idle;
                 updateClusterParameters(clusterId, false); // update cluster, keep thickness (no new KF association)
@@ -462,14 +463,15 @@ namespace mapping
             const double pointToPlaneDist = std::abs(planeNormal.dot(clusterPointsMat.row(clusterPointsMat.rows() - 1)));
             if (pointToPlaneDist > 3.0 * adaptiveSigma)
             {
-                if(clusterState == ClusterState::Premature) // must not go from premature to idle
+                if (clusterState == ClusterState::Premature) // must not go from premature to idle
                     continue;
                 clusterStates_[clusterId] = ClusterState::Idle; // idle - no valid track in newest KF
                 removePointFromCluster(clusterId, idxKeyframe); // remove latest association
-                updateClusterParameters(clusterId, false); // update location, thickness shouldn't change (no new KF association) 
+                updateClusterParameters(clusterId, false);      // update location, thickness shouldn't change (no new KF association)
                 continue;
             }
-            else{
+            else
+            {
                 clusterStates_[clusterId] = ClusterState::Tracked;
                 // Note: internally uses thickness history to update covariance
                 updateClusterParameters(clusterId, planeNormal, clusterCenter);
@@ -511,8 +513,9 @@ namespace mapping
         clusterPlaneThicknessHistory_[clusterId].push_back(planeThickness);
     }
 
-    void MappingSystem::removePointFromCluster(const ClusterId & clusterId, const uint32_t &idxKeyframe){
-        { // erase cluster
+    void MappingSystem::removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe)
+    {
+        { // remove keyframe point from cluster
             auto it = clusters_[clusterId].find(idxKeyframe);
             if (it != clusters_[clusterId].end())
                 clusters_[clusterId].erase(it);
@@ -525,17 +528,20 @@ namespace mapping
         }
     }
 
-    void MappingSystem::updateClusterParameters(const ClusterId &clusterId, bool recalcPlaneThickness){
+    void MappingSystem::updateClusterParameters(const ClusterId &clusterId, bool recalcPlaneThickness)
+    {
         std::vector<Eigen::Vector3d> clusterPoints;
         clusterPoints.reserve(clusters_[clusterId].size());
-        for (auto const &[idxSubmap, idxPoint]: clusters_.at(clusterId)){
+        for (auto const &[idxSubmap, idxPoint] : clusters_.at(clusterId))
+        {
             clusterPoints.push_back(keyframeSubmaps_[idxSubmap]->points_[idxPoint]);
         }
         const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(clusterPoints);
         *clusterCenters_[clusterId] = clusterCenter;
         *clusterNormals_[clusterId] = planeNormal;
         // explicitly recalculate plane thickness when a point was added or removed
-        if (recalcPlaneThickness){
+        if (recalcPlaneThickness)
+        {
             double planeThicknessCovariance = 0.0;
             for (const double &thickness : clusterPlaneThicknessHistory_[clusterId])
                 planeThicknessCovariance += std::pow(thickness, 2.0);
@@ -562,20 +568,22 @@ namespace mapping
 
     void MappingSystem::removeKeyframeFromClusters(const uint32_t &idxKeyframe)
     {
-        for (auto &[clusterId, clusterPoints] : clusters_)
+        for (auto const &[clusterId, clusterPoints] : clusters_)
         {
             auto itPoint = clusterPoints.find(idxKeyframe);
             if (itPoint != clusterPoints.end())
             {
-                clusterPoints.erase(itPoint);
-                if (clusterPoints.size() < 3){ // TODO: use min-points size or 3?
+                removePointFromCluster(clusterId, idxKeyframe); // remove point and thickness history entry
+                if (clusterPoints.size() < 3)
+                { // TODO: use min-points size or 3?
+                    // NOTE: Do NOT call factor->remove() here, since the smoother won't re-key factors
                     clusterStates_[clusterId] = ClusterState::Pruned;
-                    // NOTE: Do NOT call factor->remove() here.
-                    // This function runs AFTER smoother_.update(), during marginalization cleanup.
-                    // The smoother has already marginalized the relevant variable internally.
-                    // Mutating the factor's keys in-place would desync ISAM2's VariableIndex.
-                    // The factor will be properly replaced (remove-and-readd) in the next
-                    // iteration's createAndUpdateFactors().
+                    continue;
+                }
+                if (clusterStates_[clusterId] == ClusterState::Idle){
+                    // shift cluster associations, means that the entire factor needs to be replaced
+                    // to reflect the removed keyframe association
+                    clusterStates_[clusterId] = ClusterState::ShiftedIdle;
                 }
             }
         }
@@ -650,7 +658,7 @@ namespace mapping
                         robustNoise,
                         clusterId);
                     newSmootherFactors_.add(factor);
-                    factor->print();
+                    // factor->print();
                     clusterFactors_[clusterId] = factor;
                     numFactorsAdded++;
                 }
@@ -692,8 +700,8 @@ namespace mapping
                         clusterId);
                     newSmootherFactors_.add(newFactor);
                     clusterFactors_[clusterId] = newFactor;
-                    std::cout << "::: [DEBUG] replaced factor for cluster " << clusterId << " with " << keys.size() << " keys :::" << std::endl;
-                    newFactor->print();
+                    // std::cout << "::: [DEBUG] replaced factor for cluster " << clusterId << " with " << keys.size() << " keys :::" << std::endl;
+                    // newFactor->print();
                     numFactorsUpdated++;
                 }
             }
@@ -708,6 +716,57 @@ namespace mapping
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     factor->updatePlaneParameters(clusterNormals_[clusterId], clusterCenters_[clusterId], robustNoise);
                 }
+            }
+            break;
+            case ClusterState::ShiftedIdle: // key associations changed but cluster is idle, so plane parameters are not updated
+            {
+                // TODO: is the same as "tracked" case, just no association to the latest keyframe?
+                if (existingFactorIt == clusterFactors_.end())
+                {
+                    std::cout << "::: [WARN] attempting to shift factor keys of idle cluster, but factor does not exist :::" << std::endl;
+                    continue; // should not happen, but safe guard
+                }
+                const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
+                const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
+                const double adaptiveSigma = clusterSigmas_[clusterId];
+                // 1: Remove old factor from smoother (if still present)
+                const gtsam::NonlinearFactorGraph &smootherFactors = smoother_.getFactors();
+                for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+                {
+                    const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
+                    const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
+                    if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                    {
+                        existingPtpFactor->markInvalid();
+                        factorsToRemove_.push_back(gtsam::Key{factorKey});
+                        numFactorsRemoved++;
+                        break;
+                    }
+                }
+                // 2: Create new factor from ALL current clusterPoints
+                gtsam::KeyVector keys;
+                keys.reserve(clusterPoints.size());
+                std::map<gtsam::Key, Eigen::Vector3d> lidar_points;
+                for (auto const &[kfIdx, ptIdx] : clusterPoints)
+                {
+                    const gtsam::Key key = X(kfIdx);
+                    keys.push_back(key);
+                    lidar_points[key] = keyframePoses_[kfIdx]->transformTo(keyframeSubmaps_[kfIdx]->points_[ptIdx]);
+                }
+                const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
+                const auto newFactor = boost::make_shared<PointToPlaneFactor>(
+                    keys,
+                    imu_T_lidar_,
+                    lidar_points,
+                    clusterNormal,
+                    clusterCenter,
+                    robustNoise,
+                    clusterId);
+                newSmootherFactors_.add(newFactor);
+                clusterFactors_[clusterId] = newFactor;
+                numFactorsUpdated++;
+                clusterStates_[clusterId] = ClusterState::Idle; // after shifting, cluster goes back to idle state
             }
             break;
             case ClusterState::Pruned: // factor must be removed from the smoother
@@ -791,6 +850,11 @@ namespace mapping
         visualizer.waitForSpacebar();
 #endif
 
+        /**
+         * NOTE: marginalization is done BEFORE tracking so that when smoother_.update() is called,
+         * the to-be-marginalized keyframe's variables are already no longer associated with any factors
+         */
+        marginalizeKeyframesOutsideSlidingWindow(idxKeyframe); // remove to-be-marginalized keyframe associations
         const bool isTracking = trackScanPointsToClusters(idxKeyframe);
         pruneClusters(idxKeyframe);
         if (!isTracking)
@@ -803,7 +867,7 @@ namespace mapping
         newValues_.insert(X(idxKeyframe), w_X_curr_.pose());
         newValues_.insert(V(idxKeyframe), w_X_curr_.v());
         newValues_.insert(B(idxKeyframe), currBias_);
-        summarizeClusters();
+        // summarizeClusters();
         auto stopwatchFactorsStart = std::chrono::high_resolution_clock::now();
         // NOTE: will internally update factorsToRemove to drop outdated smart factors
         // the outdated factors will be replaced by extended ones with additional tracks
@@ -861,6 +925,26 @@ namespace mapping
         // TODO: supplement new clusters from the current keyframe to avoid tracking loss
         // --> only do this when tracking shows reasonable results in the first place ..
 
+        // Update the poses of the keyframe submaps
+        for (auto const &[idxKf, _] : keyframeSubmaps_)
+        {
+            const gtsam::Pose3
+                // updated IMU pose in world frame
+                world_T_imu = smoother_.calculateEstimate<gtsam::Pose3>(X(idxKf)),
+                // updated lidar pose in world frame
+                updatedPose = world_T_imu.compose(imu_T_lidar_);
+            updateKeyframeSubmapPose(idxKf, updatedPose);
+#ifndef DISABLEVIZ
+            visualizer.updateSubmap(idxKf, updatedPose.matrix());
+#endif
+        }
+#ifndef DISABLEVIZ
+        visualizer.waitForSpacebar();
+#endif
+    }
+
+    void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)
+    {
         if (idxKeyframe > static_cast<uint32_t>(config_.backend.sliding_window_size))
         {
             uint32_t idxLowerBound = keyframeSubmaps_.begin()->first;
@@ -883,23 +967,6 @@ namespace mapping
                 }
             }
         }
-
-        // Update the poses of the keyframe submaps
-        for (auto const &[idxKf, _] : keyframeSubmaps_)
-        {
-            const gtsam::Pose3
-                // updated IMU pose in world frame
-                world_T_imu = smoother_.calculateEstimate<gtsam::Pose3>(X(idxKf)),
-                // updated lidar pose in world frame
-                updatedPose = world_T_imu.compose(imu_T_lidar_);
-            updateKeyframeSubmapPose(idxKf, updatedPose);
-#ifndef DISABLEVIZ
-            visualizer.updateSubmap(idxKf, updatedPose.matrix());
-#endif
-        }
-#ifndef DISABLEVIZ
-        visualizer.waitForSpacebar();
-#endif
     }
 
     void MappingSystem::resetNewFactors()

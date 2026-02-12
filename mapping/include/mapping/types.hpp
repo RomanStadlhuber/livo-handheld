@@ -77,6 +77,9 @@ namespace mapping
         /// @brief  When the cluster could not be tracked in the new keyframe.
         /// @details A factor must already exist for this cluster. It is updated incl. the new keyframe association.
         Idle,
+        /// @brief When the cluster could not be tracked in the new keyframe, and a keyframe was marginalized from it.
+        /// @details The factor must be replaced, dropping the marginalized keyframe association.
+        ShiftedIdle,
         /// @brief Marked for removal, e.g. when failing the 6-sigma test or marginalized out.
         /// @details Any factors associated with this cluster must be removed from the graph.
         Pruned,
