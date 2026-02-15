@@ -192,11 +192,7 @@ namespace mapping
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
-        std::vector<SubmapIdxPointIdx> clusterPoints; // empty for initial keyframe
-        clusterPoints.reserve(keyframeSubmaps_.at(idxNewKF)->points_.size());
-        for (size_t i = 0; i < keyframeSubmaps_.at(idxNewKF)->points_.size(); i++)
-            clusterPoints.emplace_back(idxNewKF, static_cast<int>(i));
-        createNewClusters(idxNewKF, clusterPoints);
+        createNewClusters(idxNewKF, /*sampling=*/config_.lidar_frontend.clustering.supplement_sampling);
         // Clear lidar buffer
         lidarBuffer_.clear();
 
@@ -511,10 +507,10 @@ namespace mapping
         return idxKeyframe < config_.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
 
-    void MappingSystem::createNewClusters(const uint32_t &idxKeyframe, std::vector<SubmapIdxPointIdx> &clusterPoints)
+    void MappingSystem::createNewClusters(const uint32_t &idxKeyframe, std::size_t sampling)
     {
-        std::size_t numCreated = 0, numRejected = 0;
-        for (auto const &[idxSubmap, idxPoint] : clusterPoints)
+        std::size_t numCreated = 0;
+        for (std::size_t idxPoint = 0; idxPoint < keyframeSubmaps_.at(idxKeyframe)->points_.size(); idxPoint += sampling)
         {
             std::map<uint32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
             auto const clusterId = clusterIdCounter_++;
@@ -524,8 +520,7 @@ namespace mapping
             clusterNormals_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
             numCreated++;
         }
-        std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe
-                  << " (" << numRejected << " rejected due to plane fit) :::" << std::endl;
+        std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe << " :::" << std::endl;
     }
 
     void MappingSystem::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness)
@@ -928,9 +923,8 @@ namespace mapping
          * multiple updates to assure convergence, see also
          * - https://github.com/borglab/gtsam/blob/develop/gtsam/nonlinear/IncrementalFixedLagSmoother.cpp#L128
          * - https://groups.google.com/g/gtsam-users/c/Cz2RoY3dN14/m/3Ka6clsdBgAJ
-         * TODO: in the future, make the number of GN iterations configurable
          */
-        for (std::size_t updateIters = 1; updateIters < 5; updateIters++)
+        for (std::size_t updateIters = 1; updateIters < config_.backend.solver_iterations; updateIters++)
             smoother_.update();
         auto stopwatchSmootherEnd = std::chrono::high_resolution_clock::now();
         auto durationSmoother = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchSmootherEnd - stopwatchSmootherStart).count();
@@ -947,13 +941,10 @@ namespace mapping
         currBias_.print();
         auto marginals = smoother_.marginalCovariance(B(idxKeyframe));
         std::cout << "::: [DEBUG] bias marginal trace " << marginals.trace() << " :::" << std::endl;
-
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
-
-        // TODO: supplement new clusters from the current keyframe to avoid tracking loss
-        // --> only do this when tracking shows reasonable results in the first place ..
-
+        // supplement new clusters from keyframe points
+        createNewClusters(idxKeyframe, /*sampling=*/config_.lidar_frontend.clustering.supplement_sampling);
         // Update the poses of the keyframe submaps
         std::cout << "::: [INFO] updating keyframe submap poses for ";
         for (auto const &[idxKf, _] : keyframeSubmaps_)
