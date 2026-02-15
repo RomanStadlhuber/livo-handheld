@@ -18,6 +18,7 @@ namespace mapping
         size_t min_points = 5;
         size_t max_points = 20;
         double max_plane_thickness = 0.1; // [m]
+        size_t supplement_sampling = 10; // subsampling stride for supplementing new clusters
     };
 
     inline void declare_config(ClusteringConfig &config)
@@ -27,9 +28,11 @@ namespace mapping
         field(config.min_points, "min_points");
         field(config.max_points, "max_points");
         field(config.max_plane_thickness, "max_plane_thickness", "m");
+        field(config.supplement_sampling, "supplement_sampling");
         check(config.min_points, GT, 0, "min_points");
         check(config.max_points, GT, config.min_points, "max_points");
         check(config.max_plane_thickness, GT, 0.0, "max_plane_thickness");
+        check(config.supplement_sampling, GT, 0, "supplement_sampling");
     }
 
     /// @brief Keyframe creation thresholds
@@ -82,6 +85,7 @@ namespace mapping
     {
         int sliding_window_size = 7;   // [keyframes]
         double init_time_window = 2.0; // [sec.]
+        int solver_iterations = 5; 
     };
 
     inline void declare_config(BackendConfig &config)
@@ -90,8 +94,10 @@ namespace mapping
         name("BackendConfig");
         field(config.sliding_window_size, "sliding_window_size", "keyframes");
         field(config.init_time_window, "init_time_window", "s");
+        field(config.solver_iterations, "solver_iterations");
         check(config.sliding_window_size, GT, 0, "sliding_window_size");
         check(config.init_time_window, GT, 0.0, "init_time_window");
+        check(config.solver_iterations, GT, 0, "solver_iterations");
     }
 
     /// @brief Point cloud filtering parameters

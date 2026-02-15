@@ -1,9 +1,10 @@
 backend:
-  sliding_window_size: 7 # [keyframes]
+  sliding_window_size: 14 # [keyframes]
   init_time_window: 2.0 # [sec.]
+  solver_iterations: 5
 
 lidar_frontend:
-  voxel_size: 1.0 # [m]
+  voxel_size: 0.5 # [m]
   undistort: true # disable for solid state LiDARs
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
@@ -11,10 +12,11 @@ lidar_frontend:
     min_points: 5
     max_points: 20
     max_plane_thickness: 0.1 # [m]
+    supplement_sampling: 10 # subsampling stride for supplementing new clusters
   keyframe:
     thresh_distance: 0.05 # [m]
     thresh_angle: 0.087 # [rad], ~5 degrees
-    thresh_elapsed_scans: 5
+    thresh_elapsed_scans: 2
 
 point_filter:
   min_distance: 2.5 # [m]
