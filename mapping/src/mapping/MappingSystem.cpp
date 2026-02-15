@@ -281,23 +281,25 @@ namespace mapping
 
         // Undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation
         // Delta pose to last submap at preintegrated state / last IMU time
-        gtsam::Pose3 kf_T_prop = lastKeyframePose().inverse().compose(w_X_curr_.pose().compose(imu_T_lidar_));
+        gtsam::Pose3 kf_T_prop = lastKeyframePose().between(w_X_curr_.pose().compose(imu_T_lidar_));
 
         const double tLastKeyframe = keyframeTimestamps_.rbegin()->second;
+        // time delta between last keyframe and new preintegration
         const double dtPropToKeyframe = tLastImu_ - tLastKeyframe;
 
+        // Pose delta of this scan to last keyframe
+        // Compute pose delta to last submap at current scan time (extrapolate with constant velocity)
+        // Linear and angular velocity are obtained from pose delta over preintegration time
+        const gtsam::Vector3 angVel = gtsam::Rot3::Logmap(kf_T_prop.rotation()) / dtPropToKeyframe;
+        const gtsam::Vector3 linVel = kf_T_prop.translation() / dtPropToKeyframe;
+
+        double tLastScan = tLastKeyframe;
         // Undistort between individual scans
         gtsam::Pose3 deltaPoseLastScanToKeyframe = gtsam::Pose3::Identity();
         for (auto it = lidarBuffer_.begin(); it != lidarBuffer_.end(); ++it)
         {
             const auto [tScan, scan] = *it;
             const double dtScanToKeyframe = tScan - tLastKeyframe;
-
-            // Pose delta of this scan to last keyframe
-            // Compute pose delta to last submap at current scan time (extrapolate with constant velocity)
-            // Linear and angular velocity are obtained from pose delta over preintegration time
-            const gtsam::Vector3 angVel = gtsam::Rot3::Logmap(kf_T_prop.rotation()) / dtPropToKeyframe;
-            const gtsam::Vector3 linVel = kf_T_prop.translation() / dtPropToKeyframe;
 
             // Apply scan to keyframe delta time to get pose delta of the scan w.r.t. the last keyframe
             gtsam::Rot3 kf_R_scan = gtsam::Rot3::Expmap(angVel * dtScanToKeyframe);
@@ -307,32 +309,39 @@ namespace mapping
             // Pose & time delta from this to last scan
             gtsam::Pose3 lastScan_T_currScan = deltaPoseLastScanToKeyframe.between(kf_T_scan);
 
+            const double dtScanToLastScan = tScan - tLastScan;
+            // velocity between subsequent scans (deltaPose / deltaTime)
+            const gtsam::Vector3
+                scanAngVel = gtsam::Rot3::Logmap(lastScan_T_currScan.rotation()) / dtScanToLastScan,
+                scanLinVel = lastScan_T_currScan.translation() / dtScanToLastScan;
+
             // Undistort current scan
             for (std::size_t i = 0; i < scan->points.size(); ++i)
             {
                 const Eigen::Vector3d pt = scan->points[i];
                 const double dt = scan->offset_times[i];
-                const gtsam::Vector3 scanAngVel = gtsam::Rot3::Logmap(lastScan_T_currScan.rotation());
 
                 // Presumed rotation and translation that the point should have undergone during scan time
                 gtsam::Rot3 scan_R_pt = gtsam::Rot3::Expmap(scanAngVel * dt);
-                gtsam::Point3 scan_P_pt = lastScan_T_currScan.translation() * dt;
+                gtsam::Point3 scan_P_pt = scanLinVel * dt;
                 gtsam::Pose3 scan_T_pt{scan_R_pt, scan_P_pt};
 
-                // Undistort point
+                // Undistort point with inverse to correct motion distortion
                 const Eigen::Vector3d ptUndistorted = scan_T_pt.transformFrom(pt);
                 scan->points[i] = ptUndistorted;
             }
-
-            // Convert scan to pointcloud, voxelize, transform to keyframe pose and add to submap
+            /**
+             * Convert scan to pointcloud, voxelize and buffer with relative pose to last keyframe
+             * NOTE: the undistorted scan pointcloud is not yet transformed as this
+             */
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, config_.point_filter.min_distance, config_.point_filter.max_distance);
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(config_.lidar_frontend.voxel_size);
-            gtsam::Pose3 scanPoseInWorld = lastKeyframePose().compose(kf_T_scan);
-            // ptrPcdScanVoxelized->Transform(scanPoseInWorld.matrix());
 
             // Buffer undistorted scan
             bufferScan(kf_T_scan, ptrPcdScanVoxelized);
+            // update pose and time reference for computing delta between scans in next iteration
             deltaPoseLastScanToKeyframe = kf_T_scan;
+            tLastScan = tScan;
         }
 
         // NOTE: at this point all scans have been undistorted and buffered, so we only need to use the PCD buffer

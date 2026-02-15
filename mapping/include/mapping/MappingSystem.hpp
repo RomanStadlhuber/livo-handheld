@@ -105,6 +105,14 @@ namespace mapping
         /// @brief "Marginalize" (i.e. remove) old keyframes and their associations with clusters.
         /// Do this **before** tracking clusters so that parameters will be updated with old points already removed.
         /// Does not touch clusters as parameters will be updated during tracking.
+        /// Note that when using iSAM2 it is necessary to avoid marginalizing a factor associated with KFs within the
+        /// sliding window, because that would permanently fix the linearization points of these variables, resulting
+        /// in sub-par estimation accuracy as the delta increases.
+        /// This behavior is explained in the
+        /// [`gtsam::iSAM2::marginalizeLeaves()`](https://gtsam.org/doxygen/a04340.html#a321fb6f90eb0035ef8e5bb383f8da4a2) function,
+        ///
+        /// > "Marginalization leaves a linear approximation of the marginal in the system,
+        /// > and the linearization points of any variables involved in this linear marginal become fixed."
         /// @param idxKeyframe Index of the current (newly created) keyframe, used to determine which keyframes to marginalize.
         void marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe);
         /// @brief Fit a plane to a set of 3D points using SVD
