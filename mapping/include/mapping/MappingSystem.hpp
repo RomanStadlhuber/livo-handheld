@@ -51,6 +51,10 @@ namespace mapping
 
         ~MappingSystem() = default;
 
+        /// @brief Initialize the GTSAM fixed lag smoother with update config variables.
+        /// Use this when constructing with default args and calling setConfig() later.
+        void initializeSmoother(const MappingConfig &config);
+
         /// @brief  Set the config after initialization.
         /// @details This should not be used to update the config during operation,
         /// but rather before starting to feed data.
@@ -201,6 +205,7 @@ namespace mapping
 
         // Fixed lag smoother
         gtsam::IncrementalFixedLagSmoother smoother_;
+        gtsam::Values smootherEstimate_;
 
         // Factors, nodes and timestamps to add to the graph
         gtsam::NonlinearFactorGraph newSmootherFactors_;

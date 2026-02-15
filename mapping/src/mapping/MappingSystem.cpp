@@ -50,14 +50,12 @@ namespace mapping
           imu_T_lidar_(config.extrinsics.imu_T_lidar.toPose3()),
           lidarTimeOffset_(0.0)
     {
-        gtsam::ISAM2Params smootherParams;
-        smootherParams.optimizationParams = gtsam::ISAM2GaussNewtonParams();
-        // for some guidance, see:
-        // https://github.com/MIT-SPARK/Kimera-VIO/blob/master/include/kimera-vio/backend/VioBackendParams.h
-        smootherParams.relinearizeThreshold = 0.01;  // relinearsize more often for better estimates?
-        smootherParams.relinearizeSkip = 1;          // only (check) relinearize after that many update calls
-        smootherParams.findUnusedFactorSlots = true; // should be enabled when using smoother
-        smoother_ = gtsam::IncrementalFixedLagSmoother(static_cast<double>(config_.backend.sliding_window_size), smootherParams);
+        /**
+         * NOTE: avoid using config_ here as much as possible or
+         * make it explicit and repeatable (e.g. smoother init)
+         * because setConfig could be called after the constructor
+         */
+        initializeSmoother(config_); // <-- uses config_
         // Initialize IMU preintegration parameters
         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
         // noise values from:
@@ -87,6 +85,21 @@ namespace mapping
     {
         config_ = config;
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
+        initializeSmoother(config_);
+    }
+
+    void MappingSystem::initializeSmoother(const MappingConfig &config)
+    {
+        // need to reset smoother with new config
+        gtsam::ISAM2Params smootherParams;
+        smootherParams.optimizationParams = gtsam::ISAM2GaussNewtonParams();
+        // for some guidance, see:
+        // https://github.com/MIT-SPARK/Kimera-VIO/blob/master/include/kimera-vio/backend/VioBackendParams.h
+        smootherParams.relinearizeThreshold = 0.01;  // relinearsize more often for better estimates?
+        smootherParams.relinearizeSkip = 1;          // only (check) relinearize after that many update calls
+        smootherParams.findUnusedFactorSlots = true; // should be enabled when using smoother
+        std::cout << "Initializing smoother with fixed lag of " << config.backend.sliding_window_size << std::endl;
+        smoother_ = gtsam::IncrementalFixedLagSmoother(static_cast<double>(config.backend.sliding_window_size), smootherParams);
     }
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
@@ -924,15 +937,16 @@ namespace mapping
         std::cout << "::: [DEBUG] smoother update took " << durationSmoother << " ms :::" << std::endl;
         summarizeFactors();
         resetNewFactors();
+        smootherEstimate_ = smoother_.calculateEstimate();
         // Extract estimated state
         w_X_curr_ = gtsam::NavState{
-            smoother_.calculateEstimate<gtsam::Pose3>(X(idxKeyframe)),
-            smoother_.calculateEstimate<gtsam::Vector3>(V(idxKeyframe))};
-        currBias_ = smoother_.calculateEstimate<gtsam::imuBias::ConstantBias>(B(idxKeyframe));
+            smootherEstimate_.at(X(idxKeyframe)).cast<gtsam::Pose3>(),
+            smootherEstimate_.at(V(idxKeyframe)).cast<gtsam::Vector3>()};
+        currBias_ = smootherEstimate_.at(B(idxKeyframe)).cast<gtsam::imuBias::ConstantBias>();
         std::cout << "Current bias: ";
         currBias_.print();
         auto marginals = smoother_.marginalCovariance(B(idxKeyframe));
-        std::cout << "::: [DEBUG] marginal trace " << marginals.trace() << " :::" << std::endl;
+        std::cout << "::: [DEBUG] bias marginal trace " << marginals.trace() << " :::" << std::endl;
 
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
@@ -941,11 +955,17 @@ namespace mapping
         // --> only do this when tracking shows reasonable results in the first place ..
 
         // Update the poses of the keyframe submaps
+        std::cout << "::: [INFO] updating keyframe submap poses for ";
+        for (auto const &[idxKf, _] : keyframeSubmaps_)
+        {
+            std::cout << idxKf << " ";
+        }
+        std::cout << " :::" << std::endl;
         for (auto const &[idxKf, _] : keyframeSubmaps_)
         {
             const gtsam::Pose3
                 // updated IMU pose in world frame
-                world_T_imu = smoother_.calculateEstimate<gtsam::Pose3>(X(idxKf)),
+                world_T_imu = smootherEstimate_.at(X(idxKf)).cast<gtsam::Pose3>(),
                 // updated lidar pose in world frame
                 updatedPose = world_T_imu.compose(imu_T_lidar_);
             updateKeyframeSubmapPose(idxKf, updatedPose);
@@ -1063,13 +1083,36 @@ namespace mapping
     SlidingWindowStates MappingSystem::getStates() const
     {
         SlidingWindowStates states;
+        if (smootherEstimate_.empty())
+        {
+            return states;
+        }
+        // Print keys contained in smootherEstimate_
+        std::cout << "::: [DEBUG] Keys in smootherEstimate_: ";
+        for (const auto &key_value : smootherEstimate_)
+        {
+            std::cout << gtsam::DefaultKeyFormatter(key_value.key) << " ";
+        }
+        std::cout << ":::" << std::endl;
+
+        // Print all keyframe submap indices
+        std::cout << "::: [DEBUG] Keyframe submap indices: ";
+        for (const auto &[idxKf, _] : keyframeSubmaps_)
+        {
+            std::cout << idxKf << " ";
+        }
+        std::cout << ":::" << std::endl;
         for (auto const &[idxKf, _] : keyframeSubmaps_)
         {
             try
             {
-                const gtsam::Pose3 kfPose = smoother_.calculateEstimate<gtsam::Pose3>(X(idxKf));
-                const gtsam::Vector3 kfVel = smoother_.calculateEstimate<gtsam::Vector3>(V(idxKf));
+                const gtsam::Pose3 kfPose = smootherEstimate_.at(X(idxKf)).cast<gtsam::Pose3>();
+                const gtsam::Vector3 kfVel = smootherEstimate_.at(V(idxKf)).cast<gtsam::Vector3>();
                 states[idxKf] = NavStateStamped{gtsam::NavState{kfPose, kfVel}, keyframeTimestamps_.at(idxKf)};
+            }
+            catch (const gtsam::ValuesKeyDoesNotExist &e)
+            {
+                std::cerr << "::: [WARNING] keyframe " << idxKf << " not found in smoother estimate :::" << std::endl;
             }
             catch (const std::out_of_range &e)
             {
