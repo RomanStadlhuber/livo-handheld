@@ -193,6 +193,7 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
         createNewClusters(idxNewKF, /*voxelSize=*/0);
+        lastClusterKF_ = idxNewKF;
         // Clear lidar buffer
         lidarBuffer_.clear();
 
@@ -969,7 +970,11 @@ namespace mapping
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
         // supplement new clusters from keyframe points
-        createNewClusters(idxKeyframe, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
+        if (idxKeyframe - lastClusterKF_ >= config_.backend.sliding_window_size) // TODO: extend with distance check
+        {
+            createNewClusters(idxKeyframe, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
+            lastClusterKF_ = idxKeyframe;
+        }
         // Update the poses of the keyframe submaps
         std::cout << "::: [INFO] updating keyframe submap poses for ";
         for (auto const &[idxKf, _] : keyframeSubmaps_)
