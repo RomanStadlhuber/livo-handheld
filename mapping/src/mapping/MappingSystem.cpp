@@ -192,7 +192,7 @@ namespace mapping
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
-        createNewClusters(idxNewKF, /*sampling=*/config_.lidar_frontend.clustering.supplement_sampling);
+        createNewClusters(idxNewKF, /*voxelSize=*/0);
         // Clear lidar buffer
         lidarBuffer_.clear();
 
@@ -317,13 +317,13 @@ namespace mapping
 
             // Pose & time delta from this to last scan
             gtsam::Pose3 lastScan_T_currScan = deltaPoseLastScanToKeyframe.between(kf_T_scan);
-
             const double dtScanToLastScan = tScan - tLastScan;
             // velocity between subsequent scans (deltaPose / deltaTime)
             const gtsam::Vector3
                 scanAngVel = gtsam::Rot3::Logmap(lastScan_T_currScan.rotation()) / dtScanToLastScan,
                 scanLinVel = lastScan_T_currScan.translation() / dtScanToLastScan;
-
+            std::cout << "::: [DEBUG] undistorting scan, dt: " << dtScanToLastScan << std::endl;
+            lastScan_T_currScan.print("dT_scans: ");
             // Undistort current scan
             for (std::size_t i = 0; i < scan->points.size(); ++i)
             {
@@ -507,18 +507,43 @@ namespace mapping
         return idxKeyframe < config_.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
 
-    void MappingSystem::createNewClusters(const uint32_t &idxKeyframe, std::size_t sampling)
+    void MappingSystem::createNewClusters(const uint32_t &idxKeyframe, double voxelSize)
     {
         std::size_t numCreated = 0;
-        for (std::size_t idxPoint = 0; idxPoint < keyframeSubmaps_.at(idxKeyframe)->points_.size(); idxPoint += sampling)
+
+        if (voxelSize <= 0.01) // use all points for creating new clusters
         {
-            std::map<uint32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
-            auto const clusterId = clusterIdCounter_++;
-            clusters_.emplace(clusterId, newCluster);
-            clusterStates_.emplace(clusterId, ClusterState::Premature);
-            clusterCenters_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps_[idxKeyframe]->points_[idxPoint]));
-            clusterNormals_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
-            numCreated++;
+            for (std::size_t idxPoint = 0; idxPoint < keyframeSubmaps_.at(idxKeyframe)->points_.size(); idxPoint++)
+            {
+                std::map<uint32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
+                auto const clusterId = clusterIdCounter_++;
+                clusters_.emplace(clusterId, newCluster);
+                clusterStates_.emplace(clusterId, ClusterState::Premature);
+                clusterCenters_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps_[idxKeyframe]->points_[idxPoint]));
+                clusterNormals_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
+                numCreated++;
+            }
+        }
+        else // use downsampling (but doesn't store the pcd) to create new clusters
+        {
+            const std::shared_ptr<open3d::geometry::PointCloud> &submap = keyframeSubmaps_.at(idxKeyframe);
+            // according to source code: (output, cubic_id, original_indices)
+            auto const [_, __, voxelizedIndices] = submap->VoxelDownSampleAndTrace(
+                voxelSize,
+                submap->GetMinBound(),
+                submap->GetMaxBound());
+
+            for (const auto &idxsVoxelPts : voxelizedIndices)
+            {
+                std::size_t idxPoint = idxsVoxelPts.front(); // use first point in voxel for cluster creation
+                std::map<uint32_t, std::size_t> newCluster({{idxKeyframe, idxPoint}});
+                auto const clusterId = clusterIdCounter_++;
+                clusters_.emplace(clusterId, newCluster);
+                clusterStates_.emplace(clusterId, ClusterState::Premature);
+                clusterCenters_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps_[idxKeyframe]->points_[idxPoint]));
+                clusterNormals_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
+                numCreated++;
+            }
         }
         std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe << " :::" << std::endl;
     }
@@ -944,7 +969,7 @@ namespace mapping
         // Reset preintegrator
         preintegrator_.resetIntegrationAndSetBias(currBias_);
         // supplement new clusters from keyframe points
-        createNewClusters(idxKeyframe, /*sampling=*/config_.lidar_frontend.clustering.supplement_sampling);
+        createNewClusters(idxKeyframe, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
         // Update the poses of the keyframe submaps
         std::cout << "::: [INFO] updating keyframe submap poses for ";
         for (auto const &[idxKf, _] : keyframeSubmaps_)

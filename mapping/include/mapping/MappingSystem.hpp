@@ -135,7 +135,7 @@ namespace mapping
             double linearityThreshold = 0.5) const;
 
         // create new clusters from points
-        void createNewClusters(const uint32_t &idxKeyframe, std::size_t sampling = 1);
+        void createNewClusters(const uint32_t &idxKeyframe, double voxelSize);
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
         /// @brief Remove a point when 6-sigma test fails.
         /// Note that after this, "updateClusterParameters" still needs to be called explicitly (with recalcPlaneThickness=true).

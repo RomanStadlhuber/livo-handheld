@@ -18,7 +18,7 @@ namespace mapping
         size_t min_points = 5;
         size_t max_points = 20;
         double max_plane_thickness = 0.1; // [m]
-        size_t supplement_sampling = 10; // subsampling stride for supplementing new clusters
+        double sampling_voxel_size = 2.5; // [m], voxel size to use when supplementing new clusters
     };
 
     inline void declare_config(ClusteringConfig &config)
@@ -28,11 +28,11 @@ namespace mapping
         field(config.min_points, "min_points");
         field(config.max_points, "max_points");
         field(config.max_plane_thickness, "max_plane_thickness", "m");
-        field(config.supplement_sampling, "supplement_sampling");
+        field(config.sampling_voxel_size, "sampling_voxel_size", "m");
         check(config.min_points, GT, 0, "min_points");
         check(config.max_points, GT, config.min_points, "max_points");
         check(config.max_plane_thickness, GT, 0.0, "max_plane_thickness");
-        check(config.supplement_sampling, GT, 0, "supplement_sampling");
+        check(config.sampling_voxel_size, GT, 0.0, "sampling_voxel_size");
     }
 
     /// @brief Keyframe creation thresholds
@@ -85,7 +85,7 @@ namespace mapping
     {
         int sliding_window_size = 7;   // [keyframes]
         double init_time_window = 2.0; // [sec.]
-        int solver_iterations = 5; 
+        size_t solver_iterations = 5; 
     };
 
     inline void declare_config(BackendConfig &config)
