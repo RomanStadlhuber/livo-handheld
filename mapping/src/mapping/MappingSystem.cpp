@@ -836,6 +836,7 @@ namespace mapping
                     }
                 }
             }
+            break;
             default:
                 // should not reach here due to earlier checks
                 continue;
@@ -1063,7 +1064,10 @@ namespace mapping
 
     void MappingSystem::updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &w_T_l)
     {
-        const gtsam::Pose3 deltaPose = keyframePoses_[keyframeIdx]->between(w_T_l);
+        // let D be the delta that needs to be left-applied via Open3D's transform
+        // D * T1 = T2 | (...) * T1^-1
+        // => D = T2 * T1^-1
+        const gtsam::Pose3 deltaPose = w_T_l.compose(keyframePoses_[keyframeIdx]->inverse());
         keyframeSubmaps_[keyframeIdx]->Transform(deltaPose.matrix());
         keyframePoses_[keyframeIdx] = std::make_shared<gtsam::Pose3>(w_T_l);
     }
