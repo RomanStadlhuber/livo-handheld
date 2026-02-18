@@ -244,6 +244,7 @@ namespace mapping
         newValues_.insert(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()));
         newValues_.insert(B(idxNewKF), priorImuBias);
         w_X_curr_ = gtsam::NavState(w_T_i0, gtsam::Vector3::Zero());
+        w_X_preint_ = w_X_curr_;
         const double kfInit = static_cast<double>(idxNewKF);
 
         // Set index of all values
@@ -280,7 +281,7 @@ namespace mapping
         imuBuffer_.clear();
         lockImuBuffer.unlock();
 
-        const gtsam::NavState w_X_propagated = preintegrator_.predict(w_X_curr_, currBias_);
+        const gtsam::NavState w_X_propagated = preintegrator_.predict(w_X_preint_, currBias_);
         return w_X_propagated;
     }
 
@@ -968,6 +969,7 @@ namespace mapping
         auto marginals = smoother_.marginalCovariance(B(idxKeyframe));
         std::cout << "::: [DEBUG] bias marginal trace " << marginals.trace() << " :::" << std::endl;
         // Reset preintegrator
+        w_X_preint_ = w_X_curr_;
         preintegrator_.resetIntegrationAndSetBias(currBias_);
         // supplement new clusters from keyframe points
         if (idxKeyframe - lastClusterKF_ >= config_.backend.sliding_window_size) // TODO: extend with distance check

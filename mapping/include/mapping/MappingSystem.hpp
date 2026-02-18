@@ -226,6 +226,8 @@ namespace mapping
         /// @brief Current estimated state (propagated OR updated)
         /// @details NOTE: This is NOT the single best estimate as it is used for IMU propagation
         gtsam::NavState w_X_curr_;
+        /// @brief State at last preintegrator reset, used as base for predict()
+        gtsam::NavState w_X_preint_;
         gtsam::imuBias::ConstantBias currBias_;
         double tLastImu_;
 
