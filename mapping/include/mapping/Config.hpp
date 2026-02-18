@@ -83,9 +83,9 @@ namespace mapping
     /// @brief Backend optimization parameters
     struct BackendConfig
     {
-        int sliding_window_size = 7;   // [keyframes]
+        size_t sliding_window_size = 7;   // [keyframes]
         double init_time_window = 2.0; // [sec.]
-        size_t solver_iterations = 5; 
+        size_t solver_iterations = 2; 
     };
 
     inline void declare_config(BackendConfig &config)
