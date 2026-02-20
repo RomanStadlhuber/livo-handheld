@@ -3,6 +3,7 @@
 #include <gtsam/inference/Symbol.h>
 
 #include <algorithm>
+#include <csignal>
 #include <iostream>
 #include <set>
 #include <unordered_map>
@@ -134,11 +135,9 @@ namespace mapping
         }
         case SystemState::Recovery:
         {
-            while (true)
-            {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
-            break;
+            std::cout << "::: [ERROR] tracking lost. recovery not implemented, shutting down :::" << std::endl;
+            std::raise(SIGINT);
+            return;
         }
         }
 #ifndef DISABLEVIZ
@@ -209,12 +208,12 @@ namespace mapping
         for (auto it = imuBuffer_.begin(); it != imuBufferEndIt; ++it)
         {
             accVariance += (it->second->acceleration - accMean).squaredNorm();
-            gyroVariance += (it->second->angular_velocity).squaredNorm();
+            gyroVariance += (it->second->angular_velocity - gyroBiasMean).squaredNorm();
         }
         accVariance /= (numImuSamples - 1.0);
         gyroVariance /= (numImuSamples - 1.0);
-        preintegrator_.params()->accelerometerCovariance = gtsam::I_3x3 * accVariance;
-        preintegrator_.params()->gyroscopeCovariance = gtsam::I_3x3 * gyroVariance;
+        // preintegrator_.params()->accelerometerCovariance = gtsam::I_3x3 * accVariance;
+        // preintegrator_.params()->gyroscopeCovariance = gtsam::I_3x3 * gyroVariance;
 
         // Set bias (use existing acceleration bias)
         gtsam::imuBias::ConstantBias priorImuBias{preintegrator_.biasHat().accelerometer(), gyroBiasMean};

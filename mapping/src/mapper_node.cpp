@@ -34,6 +34,7 @@ void signalHandler(int signum)
 {
     (void)signum;
     g_shutdown_requested = true;
+    rclcpp::shutdown();
 }
 
 mapping::MappingConfig loadConfig(const std::string &config_path)
@@ -382,10 +383,10 @@ void runFromBag(const std::string &bag_path, const mapping::MappingConfig &confi
 
 int main(int argc, char **argv)
 {
-    // Register signal handler for CTRL+C
-    std::signal(SIGINT, signalHandler);
-
     rclcpp::init(argc, argv);
+
+    // Register signal handler after rclcpp::init, which installs its own
+    std::signal(SIGINT, signalHandler);
 
     // Parse arguments for config file
     std::string config_path;
