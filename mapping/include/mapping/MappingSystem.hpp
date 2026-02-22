@@ -85,6 +85,16 @@ namespace mapping
         /// (for visualization and debugging purposes).
         std::map<ClusterId, PointCluster> getCurrentClusters() const;
 
+        /// @brief Get the current keyframe counter value.
+        uint32_t getKeyframeCount() const;
+
+        /// @brief Drain and return submaps that were marginalized since the last call.
+        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> getMarginalizedSubmaps();
+
+        /// @brief Enable or disable collection of marginalized submaps.
+        /// Disabled by default to avoid unbounded memory growth in headless mode.
+        void setCollectMarginalizedSubmaps(bool enable);
+
     private:
         /// @brief Static state (assumption-based) system initialization
         /// @details
@@ -251,6 +261,8 @@ namespace mapping
         gtsam::FactorIndices factorsToRemove_;
 
         // Keyframe data
+        bool collectMarginalizedSubmaps_ = false;
+        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> marginalizedSubmaps_;
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
         std::map<uint32_t, double> keyframeTimestamps_;

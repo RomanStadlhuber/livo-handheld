@@ -62,6 +62,8 @@ public:
                     configPath.c_str());
         mapping::MappingConfig config = loadConfig(configPath);
         slam_.setConfig(config);
+        // enable collecting marginalized submaps to accumulate the global map
+        slam_.setCollectMarginalizedSubmaps(true);
         subImu_ = this->create_subscription<sensor_msgs::msg::Imu>(
             "/livox/imu", 10, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1));
         subLidar_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
@@ -164,6 +166,12 @@ private:
         tfStampedMsg.transform.rotation.w = q.w();
         tfBroadcaster_->sendTransform(tfStampedMsg);
 
+        // skip expensive visualization if no new keyframe was created
+        const uint32_t currentKeyframeCount = slam_.getKeyframeCount();
+        if (currentKeyframeCount == lastPublishedKeyframeCount_)
+            return;
+        lastPublishedKeyframeCount_ = currentKeyframeCount;
+
         // current keyframe submap
         std::shared_ptr<open3d::geometry::PointCloud> pcdSubmap = slam_.getCurrentSubmap();
         if (pcdSubmap)
@@ -173,10 +181,15 @@ private:
             open3d_conversions::open3dToRos(*pcdSubmap, submapMsg, "map");
             submapMsg.header.stamp = stamp;
             pubKeyframeSubmap_->publish(submapMsg);
-            // accumulate to global map
-            *globalMap_ += *pcdSubmap;
-            globalMap_->VoxelDownSample(0.05);
-            globalMap_->RemoveDuplicatedPoints();
+        }
+
+        // build global map from marginalized keyframe submaps (most optimized poses)
+        auto marginalizedSubmaps = slam_.getMarginalizedSubmaps();
+        if (!marginalizedSubmaps.empty())
+        {
+            for (const auto &submap : marginalizedSubmaps)
+                *globalMap_ += *submap;
+            globalMap_ = globalMap_->VoxelDownSample(0.05);
             sensor_msgs::msg::PointCloud2 globalMapMsg;
             open3d_conversions::open3dToRos(*globalMap_, globalMapMsg, "map");
             globalMapMsg.header.stamp = stamp;
@@ -286,6 +299,7 @@ private:
     static constexpr double kLivoxImuScale = 9.81;
 
     mapping::MappingSystem slam_;
+    uint32_t lastPublishedKeyframeCount_ = 0;
 };
 
 // Standalone bag reader for debugging

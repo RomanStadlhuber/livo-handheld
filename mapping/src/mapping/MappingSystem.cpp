@@ -1022,6 +1022,8 @@ namespace mapping
                 if (keyframeSubmaps_.find(idxMargiznalizedKeyframe) != keyframeSubmaps_.end())
                 {
                     removeKeyframeFromClusters(idxMargiznalizedKeyframe);
+                    if (collectMarginalizedSubmaps_)
+                        marginalizedSubmaps_.push_back(keyframeSubmaps_[idxMargiznalizedKeyframe]);
                     keyframeSubmaps_.erase(idxMargiznalizedKeyframe);
                     keyframePoses_.erase(idxMargiznalizedKeyframe);
                     keyframeTimestamps_.erase(idxMargiznalizedKeyframe);
@@ -1150,6 +1152,23 @@ namespace mapping
             return nullptr;
         }
         return keyframeSubmaps_.rbegin()->second;
+    }
+
+    uint32_t MappingSystem::getKeyframeCount() const
+    {
+        return keyframeCounter_;
+    }
+
+    std::vector<std::shared_ptr<open3d::geometry::PointCloud>> MappingSystem::getMarginalizedSubmaps()
+    {
+        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> submaps;
+        std::swap(submaps, marginalizedSubmaps_);
+        return submaps;
+    }
+
+    void MappingSystem::setCollectMarginalizedSubmaps(bool enable)
+    {
+        collectMarginalizedSubmaps_ = enable;
     }
 
     std::map<ClusterId, PointCluster> MappingSystem::getCurrentClusters() const
