@@ -140,9 +140,6 @@ namespace mapping
             return;
         }
         }
-#ifndef DISABLEVIZ
-        visualizer.refreshWindow();
-#endif
     }
 
     void MappingSystem::initializeSystem()
@@ -212,8 +209,8 @@ namespace mapping
         }
         accVariance /= (numImuSamples - 1.0);
         gyroVariance /= (numImuSamples - 1.0);
-        // preintegrator_.params()->accelerometerCovariance = gtsam::I_3x3 * accVariance;
-        // preintegrator_.params()->gyroscopeCovariance = gtsam::I_3x3 * gyroVariance;
+        preintegrator_.params()->accelerometerCovariance = gtsam::I_3x3 * accVariance;
+        preintegrator_.params()->gyroscopeCovariance = gtsam::I_3x3 * gyroVariance;
 
         // Set bias (use existing acceleration bias)
         gtsam::imuBias::ConstantBias priorImuBias{preintegrator_.biasHat().accelerometer(), gyroBiasMean};
@@ -253,12 +250,6 @@ namespace mapping
         // Clear imu buffer and store timestamp of last IMU reading
         tLastImu_ = imuBufferEndIt->first;
         imuBuffer_.clear();
-
-#ifndef DISABLEVIZ
-        visualizer.createWindow(); // create window & add world frame
-        visualizer.addSubmap(idxNewKF, w_T_i0.matrix(), ptrNewSubmapVoxelized);
-        visualizer.waitForSpacebar();
-#endif
     }
 
     gtsam::NavState MappingSystem::preintegrateIMU()
@@ -483,7 +474,7 @@ namespace mapping
             }
             const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(clusterPoints);
             // --- new plane normal consistency check ---
-            static constexpr double NORMAL_CONSISTENCY_THRESHOLD = 0.9;
+            static constexpr double NORMAL_CONSISTENCY_THRESHOLD = 0.85;
             if (
                 clusterState == ClusterState::Premature // for premature clusters, update immediately
                 // otherwise perform consistency check
@@ -903,10 +894,6 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const gtsam::Pose3 world_T_lidar = w_X_curr_.pose().compose(imu_T_lidar_);
         const uint32_t idxKeyframe = createKeyframeSubmap(world_T_lidar, tLastScan, ptrNewSubmapVoxelized);
-#ifndef DISABLEVIZ
-        visualizer.addSubmap(idxKeyframe, world_T_lidar.matrix(), ptrNewSubmapVoxelized);
-        visualizer.waitForSpacebar();
-#endif
 
         /**
          * NOTE: marginalization is done BEFORE tracking so that when smoother_.update() is called,
@@ -980,9 +967,9 @@ namespace mapping
         w_X_preint_ = w_X_curr_;
         preintegrator_.resetIntegrationAndSetBias(currBias_);
         // supplement new clusters from keyframe points
-        if (idxKeyframe - lastClusterKF_ >= 6)
+        if (idxKeyframe - lastClusterKF_ >= config_.backend.sliding_window_size)
         {
-            createNewClusters(idxKeyframe - 1, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
+            createNewClusters(idxKeyframe, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
             lastClusterKF_ = idxKeyframe;
         }
         // Update the poses of the keyframe submaps
@@ -1000,13 +987,7 @@ namespace mapping
                 // updated lidar pose in world frame
                 updatedPose = world_T_imu.compose(imu_T_lidar_);
             updateKeyframeSubmapPose(idxKf, updatedPose);
-#ifndef DISABLEVIZ
-            visualizer.updateSubmap(idxKf, updatedPose.matrix());
-#endif
         }
-#ifndef DISABLEVIZ
-        visualizer.waitForSpacebar();
-#endif
     }
 
     void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)
@@ -1027,11 +1008,6 @@ namespace mapping
                     keyframeSubmaps_.erase(idxMargiznalizedKeyframe);
                     keyframePoses_.erase(idxMargiznalizedKeyframe);
                     keyframeTimestamps_.erase(idxMargiznalizedKeyframe);
-#ifndef DISABLEVIZ
-                    visualizer.removeSubmap(idxMargiznalizedKeyframe);
-                    std::cout << "::: [INFO] marginalized keyframe " << idxMargiznalizedKeyframe << " :::" << std::endl;
-                    visualizer.waitForSpacebar();
-#endif
                 }
             }
         }

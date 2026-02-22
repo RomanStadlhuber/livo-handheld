@@ -15,10 +15,6 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include <mapping/types.hpp>
-// Visualization with Open3D
-#ifndef DISABLEVIZ
-#include <Visualization.hpp>
-#endif
 
 #include <mapping/factors/PointToPlaneFactor.hpp>
 #include <mapping/Config.hpp>
@@ -266,10 +262,6 @@ namespace mapping
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
         std::map<uint32_t, double> keyframeTimestamps_;
-
-#ifndef DISABLEVIZ
-        Visualization visualizer;
-#endif
 
         // Point cluster tracking
         ClusterId clusterIdCounter_;
