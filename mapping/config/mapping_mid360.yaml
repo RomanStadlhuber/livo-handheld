@@ -4,7 +4,7 @@ backend:
   solver_iterations: 2
 
 lidar_frontend:
-  voxel_size: 1.0 # [m]
+  voxel_size: 0.5 # [m]
   undistort: true # disable for solid state LiDARs
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
