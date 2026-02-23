@@ -420,7 +420,7 @@ namespace mapping
             if (clusterState == ClusterState::Pruned)
                 continue;
             // --- tracking: KNN search & SVD plane fit ---
-            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.rbegin(); // get the oldest point in the cluster
+            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.begin(); // get the oldest point in the cluster (more mature)
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps_[idxClusterKF]->points_[idxSubmapPt];
             const int knnFound = kdTree.SearchKNN(
                 world_clusterPt,
@@ -967,9 +967,9 @@ namespace mapping
         w_X_preint_ = w_X_curr_;
         preintegrator_.resetIntegrationAndSetBias(currBias_);
         // supplement new clusters from keyframe points
-        if (idxKeyframe - lastClusterKF_ >= config_.backend.sliding_window_size)
+        if (idxKeyframe - lastClusterKF_ >= 6)
         {
-            createNewClusters(idxKeyframe, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
+            createNewClusters(idxKeyframe - 2, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
             lastClusterKF_ = idxKeyframe;
         }
         // Update the poses of the keyframe submaps

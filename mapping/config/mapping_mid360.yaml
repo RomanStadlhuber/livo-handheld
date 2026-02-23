@@ -1,7 +1,7 @@
 backend:
   sliding_window_size: 14 # [keyframes]
   init_time_window: 2.0 # [sec.]
-  solver_iterations: 2
+  solver_iterations: 3
 
 lidar_frontend:
   voxel_size: 0.5 # [m]
