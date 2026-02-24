@@ -6,6 +6,9 @@
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
+#include <gtsam/slam/JacobianFactorQ.h>
+#include <gtsam/linear/JacobianFactor.h>
+#include <gtsam/nonlinear/LinearContainerFactor.h>
 
 #include <memory>
 #include <map>
@@ -80,6 +83,13 @@ namespace mapping
 
         // trigger, cannot (and should not) be undone
         void markInvalid() const { isInvalid_ = true; }
+
+        /// @brief marginalize a key from the factor to create a new JacobianFactor constraint.
+        /// Do this **before** removing the key associaton from the factor.
+        gtsam::LinearContainerFactor::shared_ptr createMarginalizationFactor(
+            const gtsam::Values& values,
+            const gtsam::Key &keyToMarginalize
+        ) const;
 
     private:
         std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> computeErrorAndJacobians(const gtsam::Values &values) const;

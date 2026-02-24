@@ -153,7 +153,7 @@ namespace mapping
         /// @brief Set new cluster parameters including thickness (i.e. valid tracking and point was added)
         /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
         void updateClusterParameters(const ClusterId &clusterId, const Eigen::Vector3d &newNormal, const Eigen::Vector3d &newCenter);
-        void removeKeyframeFromClusters(const uint32_t &idxKeyframe);
+        void removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket);
         void pruneClusters(const uint32_t &idxKeyframe);
         // Shorthand check for whether a cluster is valid (= tracking or idle).
         bool isClusterValid(const ClusterId &clusterId) const
