@@ -103,8 +103,11 @@ namespace mapping
         // accumulate mean-squared error and its jacobians w.r.t. the values
         for (const gtsam::Key &key : keys())
         {
-            if(!values.exists(key))
+            if (!values.exists(key))
+            {
+                Hs.push_back(gtsam::Matrix16::Zero());
                 continue; // needed when called from marginalization -> value was removed but key is still present
+            }
             // the plane cluster point associated with this key
             const Eigen::Vector3d &lidar_point = lidar_points_.at(key);
             // Get the pose estimate for this keyframe using the actual key
@@ -154,8 +157,9 @@ namespace mapping
     }
 
     gtsam::LinearContainerFactor::shared_ptr PointToPlaneFactor::createMarginalizationFactor(
-        const gtsam::Values& values,
-        const gtsam::Key &keyToMarginalize) const{
+        const gtsam::Values &values,
+        const gtsam::Key &keyToMarginalize) const
+    {
         auto [r, Hs] = computeErrorAndJacobians(values);
         // need to flip the same way as in linearize() to build the system
         // H * dx = -r
@@ -163,8 +167,11 @@ namespace mapping
         adaptiveNoiseModel_->WhitenSystem(Hs, b);
         gtsam::Matrix H;
         for (size_t i = 0; i < Hs.size(); ++i)
-            if (keys()[i] != keyToMarginalize)
+            if (keys()[i] == keyToMarginalize)
+            {
                 H = Hs[i];
+                break;
+            }
         gtsam::JacobianFactor::shared_ptr J = boost::make_shared<gtsam::JacobianFactor>(keyToMarginalize, H, b);
         return boost::make_shared<gtsam::LinearContainerFactor>(J, values);
     }

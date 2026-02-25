@@ -622,9 +622,11 @@ namespace mapping
             {
                 // --- marginalization ---
                 auto existingFactorIt = clusterFactors_.find(clusterId);
-                if(existingFactorIt != clusterFactors_.end()){
+                if (existingFactorIt != clusterFactors_.end())
+                {
                     auto factor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactorIt->second);
-                    if(factor){
+                    if (factor)
+                    {
                         gtsam::LinearContainerFactor::shared_ptr marginalizationFactor = factor->createMarginalizationFactor(markovBlanket, X(idxKeyframe));
                         newSmootherFactors_.add(marginalizationFactor);
                     }
@@ -1002,27 +1004,27 @@ namespace mapping
     {
         if (idxKeyframe <= static_cast<uint32_t>(config_.backend.sliding_window_size))
             return;
-        
+
         uint32_t idxUpperbound = idxKeyframe - static_cast<uint32_t>(config_.backend.sliding_window_size);
         uint32_t idxMarginalize = keyframeSubmaps_.begin()->first;
-        while(idxMarginalize < idxUpperbound)
+        while (idxMarginalize < idxUpperbound)
         {
             if (keyframeSubmaps_.find(idxMarginalize) != keyframeSubmaps_.end())
             {
                 /**
                  * NOTE: all of the states that could appear as blanket terms for marginalization factors
                  * currently the factors conly constrain poses X(k), so velocities and biases aren't needed here
-                 * 
+                 *
                  * The markov blanket uses the current soomther estimate, removing all states that have already been marginalized.
                  * Otherwise the marginalization factor will try to access those states while there are no more point associations
-                 * 
+                 *
                  * WARNING: this is NOT exact because at the time of marginalization, we don't know if a new constraint will be added,
                  * but it will be very noisy anyway so it should be reasonably safe to ignore it.
                  */
                 gtsam::Values markovBlanket;
-                for(uint32_t k = idxMarginalize; k < idxKeyframe; k++)
+                for (uint32_t k = idxMarginalize; k < idxKeyframe; k++)
                     markovBlanket.insert(X(k), smootherEstimate_.at(X(k)));
-                    
+
                 std::cout << "::: [INFO] marginalizing keyframe " << idxMarginalize << ", outside of sliding window :::" << std::endl;
                 removeKeyframeFromClusters(idxMarginalize, markovBlanket);
                 if (collectMarginalizedSubmaps_)
