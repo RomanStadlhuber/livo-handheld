@@ -86,6 +86,10 @@ namespace mapping
 
         /// @brief marginalize a key from the factor to create a new JacobianFactor constraint.
         /// Do this **before** removing the key associaton from the factor.
+        /// @details **Note** that this is not the actual marginalization factor,
+        /// as that will be created by the backend on its own. But it is meant to provide a prior
+        /// given the fact that with the explicit marginalization where the latest key is removed,
+        /// there would be no other constraint than the IMU preintegration which is too weak.
         gtsam::LinearContainerFactor::shared_ptr createMarginalizationFactor(
             const gtsam::Values& values,
             const gtsam::Key &keyToMarginalize
