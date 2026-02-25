@@ -156,7 +156,10 @@ namespace mapping
     gtsam::LinearContainerFactor::shared_ptr PointToPlaneFactor::createMarginalizationFactor(
         const gtsam::Values& values,
         const gtsam::Key &keyToMarginalize) const{
-        auto [b, Hs] = computeErrorAndJacobians(values);
+        auto [r, Hs] = computeErrorAndJacobians(values);
+        // need to flip the same way as in linearize() to build the system
+        // H * dx = -r
+        gtsam::Vector b = -r;
         adaptiveNoiseModel_->WhitenSystem(Hs, b);
         gtsam::Matrix H;
         for (size_t i = 0; i < Hs.size(); ++i)
