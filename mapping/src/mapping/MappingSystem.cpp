@@ -105,11 +105,13 @@ namespace mapping
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
     {
+        std::lock_guard<std::mutex> lock(mtxImuBuffer_);
         imuBuffer_[timestamp] = imu_data;
     }
 
     void MappingSystem::feedLidar(const std::shared_ptr<LidarData> &lidar_data, double timestamp)
     {
+        std::lock_guard<std::mutex> lock(mtxLidarBuffer_);
         lidarBuffer_[timestamp] = lidar_data;
     }
 
