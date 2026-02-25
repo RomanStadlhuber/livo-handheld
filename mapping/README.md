@@ -2,7 +2,7 @@
 
 A point-to-plane based LiDAR inerital odometry using iSAM2 as a backend.
 
-It is heavily inspired by the principles of [BA-LINS](), [MSC-LIO]() and I relied on some ideas from [Kimera-VIO](https://github.com/MIT-SPARK/Kimera-VIO) for the GTSAM integration.
+It is heavily inspired by the principles of [BA-LINS](https://arxiv.org/abs/2401.11491), [MSC-LIO](https://arxiv.org/abs/2407.07589) and I relied on some ideas from [Kimera-VIO](https://github.com/MIT-SPARK/Kimera-VIO) for the GTSAM integration.
 
 Integrating tightly coupled vision - TBD.
 
