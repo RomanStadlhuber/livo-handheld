@@ -165,7 +165,7 @@ namespace mapping
         // H * dx = -r
         gtsam::Vector b = -r;
         adaptiveNoiseModel_->WhitenSystem(Hs, b);
-        gtsam::Matrix H;
+        gtsam::Matrix H = gtsam::Matrix16::Zero();
         for (size_t i = 0; i < Hs.size(); ++i)
             if (keys()[i] == keyToMarginalize)
             {
