@@ -247,8 +247,6 @@ namespace mapping
         std::map<ClusterId, double> clusterPlaneThickness_;
         std::map<ClusterId, double> clusterSigmas_;
         std::map<ClusterId, ClusterState> clusterStates_;
-        /// @brief Id of the last keyframe used to insert new clusters into the map.
-        uint32_t lastClusterKF_ = 0;
         /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing constraints.
         std::map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
         size_t scansSinceLastKeyframe_ = 0;

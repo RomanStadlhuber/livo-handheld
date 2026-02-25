@@ -96,7 +96,7 @@ namespace mapping
         smootherParams.optimizationParams = gtsam::ISAM2GaussNewtonParams();
         // for some guidance, see:
         // https://github.com/MIT-SPARK/Kimera-VIO/blob/master/include/kimera-vio/backend/VioBackendParams.h
-        smootherParams.relinearizeThreshold = 0.01;  // relinearsize more often for better estimates?
+        smootherParams.relinearizeThreshold = config.backend.isam2_relinearize_threshold;
         smootherParams.relinearizeSkip = 1;          // only (check) relinearize after that many update calls
         smootherParams.findUnusedFactorSlots = true; // should be enabled when using smoother
         std::cout << "Initializing smoother with fixed lag of " << config.backend.sliding_window_size << std::endl;
@@ -189,7 +189,6 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
         const uint32_t idxNewKF = createKeyframeSubmap(w_T_l0, tLastImu_, ptrNewSubmapVoxelized);
         createNewClusters(idxNewKF, /*voxelSize=*/0);
-        lastClusterKF_ = idxNewKF;
         // Clear lidar buffer
         lidarBuffer_.clear();
 
@@ -474,11 +473,10 @@ namespace mapping
             }
             const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(clusterPoints);
             // --- new plane normal consistency check ---
-            static constexpr double NORMAL_CONSISTENCY_THRESHOLD = 0.85;
             if (
                 clusterState == ClusterState::Premature // for premature clusters, update immediately
                 // otherwise perform consistency check
-                || (planeValid && std::abs(clusterNormals_.at(clusterId)->dot(planeNormal)) > NORMAL_CONSISTENCY_THRESHOLD))
+                || (planeValid && std::abs(clusterNormals_.at(clusterId)->dot(planeNormal)) > config_.lidar_frontend.clustering.normal_consistency_threshold))
             {
                 clusterStates_[clusterId] = ClusterState::Tracked;
                 // Note: internally uses thickness history to update covariance
@@ -615,6 +613,7 @@ namespace mapping
 
     void MappingSystem::removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket)
     {
+        std::size_t numMarginalized = 0;
         for (auto const &[clusterId, clusterPoints] : clusters_)
         {
             auto itPoint = clusterPoints.find(idxKeyframe);
@@ -629,6 +628,7 @@ namespace mapping
                     {
                         gtsam::LinearContainerFactor::shared_ptr marginalizationFactor = factor->createMarginalizationFactor(markovBlanket, X(idxKeyframe));
                         newSmootherFactors_.add(marginalizationFactor);
+                        numMarginalized++;
                     }
                 }
                 removePointFromCluster(clusterId, idxKeyframe, /*firstInHistory=*/true); // remove point and thickness history entry
@@ -645,6 +645,7 @@ namespace mapping
                 }
             }
         }
+        std::cout << "::: [INFO] Created " << numMarginalized << " marginalization factors for keyframe " << idxKeyframe << " :::" << std::endl;
     }
 
     void MappingSystem::pruneClusters(const uint32_t &idxKeyframe)
@@ -977,11 +978,10 @@ namespace mapping
         w_X_preint_ = w_X_curr_;
         preintegrator_.resetIntegrationAndSetBias(currBias_);
         // supplement new clusters from keyframe points
-        if (idxKeyframe - lastClusterKF_ >= 6)
-        {
-            createNewClusters(idxKeyframe - 2, /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
-            lastClusterKF_ = idxKeyframe;
-        }
+        if (idxKeyframe > config_.lidar_frontend.clustering.insert_lag + 1)
+            createNewClusters(
+                idxKeyframe - config_.lidar_frontend.clustering.insert_lag,
+                /*voxelSize=*/config_.lidar_frontend.clustering.sampling_voxel_size);
         // Update the poses of the keyframe submaps
         std::cout << "::: [INFO] updating keyframe submap poses for ";
         for (auto const &[idxKf, _] : keyframeSubmaps_)
@@ -1206,9 +1206,5 @@ namespace mapping
             }
         }
         std::cout << "::: [DEBUG] smoother has " << numImuFactors << " IMU factors, " << numLidarFactors << " LiDAR factors." << std::endl;
-        /* std::cout << "::: [DEBUG] keys currently in the smoother :::" << std::endl;
-        smoother_.getFactors().keys().print("  ");
-        std::cout << "\n"; */
     }
-
 } // namespace mapping

@@ -19,6 +19,8 @@ namespace mapping
         size_t max_points = 20;
         double max_plane_thickness = 0.1; // [m]
         double sampling_voxel_size = 2.5; // [m], voxel size to use when supplementing new clusters
+        uint32_t insert_lag = 2;          // keyframe delay to use when inserting new clusters from keyframes
+        double normal_consistency_threshold = 0.9; // [0-1], accepting new points based updated normal consistency
     };
 
     inline void declare_config(ClusteringConfig &config)
@@ -29,10 +31,15 @@ namespace mapping
         field(config.max_points, "max_points");
         field(config.max_plane_thickness, "max_plane_thickness", "m");
         field(config.sampling_voxel_size, "sampling_voxel_size", "m");
+        field(config.insert_lag, "insert_lag", "keyframes");
+        field(config.normal_consistency_threshold, "normal_consistency_threshold");
         check(config.min_points, GT, 0, "min_points");
         check(config.max_points, GT, config.min_points, "max_points");
         check(config.max_plane_thickness, GT, 0.0, "max_plane_thickness");
         check(config.sampling_voxel_size, GT, 0.0, "sampling_voxel_size");
+        check(config.insert_lag, GT, 0u, "insert_lag");
+        check(config.normal_consistency_threshold, GT, 0.0, "normal_consistency_threshold");
+        check(config.normal_consistency_threshold, LT, 1.0, "normal_consistency_threshold");
     }
 
     /// @brief Keyframe creation thresholds
@@ -83,9 +90,10 @@ namespace mapping
     /// @brief Backend optimization parameters
     struct BackendConfig
     {
-        size_t sliding_window_size = 7;   // [keyframes]
-        double init_time_window = 2.0; // [sec.]
-        size_t solver_iterations = 2; 
+        size_t sliding_window_size = 7; // [keyframes]
+        double init_time_window = 2.0;  // [sec.]
+        size_t solver_iterations = 2;
+        double isam2_relinearize_threshold = 0.01; // frobenius norm for relinearization on state variables
     };
 
     inline void declare_config(BackendConfig &config)
@@ -95,9 +103,11 @@ namespace mapping
         field(config.sliding_window_size, "sliding_window_size", "keyframes");
         field(config.init_time_window, "init_time_window", "s");
         field(config.solver_iterations, "solver_iterations");
+        field(config.isam2_relinearize_threshold, "isam2_relinearize_threshold");
         check(config.sliding_window_size, GT, 0, "sliding_window_size");
         check(config.init_time_window, GT, 0.0, "init_time_window");
         check(config.solver_iterations, GT, 0, "solver_iterations");
+        check(config.isam2_relinearize_threshold, GT, 0.0, "isam2_relinearize_threshold");
     }
 
     /// @brief Point cloud filtering parameters
