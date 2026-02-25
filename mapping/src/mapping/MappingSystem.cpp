@@ -406,8 +406,6 @@ namespace mapping
         std::vector<double> knnDists(config_.lidar_frontend.knn_neighbors);
         knnDists.reserve(config_.lidar_frontend.knn_neighbors);
         std::size_t validTracks = 0, numValidClusters = 0;
-        // TODO: remove stopwatch after slowdown was diagnosed
-        auto stopwatchKNNStart = std::chrono::high_resolution_clock::now();
         // KD-Tree of the current submap, used for cluster tracking
         const open3d::geometry::KDTreeFlann kdTree{*keyframeSubmaps_[idxKeyframe]};
         // project each cluster point onto the current keyframe and try to find the 5 nearest neighbors
@@ -498,9 +496,6 @@ namespace mapping
         {
             return false;
         }
-        auto stopwatchKNNEnd = std::chrono::high_resolution_clock::now();
-        auto durationKNN = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchKNNEnd - stopwatchKNNStart).count();
-        std::cout << "::: [DEBUG] KNN search and cluster association took " << durationKNN << " ms :::" << std::endl;
         std::cout << "::: [INFO] keyframe " << idxKeyframe << " had " << validTracks << " tracks and " << numValidClusters << " valid clusters :::" << std::endl;
         return idxKeyframe < config_.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
@@ -924,13 +919,9 @@ namespace mapping
         newValues_.insert(V(idxKeyframe), w_X_curr_.v());
         newValues_.insert(B(idxKeyframe), currBias_);
         // summarizeClusters();
-        auto stopwatchFactorsStart = std::chrono::high_resolution_clock::now();
         // NOTE: will internally update factorsToRemove to drop outdated smart factors
         // the outdated factors will be replaced by extended ones with additional tracks
         createAndUpdateFactors(idxKeyframe);
-        auto stopwatchFactorsEnd = std::chrono::high_resolution_clock::now();
-        auto durationFactors = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchFactorsEnd - stopwatchFactorsStart).count();
-        std::cout << "::: [DEBUG] factor creation and update took " << durationFactors << " ms :::" << std::endl;
         // Preintegration factor
         newSmootherFactors_.add(
             gtsam::CombinedImuFactor(
@@ -949,7 +940,6 @@ namespace mapping
         newSmootherIndices_[V(idxKeyframe)] = tSmootherCurr;
         newSmootherIndices_[B(idxKeyframe)] = tSmootherCurr;
         // update estimator
-        auto stopwatchSmootherStart = std::chrono::high_resolution_clock::now();
         smoother_.update(newSmootherFactors_, newValues_, newSmootherIndices_, factorsToRemove_);
         /**
          * NOTE: iSAM2 update performs only one GN step,
@@ -959,9 +949,6 @@ namespace mapping
          */
         for (std::size_t updateIters = 1; updateIters < config_.backend.solver_iterations; updateIters++)
             smoother_.update();
-        auto stopwatchSmootherEnd = std::chrono::high_resolution_clock::now();
-        auto durationSmoother = std::chrono::duration_cast<std::chrono::milliseconds>(stopwatchSmootherEnd - stopwatchSmootherStart).count();
-        std::cout << "::: [DEBUG] smoother update took " << durationSmoother << " ms :::" << std::endl;
         summarizeFactors();
         resetNewFactors();
         smootherEstimate_ = smoother_.calculateEstimate();
