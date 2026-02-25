@@ -64,10 +64,22 @@ public:
         slam_.setConfig(config);
         // enable collecting marginalized submaps to accumulate the global map
         slam_.setCollectMarginalizedSubmaps(true);
+
+        // use callback groups so to keep feeding IMU while keyframe updates are running
+        callbackGroupImu_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+        callbackGroupLidar_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+        auto imuSubOpt = rclcpp::SubscriptionOptions();
+        imuSubOpt.callback_group = callbackGroupImu_;
+        auto lidarSubOpt = rclcpp::SubscriptionOptions();
+        lidarSubOpt.callback_group = callbackGroupLidar_;
+
         subImu_ = this->create_subscription<sensor_msgs::msg::Imu>(
-            "/livox/imu", 10, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1));
+            // 2 seconds assuming 500 [Hz] IMU
+            "/livox/imu", 1000, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1), imuSubOpt);
         subLidar_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-            "livox/lidar", 10, std::bind(&MapperNode::lidarCallback, this, std::placeholders::_1));
+            // 2 seconds assuming 10 [Hz] LiDAR
+            "livox/lidar", 20, std::bind(&MapperNode::lidarCallback, this, std::placeholders::_1), lidarSubOpt);
         pubSlidingWindowPath_ = this->create_publisher<nav_msgs::msg::Path>(
             "mapping/window", 10);
         pubHistoricalPosesPath_ = this->create_publisher<nav_msgs::msg::Path>(
@@ -283,6 +295,8 @@ private:
     }
 
 private:
+    rclcpp::CallbackGroup::SharedPtr callbackGroupImu_;
+    rclcpp::CallbackGroup::SharedPtr callbackGroupLidar_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subImu_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLidar_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubSlidingWindowPath_, pubHistoricalPosesPath_;
@@ -438,7 +452,14 @@ int main(int argc, char **argv)
     else
     {
         std::cout << "Running as ROS 2 node" << std::endl;
-        rclcpp::spin(std::make_shared<MapperNode>());
+        auto node = std::make_shared<MapperNode>();
+        // MultiThreadedExecutor allows parallel processing of the callback groups
+        // NOTE: IMU callbacks are just feeding data, those can run in parallel with the LiDAR callback group
+        // the LiDAR callback group feeds data AND runs the expepnsive SLAM update
+        // using just rclcpp::spin(node) would lead to IMU messages being capped and the preintegration diverging
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(node);
+        executor.spin();
     }
 
     rclcpp::shutdown();
