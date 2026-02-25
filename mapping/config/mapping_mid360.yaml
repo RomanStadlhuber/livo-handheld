@@ -5,7 +5,7 @@ backend:
   isam2_relinearize_threshold: 0.005 # frobenius norm for relinearization on state variables
 
 lidar_frontend:
-  voxel_size: 0.5 # [m]
+  voxel_size: 1.0 # [m]
   undistort: true # disable for solid state LiDARs
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
