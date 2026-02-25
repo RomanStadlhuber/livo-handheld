@@ -5,6 +5,8 @@ It is inspired from the excellent [mandeye_controller](https://github.com/Janusz
 
 > With this note I also want to express my gratitude to the authors and maintainers of this repository!
 
+> **NEW:** check out the ROS2 [mapping](./mapping) package built specifically for this hardware setup!
+
 The **key differences** are
 
 - While much of the networking related setup needs to be done on the host, the driver software itself is **entirely containerized** with convenient wrapper scripts so you only have to kick off the build!
