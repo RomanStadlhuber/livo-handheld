@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef MAPPING_FEATUREDATABASE_HPP_
-#define MAPPING_FEATUREDATABASE_HPP_
+#ifndef MAPPING_FEATUREMANAGER_HPP_
+#define MAPPING_FEATUREMANAGER_HPP_
 
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -17,12 +17,13 @@
 
 namespace mapping
 {
-    /// @brief A class to manage the feature clusters and their states.
-    class FeatureDatabase
+    /// @brief A class to manage the feature clusters,
+    /// their statesand associated GTSAM factors.
+    class FeatureManager
     {
     public:
-        FeatureDatabase() = default;
-        ~FeatureDatabase() = default;
+        FeatureManager() = default;
+        ~FeatureManager() = default;
 
         /// @brief Create new clusters from points in a keyframe.
         /// @param states The current system states.
@@ -96,4 +97,4 @@ namespace mapping
     };
 } // namespace mapping
 
-#endif // MAPPING_FEATUREDATABASE_HPP_
+#endif // MAPPING_FEATUREMANAGER_HPP_

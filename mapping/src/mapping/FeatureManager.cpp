@@ -1,10 +1,10 @@
-#include <mapping/FeatureDatabase.hpp>
+#include <mapping/FeatureManager.hpp>
 #include <mapping/helpers.hpp> // planeFitSVD
 
 namespace mapping
 {
 
-    void FeatureDatabase::createNewClusters(const States &states, const uint32_t &idxKeyframe, double voxelSize)
+    void FeatureManager::createNewClusters(const States &states, const uint32_t &idxKeyframe, double voxelSize)
     {
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps = states.getKeyframeSubmaps();
         std::size_t numCreated = 0;
@@ -45,7 +45,7 @@ namespace mapping
         std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe << " :::" << std::endl;
     }
 
-    void FeatureDatabase::pruneClusters(const uint32_t &idxKeyframe)
+    void FeatureManager::pruneClusters(const uint32_t &idxKeyframe)
     {
         std::set<ClusterId> clustersToErase;
         for (const auto &[clusterId, clusterPoints] : clusters_)
@@ -68,14 +68,14 @@ namespace mapping
                   << clusters_.size() << " clusters remain :::" << std::endl;
     }
 
-    void FeatureDatabase::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness)
+    void FeatureManager::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness)
     {
         auto const &[idxSubmap, idxPoint] = pointIdx; // destructure to make it clearer what's going on
         clusters_[clusterId][idxSubmap] = idxPoint;
         clusterPlaneThicknessHistory_[clusterId].push_back(planeThickness);
     }
 
-    std::list<ClusterId> FeatureDatabase::findClustersAssociatedWithKeyframe(const uint32_t &idxKeyframe) const
+    std::list<ClusterId> FeatureManager::findClustersAssociatedWithKeyframe(const uint32_t &idxKeyframe) const
     {
         std::list<ClusterId> associatedClusters;
         for (const auto &[clusterId, keyframeAssociations] : clusters_)
@@ -86,7 +86,7 @@ namespace mapping
         return associatedClusters;
     }
 
-    void FeatureDatabase::removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket)
+    void FeatureManager::removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket)
     {
         std::size_t numMarginalized = 0;
         for (auto const &[clusterId, clusterPoints] : clusters_)
@@ -123,7 +123,7 @@ namespace mapping
         std::cout << "::: [INFO] Created " << numMarginalized << " marginalization factors for keyframe " << idxKeyframe << " :::" << std::endl;
     }
 
-    void FeatureDatabase::removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe, bool firstInHistory)
+    void FeatureManager::removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe, bool firstInHistory)
     {
         { // remove keyframe point from cluster
             auto it = clusters_[clusterId].find(idxKeyframe);
@@ -143,7 +143,7 @@ namespace mapping
         }
     }
 
-    void FeatureDatabase::updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness)
+    void FeatureManager::updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness)
     {
         std::vector<Eigen::Vector3d> clusterPoints;
         clusterPoints.reserve(clusters_[clusterId].size());
@@ -166,7 +166,7 @@ namespace mapping
         }
     }
 
-    void FeatureDatabase::updateClusterParameters(
+    void FeatureManager::updateClusterParameters(
         const States &states,
         const ClusterId &clusterId,
         const Eigen::Vector3d &planeNormal,
@@ -183,7 +183,7 @@ namespace mapping
     }
 
     std::pair<gtsam::NonlinearFactorGraph, gtsam::FactorIndices>
-    FeatureDatabase::createAndUpdateFactors(
+    FeatureManager::createAndUpdateFactors(
         const States &states,
         const gtsam::NonlinearFactorGraph &currentSmootherFactors)
     {
