@@ -669,6 +669,7 @@ namespace mapping
         std::cout << "::: [INFO] Pruned " << clustersToErase.size() << " clusters, "
                   << clusters_.size() << " clusters remain :::" << std::endl;
     }
+
     void MappingSystem::createAndUpdateFactors(const uint32_t &idxKeyframe)
     {
         std::size_t numFactorsAdded{0}, numFactorsUpdated{0}, numFactorsRemoved{0};
