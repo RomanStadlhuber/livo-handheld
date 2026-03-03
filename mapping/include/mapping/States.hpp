@@ -3,8 +3,11 @@
 #ifndef MAPPING_STATES_HPP_
 #define MAPPING_STATES_HPP_
 
+#include <gtsam/nonlinear/Values.h>
 #include <gtsam/navigation/NavState.h>
 #include <gtsam/navigation/ImuBias.h>
+
+#include <mapping/Config.hpp>
 #include <mapping/types.hpp>
 
 namespace mapping
@@ -60,6 +63,16 @@ namespace mapping
 
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &getKeyframeSubmaps() const { return keyframeSubmaps_; };
 
+        const gtsam::Values &getSmootherEstimate() const { return smootherEstimate_; };
+        void setSmootherEstimate(const gtsam::Values &newEstimate) { smootherEstimate_ = newEstimate; };
+
+        /// @brief Get the Markov blanket (MB) of a keyframe, i.e. all variables that are directly connected to it via a factor.
+        /// WARNING: this is NOT exact because at the time of marginalization, we don't know if a new constraint will be added,
+        /// but it will be very noisy anyway so it should be reasonably safe to ignore it.
+        /// @param idxMarginalize Index of the keyframe to be marginalized, lower bound for MB.
+        /// @param idxKeyframe Index of the current keyframe, upper bound for MB.
+        gtsam::Values getMarkovBlanketForKeyframe(const uint32_t idxMarginalize, const uint32_t &idxKeyframe) const;
+
     private:
         /// @brief SYsetm lifecycle state
         SystemState systemState_;
@@ -73,6 +86,8 @@ namespace mapping
         mutable gtsam::NavState w_X_curr_, w_X_preint_;
         gtsam::imuBias::ConstantBias currBias_;
         mutable gtsam::Pose3 imu_T_lidar_; // imu-lidar extrinsic calibration.
+        /// @brief Latest estimate of the smoother after updates are completed.
+        gtsam::Values smootherEstimate_;
     };
 }
 
