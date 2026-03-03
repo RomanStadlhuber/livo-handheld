@@ -53,10 +53,11 @@ add_library(mapping
   # common logic state
   src/mapping/Buffers.cpp
   src/mapping/States.cpp
-  src/mapping/FeatureManager.cpp
   # frontends
   src/mapping/frontend/ImuFrontend.cpp
   src/mapping/frontend/LidarFrontend.cpp
+  # backend
+  src/mapping/backend/FeatureManager.cpp
 )
 
 target_include_directories(mapping PUBLIC include)

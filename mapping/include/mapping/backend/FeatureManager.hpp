@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef MAPPING_FEATUREMANAGER_HPP_
-#define MAPPING_FEATUREMANAGER_HPP_
+#ifndef MAPPING_BACKEND_FEATUREMANAGER_HPP_
+#define MAPPING_BACKEND_FEATUREMANAGER_HPP_
 
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -97,4 +97,4 @@ namespace mapping
     };
 } // namespace mapping
 
-#endif // MAPPING_FEATUREMANAGER_HPP_
+#endif // MAPPING_BACKEND_FEATUREMANAGER_HPP_

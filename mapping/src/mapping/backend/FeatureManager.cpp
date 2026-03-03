@@ -1,4 +1,4 @@
-#include <mapping/FeatureManager.hpp>
+#include <mapping/backend/FeatureManager.hpp>
 #include <mapping/helpers.hpp> // planeFitSVD
 
 namespace mapping
