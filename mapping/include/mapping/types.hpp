@@ -11,10 +11,16 @@
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/NavState.h>
+#include <gtsam/inference/Symbol.h>
 #include <open3d/geometry/PointCloud.h>
+
+using gtsam::symbol_shorthand::B;
+using gtsam::symbol_shorthand::V;
+using gtsam::symbol_shorthand::X;
 
 namespace mapping
 {
+
     /// @brief IMU measurement data
     struct ImuData
     {

@@ -3,7 +3,6 @@
 #ifndef MAPPING_FRONTEND_IMUFRONTEND_HPP_
 #define MAPPING_FRONTEND_IMUFRONTEND_HPP_
 
-#include <gtsam/inference/Symbol.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
 #include <gtsam/navigation/ImuFactor.h>
 
@@ -13,10 +12,7 @@
 #include <mapping/Config.hpp>
 
 namespace mapping
-{
-    using gtsam::symbol_shorthand::B;
-    using gtsam::symbol_shorthand::V;
-    using gtsam::symbol_shorthand::X;
+{    
 
     class ImuFrontend
     {
