@@ -20,8 +20,6 @@
 #include <mapping/Config.hpp>
 
 #include <mutex>
-// NOTE: used for stopwatches, remove when done debugging
-#include <chrono>
 
 namespace mapping
 {
@@ -227,7 +225,7 @@ namespace mapping
         uint32_t keyframeCounter_;
 
         /// @brief Mutex for accessing the system state & buffers
-        std::mutex mtxState_, mtxLidarBuffer_, mtxImuBuffer_;
+        std::mutex mtxLidarBuffer_, mtxImuBuffer_;
 
         /// @brief Current estimated state (propagated OR updated)
         /// @details NOTE: This is NOT the single best estimate as it is used for IMU propagation
