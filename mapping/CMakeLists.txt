@@ -58,6 +58,7 @@ add_library(mapping
   src/mapping/frontend/LidarFrontend.cpp
   # backend
   src/mapping/backend/FeatureManager.cpp
+  src/mapping/backend/Smoother.cpp
 )
 
 target_include_directories(mapping PUBLIC include)
