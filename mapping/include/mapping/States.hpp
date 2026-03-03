@@ -62,6 +62,7 @@ namespace mapping
         const double &lastKeyframeTimestamp() const { return keyframeTimestamps_.rbegin()->second; };
 
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &getKeyframeSubmaps() const { return keyframeSubmaps_; };
+        std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &getKeyframePoses() const { return keyframePoses_; };
 
         const gtsam::Values &getSmootherEstimate() const { return smootherEstimate_; };
         void setSmootherEstimate(const gtsam::Values &newEstimate) { smootherEstimate_ = newEstimate; };
@@ -80,8 +81,8 @@ namespace mapping
         uint32_t keyframeCounter_;
         // map data
         mutable std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
-        std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
-        std::map<uint32_t, double> keyframeTimestamps_;
+        mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
+        mutable std::map<uint32_t, double> keyframeTimestamps_;
         // estimator lifecycle values
         mutable gtsam::NavState w_X_curr_, w_X_preint_;
         gtsam::imuBias::ConstantBias currBias_;
