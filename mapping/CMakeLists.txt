@@ -50,6 +50,13 @@ add_library(mapping
   src/mapping/factors/PointToPlaneFactor.cpp
   src/mapping/Visualization.cpp
   src/mapping/MappingSystem.cpp
+  # common logic state
+  src/mapping/Buffers.cpp
+  src/mapping/States.cpp
+  src/mapping/FeatureDatabase.cpp
+  # frontends
+  src/mapping/frontend/ImuFrontend.cpp
+  src/mapping/frontend/LidarFrontend.cpp
 )
 
 target_include_directories(mapping PUBLIC include)
