@@ -41,7 +41,7 @@ namespace mapping
         /// @brief Basically just a wrapper around multiple iSAM2 update steps.
         /// After using this, call ImuFrontend::resetPreintegrator() to reset the preintegrator.
         ///
-        /// NOTE: will internally modify states to reflect the update.
+        /// NOTE: will internally modify states & submap pointclouds to reflect the update.
         /// @param idxKeyframe The index of the current keyframe, used for factor creation and marginalization.
         /// @param states The current system states, used to extend the graph and update the estimates.
         /// @param config The system config, used for update parameters.
