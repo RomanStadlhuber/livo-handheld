@@ -31,13 +31,14 @@ namespace mapping
             newSubmap += *(scan.pcd);
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config.lidar_frontend.voxel_size);
+        buffers.getScanBuffer().clear(); // reset undistorted scan buffer
         return ptrNewSubmapVoxelized;
     }
 
     bool LidarFrontend::trackScanPointsToClusters(
         const uint32_t &idxKeyframe,
         const States &states,
-        FeatureDatabase &featureDB,
+        FeatureManager &featureManager,
         const MappingConfig &config)
     {
         // Search for same-plane point clusters among all keyframes
@@ -50,10 +51,10 @@ namespace mapping
         // KD-Tree of the current submap, used for cluster tracking
         const open3d::geometry::KDTreeFlann kdTree{*keyframeSubmaps[idxKeyframe]};
         // project each cluster point onto the current keyframe and try to find the 5 nearest neighbors
-        for (auto const &cluster : featureDB.clusters_)
+        for (auto const &cluster : featureManager.clusters_)
         {
             auto const &[clusterId, clusterPointIdxs] = cluster;
-            const ClusterState clusterState = featureDB.clusterStates_.at(clusterId);
+            const ClusterState clusterState = featureManager.clusterStates_.at(clusterId);
             // --- ignore pruned clusters ---
             if (clusterState == ClusterState::Pruned)
                 continue;
@@ -76,8 +77,8 @@ namespace mapping
             {
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
-                featureDB.clusterStates_[clusterId] = ClusterState::Idle;
-                featureDB.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
+                featureManager.clusterStates_[clusterId] = ClusterState::Idle;
+                featureManager.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
                 continue;
             }
             static constexpr size_t IDX_KNN_POINT = 1; // use second-nearest neighbor for tracking to increase plane stability
@@ -86,17 +87,17 @@ namespace mapping
             {
                 const Eigen::Vector3d &knnPoint = keyframeSubmaps[idxKeyframe]->points_[knnIndices[IDX_KNN_POINT]];
                 const double pointToPlaneDist = std::abs(
-                    featureDB.clusterNormals_.at(clusterId)->dot(knnPoint - *featureDB.clusterCenters_.at(clusterId)));
-                if (pointToPlaneDist >= 3.0 * featureDB.clusterSigmas_.at(clusterId))
+                    featureManager.clusterNormals_.at(clusterId)->dot(knnPoint - *featureManager.clusterCenters_.at(clusterId)));
+                if (pointToPlaneDist >= 3.0 * featureManager.clusterSigmas_.at(clusterId))
                 {
-                    featureDB.clusterStates_[clusterId] = ClusterState::Idle;
-                    featureDB.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
+                    featureManager.clusterStates_[clusterId] = ClusterState::Idle;
+                    featureManager.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
                     continue;
                 }
             }
             // --- tracking valid: add point to cluster ---
             // associate the second-nearest point with the cluster to increase stability
-            featureDB.addPointToCluster(clusterId, {idxKeyframe, knnIndices[IDX_KNN_POINT]}, planeTrackThickness);
+            featureManager.addPointToCluster(clusterId, {idxKeyframe, knnIndices[IDX_KNN_POINT]}, planeTrackThickness);
             validTracks++;
             knnIndices.clear();
             knnDists.clear();
@@ -116,11 +117,11 @@ namespace mapping
             if (
                 clusterState == ClusterState::Premature // for premature clusters, update immediately
                 // otherwise perform consistency check
-                || (planeValid && std::abs(featureDB.clusterNormals_.at(clusterId)->dot(planeNormal)) > config.lidar_frontend.clustering.normal_consistency_threshold))
+                || (planeValid && std::abs(featureManager.clusterNormals_.at(clusterId)->dot(planeNormal)) > config.lidar_frontend.clustering.normal_consistency_threshold))
             {
-                featureDB.clusterStates_[clusterId] = ClusterState::Tracked;
+                featureManager.clusterStates_[clusterId] = ClusterState::Tracked;
                 // Note: internally uses thickness history to update covariance
-                featureDB.updateClusterParameters(states, clusterId, planeNormal, clusterCenter);
+                featureManager.updateClusterParameters(states, clusterId, planeNormal, clusterCenter);
                 numValidClusters++;
             }
             else
@@ -128,9 +129,9 @@ namespace mapping
                 // conistency check failed -> mark cluster Idle, remove added pt and recompute parameters from old old associations
                 if (clusterState == ClusterState::Premature) // must not go from premature to idle
                     continue;
-                featureDB.clusterStates_[clusterId] = ClusterState::Idle;    // idle - no valid track in newest KF
-                featureDB.removePointFromCluster(clusterId, idxKeyframe);    // remove latest association
-                featureDB.updateClusterParameters(states, clusterId, false); // update location, thickness shouldn't change (no new KF association)
+                featureManager.clusterStates_[clusterId] = ClusterState::Idle;    // idle - no valid track in newest KF
+                featureManager.removePointFromCluster(clusterId, idxKeyframe);    // remove latest association
+                featureManager.updateClusterParameters(states, clusterId, false); // update location, thickness shouldn't change (no new KF association)
                 continue;
             }
         }

@@ -7,7 +7,7 @@
 #include <mapping/Config.hpp>
 #include <mapping/States.hpp>
 #include <mapping/Buffers.hpp>
-#include <mapping/FeatureDatabase.hpp>
+#include <mapping/backend/FeatureManager.hpp>
 
 #include <open3d/geometry/PointCloud.h>
 #include <open3d/geometry/KDTreeFlann.h>
@@ -27,6 +27,7 @@ namespace mapping
         /// @param states The current state of the system, used for reference (not modified).
         /// @param buffers The buffers to be used for accumulation.
         /// @return The accumulated submap PointCloud as shared_ptr.
+        [[nodiscard]]
         std::shared_ptr<open3d::geometry::PointCloud> accumulateUndistortedScans(
             const States &states,
             Buffers &buffers,
@@ -34,11 +35,14 @@ namespace mapping
 
         /// @brief Track the current keyframe submap against persistent "same plane point" clusters
         /// @param idxKeyframe Index of the current keyframe
+        /// @param states Used to get the latest keyframe pose and submap.
+        /// @param featureManager Used to access the clusters and their parameters.
+        /// @param config Used to get the tracking parameters.
         /// @return True if the keyframe was tracked successfully
         bool trackScanPointsToClusters(
             const uint32_t &idxKeyframe,
             const States &states,
-            FeatureDatabase &featureDB,
+            FeatureManager &featureManager,
             const MappingConfig &config);
     };
 } // namespace mapping
