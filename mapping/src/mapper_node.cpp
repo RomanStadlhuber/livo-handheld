@@ -309,7 +309,9 @@ private:
     /// @brief Naive accumulation of keyframe submaps to form the global map.
     std::shared_ptr<open3d::geometry::PointCloud> globalMap_;
     rclcpp::Time startTime_;
-    bool hasStartTime_ = false;
+    // accessed from both IMU and LiDAR callback threads without a lock
+    // TODO: in the future, use a mutex for values like this
+    std::atomic<bool> hasStartTime_ = false;
     static constexpr double kLivoxImuScale = 9.81;
 
     mapping::MappingSystem slam_;
