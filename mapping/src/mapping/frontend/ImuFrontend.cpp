@@ -3,8 +3,24 @@
 
 namespace mapping
 {
+    void ImuFrontend::initializeFromStatic(
+        const double &accVariance,
+        const double &gyroVariance,
+        const Eigen::Vector3d &gyroBiasMean)
+    {
+        if (isInitialized_)
+            throw std::runtime_error("::: [ERROR] Tried to initialize (static) IMU frontend twice. :::");
+        preintegrator_.params()->accelerometerCovariance = gtsam::I_3x3 * accVariance;
+        preintegrator_.params()->gyroscopeCovariance = gtsam::I_3x3 * gyroVariance;
+        gtsam::imuBias::ConstantBias priorImuBias{preintegrator_.biasHat().accelerometer(), gyroBiasMean};
+        preintegrator_.resetIntegrationAndSetBias(priorImuBias);
+        isInitialized_ = true;
+    }
+
     gtsam::NavState ImuFrontend::preintegrateIMU(const States &states, Buffers &buffers)
     {
+        if(!isInitialized_)
+            throw std::runtime_error("::: [ERROR] Tried to preintegrate IMU measurements without initializing the IMU frontend. :::");
         // Lock the buffers for accessing values
         std::unique_lock<std::mutex> lockImuBuffer(buffers.getMtxImuBuffer());
         std::map<double, std::shared_ptr<ImuData>> &imuBuffer = buffers.getImuBuffer();
@@ -35,7 +51,7 @@ namespace mapping
         preintegrator_.resetIntegrationAndSetBias(states.getCurrentBias());
     }
 
-    void ImuFrontend::undistortScans(const States &states, Buffers &buffers, const MappingConfig &config)
+    void ImuFrontend::undistortScans(States &states, Buffers &buffers, const MappingConfig &config)
     {
         // Iterator to the newest lidar scan that can still be processed (older than latest imu timestamp)
         std::unique_lock<std::mutex> lockLidarBuffer(buffers.getMtxLidarBuffer());
@@ -55,6 +71,7 @@ namespace mapping
         const gtsam::Vector3 linVel = kf_T_prop.translation() / dtPropToKeyframe;
 
         std::map<double, std::shared_ptr<LidarData>> &lidarBuffer = buffers.getLidarBuffer();
+        states.setLastScanTime(lidarBuffer.rbegin()->first);
 
         double tLastScan = tLastKeyframe;
         // Undistort between individual scans
