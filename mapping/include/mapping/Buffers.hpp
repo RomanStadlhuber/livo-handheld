@@ -37,16 +37,6 @@ namespace mapping
             const gtsam::Pose3 &scanPoseToLastKeyframe,
             std::shared_ptr<open3d::geometry::PointCloud> pcdScan);
 
-        /// @brief Enable or disable collection of marginalized submaps.
-        /// Disabled by default to avoid unbounded memory growth in headless mode.
-        void setCollectMarginalizedSubmaps(bool enable)
-        {
-            collectMarginalizedSubmaps_ = enable;
-        };
-
-        /// @brief Drain and return submaps that were marginalized since the last call.
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> getMarginalizedSubmaps();
-
         /// @brief Get mutexes for lock guard or unique lock.
         /// You should always lock the corresponding mutex before accessing the buffers.
         std::mutex &getMtxImuBuffer() { return mtxImuBuffer_; };
@@ -56,6 +46,10 @@ namespace mapping
         std::map<double, std::shared_ptr<LidarData>> &getLidarBuffer() { return lidarBuffer_; };
         std::list<ScanBuffer> &getScanBuffer() { return scanBuffer_; };
 
+        /// @brief The number of scans that have elapsed since the last keyfarme w
+        /// @return
+        std::size_t numScansSinceLastKeyframe() const { return scanBuffer_.size(); };
+
     private:
         // mutexes to lock buffer access
         std::mutex mtxLidarBuffer_, mtxImuBuffer_;
@@ -64,10 +58,6 @@ namespace mapping
         std::map<double, std::shared_ptr<LidarData>> lidarBuffer_;
         /// @brief Undistorted scans that have not yet been merged into keyframe submaps.
         std::list<ScanBuffer> scanBuffer_;
-        /// @brief whether to keep marginalized submap PCDs for visualization interfaces.
-        bool collectMarginalizedSubmaps_ = false;
-        /// @brief marginalized submap PCDs, cleared on each call to getMarginalizedSubmaps()
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> marginalizedSubmaps_;
     };
 }
 

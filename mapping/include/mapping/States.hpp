@@ -33,6 +33,12 @@ namespace mapping
             double keyframeTimestamp,
             std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap);
 
+        /// @brief Update a keyframe's submap to a new world pose
+        /// @details Will internally compute the left-applied pose delta `w_dT_w * w_pts_l`.
+        /// @param keyframeIdx Index of the keyframe to update
+        /// @param w_T_l New pose in world frame
+        void updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &w_T_l);
+
         /// @brief Remove a keyframe (submap, pose, timestamp).
         void removeKeyframe(const uint32_t idxKeyframe);
 
@@ -51,13 +57,18 @@ namespace mapping
         void setCurrentBias(const gtsam::imuBias::ConstantBias &newBias) { currBias_ = newBias; };
 
         // system-relative timestamps of the last processed IMU or LiDAR measurement.
-        mutable double tLastImu_, tLastScan_;
+        mutable double tLastImu_{0}, tLastScan_{0};
 
         // setters for bottom-up accesses that should adhere to constness
         void setLastScanTime(double timestamp) const { tLastScan_ = timestamp; };
         void setLastImuTime(double timestamp) const { tLastImu_ = timestamp; };
 
+        void setImuToLidarExtrinsic(const gtsam::Pose3 &newExtrinsic) { imu_T_lidar_ = newExtrinsic; };
         gtsam::Pose3 &getImuToLidarExtrinsic() const { return imu_T_lidar_; };
+
+        std::map<uint32_t, double> &getKeyframeTimestamps() const { return keyframeTimestamps_; };
+        const uint32_t &getLatestKeyframeIdx() const { return keyframeCounter_; };
+
         gtsam::Pose3 &lastKeyframePose() const { return *keyframePoses_.rbegin()->second; };
         const double &lastKeyframeTimestamp() const { return keyframeTimestamps_.rbegin()->second; };
 
@@ -74,15 +85,32 @@ namespace mapping
         /// @param idxKeyframe Index of the current keyframe, upper bound for MB.
         gtsam::Values getMarkovBlanketForKeyframe(const uint32_t idxMarginalize, const uint32_t &idxKeyframe) const;
 
+        /// -- archive & obtain marginalized submaps (for visualization purposes only) ---
+
+        /// @brief Enable or disable collection of marginalized submaps.
+        /// Disabled by default to avoid unbounded memory growth in headless mode.
+        void setCollectMarginalizedSubmaps(bool enable)
+        {
+            collectMarginalizedSubmaps_ = enable;
+        };
+
+        /// @brief Return submaps that were marginalized since the last call and clear the buffer internally.
+        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> getMarginalizedSubmaps();
+
+
     private:
         /// @brief SYsetm lifecycle state
-        SystemState systemState_;
+        SystemState systemState_ = SystemState::Initializing;
         /// @brief Counter for assigning unique indices to keyframes.
-        uint32_t keyframeCounter_;
+        uint32_t keyframeCounter_{0};
         // map data
         mutable std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
         mutable std::map<uint32_t, double> keyframeTimestamps_;
+        /// @brief whether to keep marginalized submap PCDs for visualization interfaces.
+        bool collectMarginalizedSubmaps_ = false;
+        /// @brief marginalized submap PCDs, cleared on each call to getMarginalizedSubmaps()
+        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> marginalizedSubmaps_;
         // estimator lifecycle values
         mutable gtsam::NavState w_X_curr_, w_X_preint_;
         gtsam::imuBias::ConstantBias currBias_;

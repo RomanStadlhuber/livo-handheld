@@ -18,8 +18,20 @@ namespace mapping
         return idxNewKf;
     }
 
+    void States::updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &w_T_l)
+    {
+        // let D be the delta that needs to be left-applied via Open3D's transform
+        // D * T1 = T2 | (...) * T1^-1
+        // => D = T2 * T1^-1
+        const gtsam::Pose3 deltaPose = w_T_l.compose(keyframePoses_[keyframeIdx]->inverse());
+        keyframeSubmaps_[keyframeIdx]->Transform(deltaPose.matrix());
+        keyframePoses_[keyframeIdx] = std::make_shared<gtsam::Pose3>(w_T_l);
+    }
+
     void States::removeKeyframe(const uint32_t idxKeyframe)
     {
+        if (collectMarginalizedSubmaps_)
+            marginalizedSubmaps_.push_back(keyframeSubmaps_[idxKeyframe]);
         keyframeSubmaps_.erase(idxKeyframe);
         keyframePoses_.erase(idxKeyframe);
         keyframeTimestamps_.erase(idxKeyframe);
@@ -41,5 +53,12 @@ namespace mapping
         for (uint32_t k = idxMarginalize; k < idxKeyframe; k++)
             markovBlanket.insert(X(k), smootherEstimate_.at(X(k)));
         return markovBlanket;
+    }
+
+    std::vector<std::shared_ptr<open3d::geometry::PointCloud>> States::getMarginalizedSubmaps()
+    {
+        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> submaps;
+        std::swap(submaps, marginalizedSubmaps_);
+        return submaps;
     }
 }
