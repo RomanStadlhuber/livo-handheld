@@ -32,7 +32,7 @@ namespace mapping
         /// @param x0 Initial pose and velocity estimate (NavState) for the first keyframe.
         /// @param b0 Initial bias estimate for the first keyframe.
         void setPriors(
-            const uint32_t &idxKeyframe=0,
+            const uint32_t &idxKeyframe,
             const gtsam::NonlinearFactorGraph & priors,
             const gtsam::NavState &x0,
             const gtsam::imuBias::ConstantBias &b0
