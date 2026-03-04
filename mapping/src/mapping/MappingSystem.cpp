@@ -160,8 +160,8 @@ namespace mapping
         states_.setCurrentState(x0);
         states_.setPreintegrationRefState(x0);
 
-        // store last IMU timestamp and clear buffer
-        states_.setLastImuTime(imuBufferEndIt->first);
+        // store last processed IMU timestamp and clear buffer
+        states_.setLastImuTime(std::prev(imuBufferEndIt)->first);
         imuBuffer.clear();
     }
 
