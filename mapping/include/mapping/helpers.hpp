@@ -15,7 +15,7 @@ namespace mapping
     /// @param minPointDist Minimum point distance to include
     /// @param maxPointDist Maximum point distance to include
     /// @return an Open3D PointCloud, with scan timestamp info removed.
-    open3d::geometry::PointCloud Scan2PCD(
+    inline open3d::geometry::PointCloud Scan2PCD(
         const std::shared_ptr<LidarData> &lidar_data,
         double minPointDist,
         double maxPointDist)
@@ -44,7 +44,7 @@ namespace mapping
     ///         - planeCenter: centroid of input points
     ///         - planePoints: Nx3 matrix of centered points (w_p - w_planeCenter)
     ///         - planeThickness: mean squared point-to-plane distance (lower is better)
-    std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double> planeFitSVD(
+    inline std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double> planeFitSVD(
         const std::vector<Eigen::Vector3d> &points,
         double planarityThreshold = 0.1,
         double linearityThreshold = 0.5)
