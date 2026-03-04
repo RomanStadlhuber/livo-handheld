@@ -17,7 +17,7 @@ namespace mapping
     class ImuFrontend
     {
     public:
-        ImuFrontend() = default;
+        ImuFrontend();
         ~ImuFrontend() = default;
 
         /// @brief Bootstrap the IMU preintegrator with values from static intialization.

@@ -3,6 +3,32 @@
 
 namespace mapping
 {
+    ImuFrontend::ImuFrontend()
+    {
+         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
+        // noise values from:
+        // https://github.com/RomanStadlhuber/mid360_docker/blob/main/mid360_runner/config/mapping_mid360.yaml#L13
+        constexpr double
+            // sensor readout noise
+            accelerometerNoise = 0.05,
+            gyroscopeNoise = 0.005,
+            // bias random walk noise
+            accelBiasRandomWalk = 0.0005,
+            gyroBiasRandomWalk = 0.00005;
+        // sensor readout noise
+        params->accelerometerCovariance = gtsam::I_3x3 * std::pow(accelerometerNoise, 2);
+        params->gyroscopeCovariance = gtsam::I_3x3 * std::pow(gyroscopeNoise, 2);
+        // bias random walk noise
+        params->biasAccCovariance = gtsam::I_3x3 * std::pow(accelBiasRandomWalk, 2);
+        params->biasOmegaCovariance = gtsam::I_3x3 * std::pow(gyroBiasRandomWalk, 2);
+        // bias value from:
+        // https://github.com/hku-mars/FAST_LIO/blob/7cc4175de6f8ba2edf34bab02a42195b141027e9/include/use-ikfom.hpp#L35
+        params->integrationCovariance = gtsam::I_3x3 * 1e-8;
+        const gtsam::Vector6 commonBias{gtsam::Vector6::Ones() * 0.0001};
+        gtsam::imuBias::ConstantBias priorImuBias{commonBias};
+        preintegrator_ = gtsam::PreintegratedCombinedMeasurements(params, priorImuBias);
+    }
+
     void ImuFrontend::initializeFromStatic(
         const double &accVariance,
         const double &gyroVariance,
@@ -19,7 +45,7 @@ namespace mapping
 
     gtsam::NavState ImuFrontend::preintegrateIMU(const States &states, Buffers &buffers)
     {
-        if(!isInitialized_)
+        if (!isInitialized_)
             throw std::runtime_error("::: [ERROR] Tried to preintegrate IMU measurements without initializing the IMU frontend. :::");
         // Lock the buffers for accessing values
         std::unique_lock<std::mutex> lockImuBuffer(buffers.getMtxImuBuffer());
