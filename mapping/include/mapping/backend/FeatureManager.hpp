@@ -6,11 +6,13 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
+#include <gtsam/navigation/CombinedImuFactor.h> // for "summarizeFactors"
 
 #include <mapping/types.hpp>
 #include <mapping/States.hpp>
 #include <mapping/factors/PointToPlaneFactor.hpp>
 
+#include <iostream>
 #include <utility>
 #include <list>
 #include <set>
@@ -68,8 +70,19 @@ namespace mapping
         /// @return New factors to add and list of factors to remove with `smoother.update(...)`
         [[nodiscard]] std::pair<gtsam::NonlinearFactorGraph, gtsam::FactorIndices>
         createAndUpdateFactors(
-            const States &states, 
+            const States &states,
             const gtsam::NonlinearFactorGraph &currentSmootherFactors);
+
+        /// @brief Shorthand check for whether a cluster is valid (= tracking or idle).
+        bool isClusterValid(const ClusterId &clusterId) const
+        {
+            return !(clusterStates_.at(clusterId) == ClusterState::Premature || clusterStates_.at(clusterId) == ClusterState::Pruned);
+        };
+        /// @brief Summarize current clusters for debugging purposes.
+        void summarizeClusters() const;
+        /// @brief Summarize current factors for debugging purposes.
+        /// @param factors The factor graph to summarize obtained from `Smoother::getFactors()`.
+        void summarizeFactors(const gtsam::NonlinearFactorGraph &factors) const;
 
     public: // attributes
         /**
@@ -87,13 +100,14 @@ namespace mapping
         std::map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
         std::map<ClusterId, boost::shared_ptr<PointToPlaneFactor>> clusterFactors_;
         /// @brief Counter for assigning unique IDs to clusters.
-        ClusterId clusterIdCounter_;
+        ClusterId clusterIdCounter_{0};
         // factor management for what's passed to the smoother
         gtsam::NonlinearFactorGraph newSmootherFactors_;
         gtsam::FactorIndices factorsToRemove_;
         /// @brief Robust kernel for point-to-plane factors
         /// see also: https://gtsam.org/doxygen/a03860.html
-        gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_;
+        gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_{
+            gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(new gtsam::noiseModel::mEstimator::GemanMcClure(1.0))};
     };
 } // namespace mapping
 

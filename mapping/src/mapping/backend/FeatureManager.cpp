@@ -6,7 +6,7 @@ namespace mapping
 
     void FeatureManager::createNewClusters(const States &states, const uint32_t &idxKeyframe, double voxelSize)
     {
-        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps = states.getKeyframeSubmaps();
+        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();
         std::size_t numCreated = 0;
         if (voxelSize <= 0.01) // use all points for creating new clusters
         {
@@ -372,6 +372,55 @@ namespace mapping
 
         // return values of the fields while simultaneously clearing them.
         return {std::exchange(newSmootherFactors_, {}), std::exchange(factorsToRemove_, {})};
+    }
+
+    void FeatureManager::summarizeClusters() const
+    {
+        std::cout << "::: [DEBUG] Cluster summary :::" << std::endl;
+        for (auto const &cluster : clusters_)
+        {
+            auto const &[clusterId, clusterPoints] = cluster;
+            if (!isClusterValid(clusterId)) // skip invalid clusters, otherwise it's too much logging going on
+                continue;
+            std::string stateStr;
+            switch (clusterStates_.at(clusterId))
+            {
+            case ClusterState::Tracked:
+                stateStr = "tracked";
+                break;
+            case ClusterState::Idle:
+                stateStr = "idle";
+                break;
+            default: // safeguard (shoud not happen)
+                stateStr = "premature or marked for removal";
+                break;
+            }
+            std::cout << "\tId: " << clusterId << " size: " << clusterPoints.size() << " thickness: " << clusterPlaneThickness_.at(clusterId)
+                      << " sigma: " << clusterSigmas_.at(clusterId)
+                      << " state: " << stateStr << std::endl;
+        }
+    }
+
+    void FeatureManager::summarizeFactors(const gtsam::NonlinearFactorGraph &factors) const
+    {
+        size_t numImuFactors{0}, numLidarFactors{0};
+        for (size_t factorKey = 0; factorKey < factors.size(); ++factorKey)
+        {
+            const gtsam::NonlinearFactor::shared_ptr factor = factors[factorKey];
+            const auto imuFactor = boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(factor);
+            if (imuFactor)
+            {
+                numImuFactors++;
+                continue;
+            }
+            const auto ptpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+            if (ptpFactor)
+            {
+                numLidarFactors++;
+                continue;
+            }
+        }
+        std::cout << "::: [DEBUG] smoother has " << numImuFactors << " IMU factors, " << numLidarFactors << " LiDAR factors." << std::endl;
     }
 
 } // namespace mapping
