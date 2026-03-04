@@ -20,11 +20,4 @@ namespace mapping
     {
         scanBuffer_.push_back(ScanBuffer{pcdScan, std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe)});
     }
-
-    std::vector<std::shared_ptr<open3d::geometry::PointCloud>> Buffers::getMarginalizedSubmaps()
-    {
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> submaps;
-        std::swap(submaps, marginalizedSubmaps_);
-        return submaps;
-    }
 }
