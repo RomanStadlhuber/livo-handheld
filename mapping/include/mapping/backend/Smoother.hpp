@@ -27,10 +27,12 @@ namespace mapping
 
         /// @brief Set the inital, world-frame fixing state and priors to bootstrap the optimization.
         /// Do this with the values from SLAM initialization.
+        /// @param idxKeyframe The index variables associated with the first keyframe (assumed 0 by default).
         /// @param priors Prior factors must constrain the full SLAM state Pose `X(0)`, Velocity `V(0)`, and Bias `B(0)`.
         /// @param x0 Initial pose and velocity estimate (NavState) for the first keyframe.
         /// @param b0 Initial bias estimate for the first keyframe.
         void setPriors(
+            const uint32_t &idxKeyframe=0,
             const gtsam::NonlinearFactorGraph & priors,
             const gtsam::NavState &x0,
             const gtsam::imuBias::ConstantBias &b0
@@ -55,6 +57,10 @@ namespace mapping
             // NOTE: will be modified in-place
             gtsam::NonlinearFactorGraph newAndUpdatedFactors,
             const gtsam::FactorIndices &factorsToRemove);
+
+        /// @brief A relay to `IncrementalFixedLagSmoother::getFactors()`,
+        /// which is needed by the FeatureManager for factor removal, replacements & marginalization.
+        const gtsam::NonlinearFactorGraph &getFactors() const {return smoother_.getFactors();};
 
     private:
         // shorthand indicator on whether to add priors before the update pass

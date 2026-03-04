@@ -22,6 +22,7 @@ namespace mapping
     }
 
     void Smoother::setPriors(
+        const uint32_t &idxKeyframe,
         const gtsam::NonlinearFactorGraph &priors,
         const gtsam::NavState &x0,
         const gtsam::imuBias::ConstantBias &b0)
@@ -32,12 +33,12 @@ namespace mapping
             return;
         }
         initialPriors_ = priors;
-        initialValues_.insert(X(0), x0.pose());
-        initialValues_.insert(V(0), x0.v());
-        initialValues_.insert(B(0), b0);
-        initialSmootherIndices_[X(0)] = 0.0;
-        initialSmootherIndices_[V(0)] = 0.0;
-        initialSmootherIndices_[B(0)] = 0.0;
+        initialValues_.insert(X(idxKeyframe), x0.pose());
+        initialValues_.insert(V(idxKeyframe), x0.v());
+        initialValues_.insert(B(idxKeyframe), b0);
+        initialSmootherIndices_[X(idxKeyframe)] = 0.0;
+        initialSmootherIndices_[V(idxKeyframe)] = 0.0;
+        initialSmootherIndices_[B(idxKeyframe)] = 0.0;
     }
 
     void Smoother::updateAndOptimizeGraph(
@@ -77,7 +78,7 @@ namespace mapping
             bootstrapped_ = true;
             std::cout << "::: [INFO] Graph is now bootstrapped with priors :::" << std::endl;
         }
-        if(!bootstrapped_) // abort if smoother is not bootstrapped
+        if (!bootstrapped_) // abort if smoother is not bootstrapped
         {
             throw std::runtime_error("::: [ERROR] Attempting to update smoother without bootstrapping, this should not happen :::");
         }
