@@ -51,6 +51,13 @@ namespace mapping
         std::unique_lock<std::mutex> lockImuBuffer(buffers.getMtxImuBuffer());
         std::map<double, std::shared_ptr<ImuData>> &imuBuffer = buffers.getImuBuffer();
 
+        // guard against empty buffer (caused by multi-threaded executor while CPU under load)
+        if (imuBuffer.empty())
+        {
+            lockImuBuffer.unlock();
+            return preintegrator_.predict(states.getPreintegrationRefState(), states.getCurrentBias());
+        }
+
         // Perform preintegration to decide whether a new keyframe is needed
         for (auto imuIt = imuBuffer.begin(); imuIt != imuBuffer.end(); ++imuIt)
         {
