@@ -11,7 +11,7 @@
 
 namespace mapping
 {
-
+    /// @ingroup config
     /// @brief Clustering parameters for point cluster validation
     struct ClusteringConfig
     {

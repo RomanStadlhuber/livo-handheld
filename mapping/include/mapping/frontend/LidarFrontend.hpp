@@ -16,6 +16,7 @@
 
 namespace mapping
 {
+    /// @ingroup frontend_lidar
     class LidarFrontend
     {
     public:

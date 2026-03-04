@@ -20,7 +20,7 @@ using gtsam::symbol_shorthand::X;
 
 namespace mapping
 {
-
+    /// @ingroup types
     /// @brief IMU measurement data
     struct ImuData
     {
@@ -28,6 +28,7 @@ namespace mapping
         Eigen::Vector3d angular_velocity;
     };
 
+    /// @ingroup types
     /// @brief LiDAR scan data with per-point timestamps
     struct LidarData
     {
@@ -38,6 +39,7 @@ namespace mapping
     template <typename T>
     using InputBuffer = std::map<double, std::shared_ptr<T>>;
 
+    /// @ingroup types
     /// @brief Buffered scan data for keyframe creation
     struct ScanBuffer
     {
@@ -47,6 +49,7 @@ namespace mapping
         std::shared_ptr<gtsam::Pose3> kf_T_scan;
     };
 
+    /// @ingroup types
     /// @brief System lifecycle states
     enum class SystemState
     {
@@ -70,6 +73,7 @@ namespace mapping
         std::shared_ptr<Eigen::Vector3d> normal;
     };
 
+    /// @ingroup types
     /// @brief State of a point cluster in the tracking system.
     /// See detail descriptoin for relationship to managing factors.
     enum class ClusterState
@@ -102,5 +106,5 @@ namespace mapping
 
     /// @brief Invalid cluster ID sentinel value
     constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
-}
+} // namespace mapping
 #endif // MAPPING_TYPES_HPP_

@@ -1,0 +1,47 @@
+/// @defgroup frontend Frontend
+/// @brief Sensor frontends for IMU and LiDAR processing.
+
+/// @defgroup frontend_imu IMU Frontend
+/// @ingroup frontend
+/// @brief IMU preintegration and scan undistortion.
+
+/// @defgroup frontend_lidar LiDAR Frontend
+/// @ingroup frontend
+/// @brief LiDAR scan accumulation and cluster tracking.
+
+/// @defgroup backend Backend
+/// @brief Factor graph optimization and feature management.
+
+/// @defgroup backend_smoother Smoother
+/// @ingroup backend
+/// @brief Incremental fixed-lag smoother (iSAM2) wrapper.
+
+/// @defgroup backend_features Feature Manager
+/// @ingroup backend
+/// @brief Planar cluster lifecycle and factor management.
+
+/// @defgroup factors Factors
+/// @brief GTSAM custom factors for graph optimization.
+
+/// @defgroup core Core
+/// @brief Shared types, configuration, buffers, and state management.
+
+/// @defgroup types Types
+/// @ingroup core
+/// @brief Common data types, enums, and type aliases.
+
+/// @defgroup config Configuration
+/// @ingroup core
+/// @brief System configuration structs.
+
+/// @defgroup buffers Buffers
+/// @ingroup core
+/// @brief Thread-safe sensor data buffers.
+
+/// @defgroup states States
+/// @ingroup core
+/// @brief Sliding-window keyframe and navigation state management.
+
+/// @defgroup helpers Helpers
+/// @ingroup core
+/// @brief Utility functions for point cloud conversion and plane fitting.

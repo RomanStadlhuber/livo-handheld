@@ -12,6 +12,7 @@
 
 namespace mapping
 {
+    /// @ingroup buffers
     class Buffers
     {
     public:
@@ -59,6 +60,6 @@ namespace mapping
         /// @brief Undistorted scans that have not yet been merged into keyframe submaps.
         std::list<ScanBuffer> scanBuffer_;
     };
-}
+} // namespace mapping
 
 #endif // MAPPING_BUFFERS_HPP_

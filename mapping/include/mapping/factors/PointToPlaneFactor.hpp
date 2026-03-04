@@ -16,7 +16,7 @@
 
 namespace mapping
 {
-
+    /// @ingroup factors
     /// @brief Point-to-plane factor supporting multiple keyframe poses
     /// @details This factor constrains multiple keyframe poses by enforcing that observed
     /// points from each keyframe lie on a common plane. The plane is defined by its normal

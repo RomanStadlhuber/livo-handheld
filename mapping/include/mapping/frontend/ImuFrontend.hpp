@@ -12,8 +12,9 @@
 #include <mapping/Config.hpp>
 
 namespace mapping
-{    
+{
 
+    /// @ingroup frontend_imu
     class ImuFrontend
     {
     public:

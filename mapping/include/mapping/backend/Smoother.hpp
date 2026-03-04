@@ -15,6 +15,7 @@
 
 namespace mapping
 {
+    /// @ingroup backend_smoother
     class Smoother
     {
     public:
@@ -76,6 +77,6 @@ namespace mapping
         // whether the initial priors have been added to the graph and the smoother has been bootstrapped
         bool bootstrapped_{false};
     };
-}
+} // namespace mapping
 
 #endif // MAPPING_BACKEND_SMOOTHER_HPP_

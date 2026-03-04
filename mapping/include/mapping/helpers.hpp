@@ -10,6 +10,7 @@
 
 namespace mapping
 {
+    /// @ingroup helpers
     /// @brief Convert LidarData to Open3D PointCloud (no undistortion).
     /// @param lidar_data The raw LiDAR scan, potentially undistorted.
     /// @param minPointDist Minimum point distance to include
@@ -34,6 +35,7 @@ namespace mapping
         return pcd;
     }
 
+    /// @ingroup helpers
     /// @brief Fit a plane to a set of 3D points using SVD
     /// @param points Input points to fit the plane to
     /// @param planarityThreshold Maximum ratio σ₃/σ₂ for valid plane (default 0.3)

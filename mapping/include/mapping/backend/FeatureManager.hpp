@@ -19,6 +19,7 @@
 
 namespace mapping
 {
+    /// @ingroup backend_features
     /// @brief A class to manage the feature clusters,
     /// their statesand associated GTSAM factors.
     class FeatureManager

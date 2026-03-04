@@ -12,6 +12,7 @@
 
 namespace mapping
 {
+    /// @ingroup states
     class States
     {
     public:
@@ -118,6 +119,6 @@ namespace mapping
         /// @brief Latest estimate of the smoother after updates are completed.
         gtsam::Values smootherEstimate_;
     };
-}
+} // namespace mapping
 
 #endif // MAPPING_STATES_HPP_
