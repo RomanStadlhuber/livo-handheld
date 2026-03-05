@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup buffers
 #pragma once
 
 #ifndef MAPPING_BUFFERS_HPP_

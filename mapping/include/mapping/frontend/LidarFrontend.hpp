@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup frontend_lidar
 #pragma once
 
 #ifndef MAPPING_FRONTEND_LIDARFRONTEND_HPP_

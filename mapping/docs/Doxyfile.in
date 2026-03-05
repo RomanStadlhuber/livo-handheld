@@ -30,10 +30,14 @@ GENERATE_LATEX         = NO
 
 # --- MathJax ---
 USE_MATHJAX            = YES
+MATHJAX_VERSION        = MathJax_3
+
 # --- doxygen-awesome-css theme ---
 HTML_EXTRA_STYLESHEET  = @AWESOME_CSS_DIR@/doxygen-awesome.css
+HTML_COLORSTYLE        = TOGGLE
 GENERATE_TREEVIEW      = YES
 DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
 
 # --- Graphs ---
 HAVE_DOT               = YES

@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup config
 #pragma once
 
 #ifndef MAPPING_CONFIG_HPP_

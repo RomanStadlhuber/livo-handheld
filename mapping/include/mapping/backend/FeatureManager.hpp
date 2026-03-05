@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup backend_features
 #pragma once
 
 #ifndef MAPPING_BACKEND_FEATUREMANAGER_HPP_

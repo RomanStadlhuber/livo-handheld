@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup types
 #pragma once
 
 #ifndef MAPPING_TYPES_HPP_

@@ -81,7 +81,53 @@ The system updates:
 ## Marginalization
 
 `MappingSystem::marginalizeKeyframesOutsideSlidingWindow` runs **before** the
-smoother update to prevent dangling variable references.
+smoother update to circumvent the blanket variable fixing that iSAM2 does in
+[`iSAM2::marginalizeLeaves`](https://gtsam.org/doxygen/a04340.html#a321fb6f90eb0035ef8e5bb383f8da4a2).
+
+
+### The Problem with iSAM2's Marginalization
+
+> Marginalization leaves a linear approximation of the marginal in the system,
+> and the linearization points of any variables involved in this linear marginal
+> become fixed.
+> 
+> The set fixed variables will include any key involved with the
+> marginalized variables in the original factors, and possibly additional ones
+> due to fill-in.
+
+which means that when a varialble \f$ X_k \f$ becomes marginalized
+during `IncrementalFixedLagSmoother::update`, all other variables
+in the markov blanket (i.e. associated through LiDAR factors) **will
+be locked**.
+
+While this design decision makes sense for long runing factor graphs
+(e.g. when not using a sliding window), this is detrimental to the
+odometry process.
+Due to the fact that LiDAR cluster factors often associate with
+(almost) the entire sliding window, marginalizing this way would mean
+that that essentially the entire window would become locked, and new
+variables will not have time to mature over multiple optimizer passes.
+
+### The Workaround used in this project.
+
+The workaround is to update the factors by separating out the variable that will be marginalized in the *next* `update()` call and creating a
+custom marginalization-factor that is a `NonLinearContainerFactor`
+around a `JacobianFactor` with fixed nonlinear residual \f$ r_{j}
+(X_{k}) \f$ which is created from 
+`mapping:PointToPlaneFactor::createMarginalizationFactor()`, which is
+one prior for each cluster the variable is associated with.
+These will then be amalgamated into a Hessian factor by iSAM2
+internally and serve to provide a stronger prior to the
+marginalization process itself.
+
+Removing the variable associations from the cluster but *not* creating
+the marginalization priors would lead to a weak marginalization which
+makes drift worse, as the IMU preintegration factor connected to
+\f$ X_{k} \f$ would then serve as the only prior information.
+
+
+### The Marginalization Process
+
 
 For each keyframe older than `idxKeyframe - sliding_window_size`:
 

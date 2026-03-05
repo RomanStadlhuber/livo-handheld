@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup system
 #pragma once
 
 #ifndef MAPPING_MAPPINGSYSTEM_HPP_
@@ -16,6 +18,7 @@
 
 namespace mapping
 {
+    /// @ingroup system
     /// @brief LiDAR-Inertial Odometry and Mapping System
     /// @details Orchestrates IMU preintegration, LiDAR scan processing,
     /// keyframe management, and factor graph optimization using a fixed-lag smoother.

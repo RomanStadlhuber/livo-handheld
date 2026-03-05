@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup backend_features
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/helpers.hpp> // planeFitSVD
 

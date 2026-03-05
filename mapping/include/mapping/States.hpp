@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup states
 #pragma once
 
 #ifndef MAPPING_STATES_HPP_

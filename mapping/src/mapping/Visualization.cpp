@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup system
 #include <Visualization.hpp>
 
 namespace mapping

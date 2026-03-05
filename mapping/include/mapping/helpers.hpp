@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup helpers
 #pragma once
 
 #ifndef MAPPING_HELPERS_HPP_

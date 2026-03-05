@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup backend_smoother
 #pragma once
 
 #ifndef MAPPING_BACKEND_SMOOTHER_HPP_

@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup frontend_imu
 #pragma once
 
 #ifndef MAPPING_FRONTEND_IMUFRONTEND_HPP_

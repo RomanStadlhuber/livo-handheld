@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup system
 #pragma once
 
 #ifndef MAPPING_VISUALIZATION_HPP_
@@ -13,6 +15,7 @@
 
 namespace mapping
 {
+    /// @ingroup system
     class Visualization
     {
     public:

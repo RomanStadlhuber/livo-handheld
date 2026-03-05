@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup factors
 #include <mapping/factors/PointToPlaneFactor.hpp>
 
 #include <gtsam/base/Matrix.h>

@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup backend_smoother
 #include <mapping/backend/Smoother.hpp>
 
 namespace mapping

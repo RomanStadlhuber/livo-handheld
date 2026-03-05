@@ -21,6 +21,28 @@ cd /ros2_ws/src/livo/mapping/docs/output/html && python3 -m http.server 8080
 
 The identifiers in parentheses are the Doxygen group IDs used with `@ingroup`.
 
+### Adding a new file to an existing module
+
+Every `.hpp` and `.cpp` file must have `/// @file` and `/// @ingroup <group_id>` at
+the very top (before `#pragma once` or `#include`). This makes the file appear under
+its module in the Modules tab instead of the (hidden) Files tab:
+
+```cpp
+/// @file
+/// @ingroup frontend_imu
+#pragma once
+// ...
+```
+
+For `.cpp` files:
+
+```cpp
+/// @file
+/// @ingroup frontend_imu
+#include <mapping/frontend/ImuFrontend.hpp>
+// ...
+```
+
 ### Adding a class or struct to an existing module
 
 Place `/// @ingroup <group_id>` directly above the class or struct definition.
@@ -118,14 +140,19 @@ Link it from `docs/pages/mainpage.md`:
 - @subpage my_new_page -- Short description
 ```
 
-### Important caveats (Doxygen 1.9.1)
+### Doxygen version
 
-- **Use `@ingroup` on each entity**, not `@{` / `@}` scope markers. The scope
-  marker approach does not associate classes with groups in Doxygen 1.9.1.
-- **Use `\f$` for math in `.md` files**, not `@f$`. The `@f$` form does not
-  render correctly in Markdown pages with this Doxygen version.
-- **Avoid `\lvert` / `\rvert`** in math — use `\left|` / `\right|` instead
-  (MathJax v2 compatibility).
+The project uses **Doxygen 1.13.2**, built from source in the Dockerfile
+(`Dockerfile.mapping`). The Ubuntu 22.04 apt package ships 1.9.1 which has
+several broken features (e.g. `GROUP_NESTED_COMPOUNDS`, missing MathJax v3
+support). Do **not** downgrade to the apt version.
+
+### Important caveats
+
+- **Use `@ingroup` on each entity**, not `@{` / `@}` scope markers. This is
+  explicit and works across all Doxygen versions.
+- **Use `\f$` for math in `.md` files** (e.g. `\f$ x^2 \f$`). The `@f$` form
+  also works in modern Doxygen but `\f$` is preferred for consistency.
 - **`docs/output/` is gitignored** — only source files under `docs/` are tracked.
 
 ## Profiling with `gperftools`

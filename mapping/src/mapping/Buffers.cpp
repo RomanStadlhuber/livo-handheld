@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup buffers
 #include <mapping/Buffers.hpp>
 
 namespace mapping

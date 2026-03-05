@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup frontend_lidar
 #include <mapping/frontend/LidarFrontend.hpp>
 #include <mapping/helpers.hpp> // planeFitSVD
 

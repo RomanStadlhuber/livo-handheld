@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup factors
 #pragma once
 
 #ifndef MAPPING_FACTORS_POINTTOPLANEFACTOR_HPP_

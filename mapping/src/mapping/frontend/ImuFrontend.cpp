@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup frontend_imu
 #include <mapping/frontend/ImuFrontend.hpp>
 #include <mapping/helpers.hpp> // Scan2PCD
 

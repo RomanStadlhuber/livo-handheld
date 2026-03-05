@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup states
 #include <mapping/States.hpp>
 
 namespace mapping

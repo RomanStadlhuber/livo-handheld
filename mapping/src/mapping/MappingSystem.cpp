@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup system
 #include <mapping/MappingSystem.hpp>
 #include <mapping/helpers.hpp>
 

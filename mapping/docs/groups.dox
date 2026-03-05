@@ -45,3 +45,6 @@
 /// @defgroup helpers Helpers
 /// @ingroup core
 /// @brief Utility functions for point cloud conversion and plane fitting.
+
+/// @defgroup system System
+/// @brief Top-level orchestration and ROS visualization.
