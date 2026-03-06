@@ -14,6 +14,7 @@
 
 namespace mapping
 {
+    /// @ingroup frontend_recovery
     /// @brief Frontend specifically used for recovreing from tracking failure.
     /// Aims to produce a pose/state estimate that can be used to reset the smoother and reinitialize the frontend.
     class RecoveryFrontend

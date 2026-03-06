@@ -27,6 +27,7 @@ Where \f$r_{j}\f$ is the residual of the \f$ j \f$ _-th_ cluster with respect to
 
 - @subpage cluster_tracking -- Planar feature tracking across keyframes
 - @subpage backend_isam2 -- iSAM2 configuration, update cycle, and marginalization
+- @subpage recovery -- Full state recovery on tracking loss.
 - @subpage core_structure -- Buffers, state management, and data flow
 
 ## Building the Documentation

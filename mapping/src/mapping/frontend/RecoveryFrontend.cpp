@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup frontend_recovery
 #include <mapping/frontend/RecoveryFrontend.hpp>
 
 namespace mapping

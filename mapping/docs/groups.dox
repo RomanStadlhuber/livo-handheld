@@ -9,6 +9,10 @@
 /// @ingroup frontend
 /// @brief LiDAR scan accumulation and cluster tracking.
 
+/// @defgroup frontend_recovery Recovery Frontend
+/// @ingroup frontend
+/// @brief Full state recovery on tracking loss.
+
 /// @defgroup backend Backend
 /// @brief Factor graph optimization and feature management.
 
