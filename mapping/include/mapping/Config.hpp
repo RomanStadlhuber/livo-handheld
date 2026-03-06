@@ -19,9 +19,9 @@ namespace mapping
     {
         size_t min_points = 5;
         size_t max_points = 20;
-        double max_plane_thickness = 0.1; // [m]
-        double sampling_voxel_size = 2.5; // [m], voxel size to use when supplementing new clusters
-        uint32_t insert_lag = 2;          // keyframe delay to use when inserting new clusters from keyframes
+        double max_plane_thickness = 0.1;          // [m]
+        double sampling_voxel_size = 2.5;          // [m], voxel size to use when supplementing new clusters
+        uint32_t insert_lag = 2;                   // keyframe delay to use when inserting new clusters from keyframes
         double normal_consistency_threshold = 0.9; // [0-1], accepting new points based updated normal consistency
     };
 
@@ -112,6 +112,29 @@ namespace mapping
         check(config.isam2_relinearize_threshold, GT, 0.0, "isam2_relinearize_threshold");
     }
 
+    /// @brief Recovery frontend parameters
+    struct RecoveryConfig
+    {
+        double voxel_size = 0.2;           // [m], voxel size to use for recovery reference point cloud
+        size_t reference_window_size = 10; // [keyframes], number of keyframes to use for recovery reference
+        size_t reference_lag = 2;          // keyframe delay to use for recovery reference
+        size_t icp_iterations = 50;
+    };
+
+    inline void declare_config(RecoveryConfig &config)
+    {
+        using namespace config;
+        name("RecoveryConfig");
+        field(config.voxel_size, "voxel_size", "m");
+        field(config.reference_window_size, "reference_window_size", "keyframes");
+        field(config.reference_lag, "reference_lag", "keyframes");
+        field(config.icp_iterations, "icp_iterations");
+        check(config.voxel_size, GT, 0.0, "voxel_size");
+        check(config.reference_window_size, GT, 1, "reference_window_size");
+        check(config.reference_lag, GT, 0, "reference_lag");
+        check(config.icp_iterations, GT, 1, "icp_iterations");
+    }
+
     /// @brief Point cloud filtering parameters
     struct PointFilterConfig
     {
@@ -175,6 +198,7 @@ namespace mapping
         LidarFrontendConfig lidar_frontend;
         PointFilterConfig point_filter;
         ExtrinsicsConfig extrinsics;
+        RecoveryConfig recovery;
     };
 
     inline void declare_config(MappingConfig &config)

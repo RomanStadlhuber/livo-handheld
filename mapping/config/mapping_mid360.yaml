@@ -21,6 +21,12 @@ lidar_frontend:
     thresh_angle: 0.175 # [rad], ~10 degrees
     thresh_elapsed_scans: 5
 
+recovery:
+  voxel_size: 0.2 # [m], voxel size to use for recovery reference point cloud
+  reference_window_size: 10 # [keyframes], number of keyframes to use for recovery reference
+  reference_lag: 2 # keyframe delay to use for recovery reference
+  icp_iterations: 50
+
 point_filter:
   min_distance: 2.5 # [m]
   max_distance: 100.0 # [m]
