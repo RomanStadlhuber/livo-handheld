@@ -26,6 +26,7 @@ recovery:
   reference_window_size: 10 # [keyframes], number of keyframes to use for recovery reference
   reference_lag: 2 # keyframe delay to use for recovery reference
   icp_iterations: 50
+  max_correspondence_distance: 0.05 # [m], max. dist. for point-to-plane ICP correspondences
 
 point_filter:
   min_distance: 2.5 # [m]

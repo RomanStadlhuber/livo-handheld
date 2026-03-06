@@ -64,10 +64,10 @@ namespace mapping
         // estimate recovery alignment with ICP, see example here:
         // https://www.open3d.org/docs/release/tutorial/pipelines/icp_registration.html
         open3d::pipelines::registration::RegistrationResult icpResult = open3d::pipelines::registration::RegistrationICP(
-            *ptrPcdQuery,           // source (to align)
-            *ptrPcdRef,             // target (reference)
-            0.02,                   // max. correspondence distance
-            w_T_lRecovery.matrix(), // alignment initial guess
+            *ptrPcdQuery,                                // source (to align)
+            *ptrPcdRef,                                  // target (reference)
+            config.recovery.max_correspondence_distance, // for picking point to plane correspondences
+            w_T_lRecovery.matrix(),                      // alignment initial guess
             /*method=*/open3d::pipelines::registration::TransformationEstimationPointToPlane(),
             icpSettings);
         gtsam::Pose3 w_T_l_icpOut{icpResult.transformation_};

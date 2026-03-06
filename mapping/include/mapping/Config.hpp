@@ -118,7 +118,8 @@ namespace mapping
         double voxel_size = 0.2;           // [m], voxel size to use for recovery reference point cloud
         size_t reference_window_size = 10; // [keyframes], number of keyframes to use for recovery reference
         size_t reference_lag = 2;          // keyframe delay to use for recovery reference
-        size_t icp_iterations = 50;
+        int icp_iterations = 50;
+        double max_correspondence_distance = 0.05; // [m], for validating point-to-plane ICP correspondences
     };
 
     inline void declare_config(RecoveryConfig &config)
@@ -129,10 +130,12 @@ namespace mapping
         field(config.reference_window_size, "reference_window_size", "keyframes");
         field(config.reference_lag, "reference_lag", "keyframes");
         field(config.icp_iterations, "icp_iterations");
+        field(config.max_correspondence_distance, "max_correspondence_distance", "m");
         check(config.voxel_size, GT, 0.0, "voxel_size");
         check(config.reference_window_size, GT, 1, "reference_window_size");
         check(config.reference_lag, GT, 0, "reference_lag");
         check(config.icp_iterations, GT, 1, "icp_iterations");
+        check(config.max_correspondence_distance, GT, 0.0, "max_correspondence_distance");
     }
 
     /// @brief Point cloud filtering parameters
@@ -209,6 +212,7 @@ namespace mapping
         field(config.lidar_frontend, "lidar_frontend");
         field(config.point_filter, "point_filter");
         field(config.extrinsics, "extrinsics");
+        field(config.recovery, "recovery");
     }
 
 } // namespace mapping
