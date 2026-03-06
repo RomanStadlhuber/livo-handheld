@@ -63,18 +63,29 @@ namespace mapping
         case SystemState::Recovery:
         {
             const uint32_t idxKfRecovery = states_.getLatestKeyframeIdx();
-            // the initialization state from recovery
+
+            // the initialization state from recovery (pose + velocity)
             gtsam::NavState w_X_recovery = RecoveryFrontend::estimateRecoveryState(states_, config_);
+
+            // reset all components
+            featureManager_.reset();
+            states_.reset(w_X_recovery);
+            buffers_.reset();
+
+            // rebuild smoother with new graph anchored at recovery keyframe
             smoother_.reset(config_);
             gtsam::imuBias::ConstantBias bPrior = states_.getCurrentBias();
             gtsam::NonlinearFactorGraph priors = constructSystemPriors(
                 idxKfRecovery, w_X_recovery, bPrior);
             smoother_.setPriors(idxKfRecovery, priors, w_X_recovery, bPrior);
-            /**
-             * TODO:
-             * - reset Buffers, States and FeatureManager
-             * - construct new clusters for current keyframe, similar to initialization
-             */
+
+            // reset preintegrator with current bias estimate
+            imuFrontend_.resetPreintegrator(states_);
+            // bootstrap new clusters from recovery keyframe submap
+            featureManager_.createNewClusters(states_, idxKfRecovery, /*voxelSize=*/0);
+            // resume tracking
+            states_.setLifecycleState(SystemState::Tracking);
+            break;
         }
         }
     }
@@ -356,7 +367,7 @@ namespace mapping
 
     uint32_t MappingSystem::getKeyframeCount() const
     {
-        return states_.getLatestKeyframeIdx();
+        return states_.getKeyframeCount();
     }
 
     std::vector<std::shared_ptr<open3d::geometry::PointCloud>> MappingSystem::getMarginalizedSubmaps()
