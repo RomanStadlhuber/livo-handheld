@@ -94,7 +94,7 @@ Validity checks:
 
 Plane thickness (used as a noise proxy):
 \f[
-  t = \frac{1}{N} \sum_{i=1}^{N} \bigl(\mathbf{n}^\top (\mathbf{p}_i - \mathbf{c})\bigr)^2
+  \Gamma_{\text{fit}} = \frac{1}{N} \sum_{i=1}^{N} \bigl(\mathbf{n}^\top (\mathbf{p}_i - \mathbf{c})\bigr)^2
 \f]
 
 
@@ -110,7 +110,7 @@ KNN pipeline), a **local plane thickness** \f$ t_k \f$ is computed from the KNN
 plane fit on the adjacent points in that keyframe's submap:
 
 \f[
-  t_k = \frac{1}{N_{\text{KNN}}} \sum_{i=1}^{N_{\text{KNN}}}
+  \Gamma_k = \frac{1}{N_{\text{KNN}}} \sum_{i=1}^{N_{\text{KNN}}}
     \bigl(\mathbf{n}_{\text{KNN}}^\top (\mathbf{p}_i - \mathbf{c}_{\text{KNN}})\bigr)^2
 \f]
 
@@ -121,10 +121,10 @@ thickness observations.
 
 ### Cluster thickness from history
 
-The overall cluster thickness is the mean of the squared per-track measurements:
+The overall thickness of the \f$ j \f$ *-th* cluster is the mean of the squared historical measurements:
 
 \f[
-  \Gamma = \frac{1}{K} \sum_{k=1}^{K} t_k^2
+  \Gamma_{j} = \frac{1}{K} \sum_{k=1}^{K} \Gamma_k^2
 \f]
 
 where \f$ K \f$ is the number of entries in the thickness history. This
@@ -141,7 +141,7 @@ sliding window.
 The cluster sigma used in the `PointToPlaneFactor` noise model is:
 
 \f[
-  \sigma_{\text{cluster}} = \bigl(0.5 \cdot \Gamma\,\bigr)^{1/4}
+  \sigma_{\text{cluster}} = \bigl(0.5 \cdot \Gamma_j\,\bigr)^{1/4}
 \f]
 
 This fourth-root mapping ensures that:
