@@ -57,6 +57,42 @@ namespace mapping
         return markovBlanket;
     }
 
+    void States::reset(const gtsam::NavState &recoveryState)
+    {
+        const uint32_t idxRecovery = keyframeCounter_ - 1;
+
+        // archive all keyframe submaps except the recovery keyframe
+        if (collectMarginalizedSubmaps_)
+        {
+            for (auto &[idx, ptrSubmap] : keyframeSubmaps_)
+            {
+                if (idx != idxRecovery)
+                    marginalizedSubmaps_.push_back(ptrSubmap);
+            }
+        }
+
+        // preserve recovery keyframe data
+        auto recoverySubmap = keyframeSubmaps_.at(idxRecovery);
+        auto recoveryPose = keyframePoses_.at(idxRecovery);
+        double recoveryTimestamp = keyframeTimestamps_.at(idxRecovery);
+
+        // clear all keyframe maps and re-insert only the recovery keyframe
+        keyframeSubmaps_.clear();
+        keyframePoses_.clear();
+        keyframeTimestamps_.clear();
+
+        keyframeSubmaps_[idxRecovery] = recoverySubmap;
+        keyframePoses_[idxRecovery] = recoveryPose;
+        keyframeTimestamps_[idxRecovery] = recoveryTimestamp;
+
+        // reset navigation state to recovery estimate
+        w_X_curr_ = recoveryState;
+        w_X_preint_ = recoveryState;
+
+        // clear stale smoother estimate (graph was reset)
+        smootherEstimate_ = gtsam::Values();
+    }
+
     std::vector<std::shared_ptr<open3d::geometry::PointCloud>> States::getMarginalizedSubmaps()
     {
         std::vector<std::shared_ptr<open3d::geometry::PointCloud>> submaps;

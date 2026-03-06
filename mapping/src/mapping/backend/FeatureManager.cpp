@@ -6,6 +6,21 @@
 namespace mapping
 {
 
+    void FeatureManager::reset()
+    {
+        clusters_.clear();
+        clusterPlaneThicknessHistory_.clear();
+        clusterPlaneThickness_.clear();
+        clusterSigmas_.clear();
+        clusterStates_.clear();
+        clusterCenters_.clear();
+        clusterNormals_.clear();
+        clusterFactors_.clear();
+        clusterIdCounter_ = 0;
+        newSmootherFactors_ = gtsam::NonlinearFactorGraph();
+        factorsToRemove_.clear();
+    }
+
     void FeatureManager::createNewClusters(const States &states, const uint32_t &idxKeyframe, double voxelSize)
     {
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();

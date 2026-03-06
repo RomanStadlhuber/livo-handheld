@@ -16,6 +16,15 @@ namespace mapping
         lidarBuffer_[timestamp] = lidar_data;
     }
 
+    void Buffers::reset()
+    {
+        std::lock_guard<std::mutex> lockImu(mtxImuBuffer_);
+        std::lock_guard<std::mutex> lockLidar(mtxLidarBuffer_);
+        imuBuffer_.clear();
+        lidarBuffer_.clear();
+        scanBuffer_.clear();
+    }
+
     void Buffers::bufferScan(
         const gtsam::Pose3 &scanPoseToLastKeyframe,
         std::shared_ptr<open3d::geometry::PointCloud> pcdScan)

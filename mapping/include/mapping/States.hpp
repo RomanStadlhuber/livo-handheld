@@ -70,7 +70,8 @@ namespace mapping
         gtsam::Pose3 &getImuToLidarExtrinsic() const { return imu_T_lidar_; };
 
         std::map<uint32_t, double> &getKeyframeTimestamps() const { return keyframeTimestamps_; };
-        const uint32_t &getLatestKeyframeIdx() const { return keyframeCounter_; };
+        uint32_t getLatestKeyframeIdx() const { return keyframeCounter_ - 1; };
+        uint32_t getKeyframeCount() const { return keyframeCounter_; };
 
         gtsam::Pose3 &lastKeyframePose() const { return *keyframePoses_.rbegin()->second; };
         const double &lastKeyframeTimestamp() const { return keyframeTimestamps_.rbegin()->second; };
@@ -87,6 +88,9 @@ namespace mapping
         /// @param idxMarginalize Index of the keyframe to be marginalized, lower bound for MB.
         /// @param idxKeyframe Index of the current keyframe, upper bound for MB.
         gtsam::Values getMarkovBlanketForKeyframe(const uint32_t idxMarginalize, const uint32_t &idxKeyframe) const;
+
+        /// @brief Reset all sliding-window state for recovery, re-anchoring at the given keyframe.
+        void reset(const gtsam::NavState &recoveryState);
 
         /// -- archive & obtain marginalized submaps (for visualization purposes only) ---
 

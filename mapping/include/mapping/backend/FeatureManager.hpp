@@ -76,6 +76,9 @@ namespace mapping
             const States &states,
             const gtsam::NonlinearFactorGraph &currentSmootherFactors);
 
+        /// @brief Clear all clusters and factor bookkeeping.
+        void reset();
+
         /// @brief Shorthand check for whether a cluster is valid (= tracking or idle).
         bool isClusterValid(const ClusterId &clusterId) const
         {

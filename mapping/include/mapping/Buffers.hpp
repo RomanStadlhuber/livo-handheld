@@ -49,6 +49,9 @@ namespace mapping
         std::map<double, std::shared_ptr<LidarData>> &getLidarBuffer() { return lidarBuffer_; };
         std::list<ScanBuffer> &getScanBuffer() { return scanBuffer_; };
 
+        /// @brief Discard all buffered sensor data.
+        void reset();
+
         /// @brief The number of scans that have elapsed since the last keyfarme w
         /// @return
         std::size_t numScansSinceLastKeyframe() const { return scanBuffer_.size(); };
