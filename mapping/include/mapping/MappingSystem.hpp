@@ -11,6 +11,7 @@
 #include <mapping/States.hpp>
 #include <mapping/frontend/ImuFrontend.hpp>
 #include <mapping/frontend/LidarFrontend.hpp>
+#include <mapping/frontend/RecoveryFrontend.hpp>
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/backend/Smoother.hpp>
 
@@ -84,6 +85,25 @@ namespace mapping
         /// are created before the smoother update.
         /// @param idxKeyframe Index of the current (newly created) keyframe.
         void marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe);
+
+        /// @brief Construct priors for initializing the Smoother.
+        ///
+        /// This will construct the part of the factor graph that fixes the prior state
+        /// `X`, `V` and bias `B`.
+        ///
+        /// NOTE: in the case of system recovery, it still makes sense to use the last available bias estimate,
+        /// while the pose and velocity will be recovered by the `RelocalizationFrontend`.
+        /// 
+        /// USAGE: Use the returned `gtsam::NonlinearFactorGraph priors` with `smoother_.setPriors(idxKeyframe, priors, xPrior, bPrior);`.
+        /// @param idxKeyframe Index of the initialization keyframe.
+        /// @param xPrior Initial navigation state prior, obtained from static initialization or recovery.
+        /// @param bPrior Initial bias estimate, obtained from initialization or,
+        /// in case cf recovery, from the last available estimate.
+        /// @return Factor graph that fixes the state prior.
+        gtsam::NonlinearFactorGraph constructSystemPriors(
+            const uint32_t &idxKeyframe,
+            const gtsam::NavState &xPrior,
+            const gtsam::imuBias::ConstantBias &bPrior) const;
 
         // subsystem instances
         Buffers buffers_;

@@ -62,9 +62,19 @@ namespace mapping
         }
         case SystemState::Recovery:
         {
-            std::cout << "::: [ERROR] tracking lost. recovery not implemented, shutting down :::" << std::endl;
-            // std::raise(SIGINT);
-            return;
+            const uint32_t idxKfRecovery = states_.getLatestKeyframeIdx();
+            // the initialization state from recovery
+            gtsam::NavState w_X_recovery = RecoveryFrontend::estimateRecoveryState(states_, config_);
+            smoother_.reset(config_);
+            gtsam::imuBias::ConstantBias bPrior = states_.getCurrentBias();
+            gtsam::NonlinearFactorGraph priors = constructSystemPriors(
+                idxKfRecovery, w_X_recovery, bPrior);
+            smoother_.setPriors(idxKfRecovery, priors, w_X_recovery, bPrior);
+            /**
+             * TODO:
+             * - reset Buffers, States and FeatureManager
+             * - construct new clusters for current keyframe, similar to initialization
+             */
         }
         }
     }
@@ -141,23 +151,11 @@ namespace mapping
 
         // modifies imuFrontend_: calibrates preintegrator noise and resets with computed bias
         imuFrontend_.initializeFromStatic(accVariance, gyroVariance, gyroBiasMean);
-
-        // build prior factors for the first keyframe
         gtsam::imuBias::ConstantBias priorImuBias{Eigen::Vector3d::Zero(), gyroBiasMean};
-        gtsam::NonlinearFactorGraph priors;
-        gtsam::Vector6 priorPoseSigma;
-        priorPoseSigma << 0.0175, 0.0175, 0.0873, 0.1, 0.1, 0.1; // rpy xyz
-        priors.addPrior(X(idxNewKF), w_T_i0, gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
-        priors.addPrior(V(idxNewKF), gtsam::Vector3(gtsam::Vector3::Zero()), gtsam::noiseModel::Isotropic::Sigma(3, 1e-2));
-        const gtsam::noiseModel::Diagonal::shared_ptr biasPriorNoise =
-            gtsam::noiseModel::Diagonal::Sigmas(
-                (gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.1, 0.1, 0.1).finished());
-        priors.addPrior(B(idxNewKF), priorImuBias, biasPriorNoise);
-
-        // modifies smoother_: buffers priors, initial values and timestamps for first update
         gtsam::NavState x0{w_T_i0, gtsam::Vector3::Zero()};
+        // build prior factors for the first keyframe
+        gtsam::NonlinearFactorGraph priors = constructSystemPriors(idxNewKF, x0, priorImuBias);
         smoother_.setPriors(idxNewKF, priors, x0, priorImuBias);
-
         // set initial navigation state
         states_.setCurrentState(x0);
         states_.setPreintegrationRefState(x0);
@@ -283,6 +281,22 @@ namespace mapping
             }
             idxMarginalize++;
         }
+    }
+
+    gtsam::NonlinearFactorGraph MappingSystem::constructSystemPriors(
+        const uint32_t &idxKeyframe,
+        const gtsam::NavState &xPrior,
+        const gtsam::imuBias::ConstantBias &bPrior) const
+    {
+        gtsam::NonlinearFactorGraph priors;
+        gtsam::Vector6 priorPoseSigma;
+        priorPoseSigma << 0.0175, 0.0175, 0.0873, 0.1, 0.1, 0.1; // rpy xyz
+        priors.addPrior(X(idxKeyframe), xPrior.pose(), gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
+        priors.addPrior(V(idxKeyframe), xPrior.velocity(), gtsam::noiseModel::Isotropic::Sigma(3, 1e-2));
+        const gtsam::noiseModel::Diagonal::shared_ptr biasPriorNoise =
+            gtsam::noiseModel::Diagonal::Sigmas(1e-3 * gtsam::Vector6::Ones());
+        priors.addPrior(B(idxKeyframe), bPrior, biasPriorNoise);
+        return priors;
     }
 
     // --- public query methods ---
