@@ -144,11 +144,7 @@ The cluster sigma used in the `PointToPlaneFactor` noise model is:
   \sigma_{\text{cluster}} = \bigl(0.5 \cdot \Gamma_j\,\bigr)^{1/4}
 \f]
 
-This fourth-root mapping ensures that:
-- Well-fitting planes (\f$ \Gamma \f$ small) get a tight noise model, pulling
-  the optimizer strongly toward the plane constraint.
-- Rough or uncertain planes (\f$ \Gamma \f$ large) get a looser noise model,
-  reducing their influence on the solution.
+which is based on Eq. *(19)* from the [MSC-LIO](https://arxiv.org/abs/2407.07589) paper.
 
 The resulting \f$ \sigma_{\text{cluster}} \f$ is wrapped in an isotropic noise
 model with a Geman-McClure robust kernel (\f$ c = 1.0 \f$), which further
