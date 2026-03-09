@@ -95,8 +95,7 @@ namespace mapping
         for (std::size_t updateIters = 1; updateIters < config.backend.solver_iterations; updateIters++)
             smoother_.update();
         // calculate the estimate and update the shared state container
-        // currently this is just matching legacy behavior,
-        // TODO: in the future, states should have only one "values" member and the rest is getters...
+        // currently this is just matching legacy behavior
         states.setSmootherEstimate(smoother_.calculateEstimate());
         states.setCurrentState(gtsam::NavState(
             states.getSmootherEstimate().at(X(idxKeyframe)).cast<gtsam::Pose3>(),

@@ -124,8 +124,8 @@ namespace mapping
                     }
                 }
                 removePointFromCluster(clusterId, idxKeyframe, /*firstInHistory=*/true); // remove point and thickness history entry
-                if (clusterPoints.size() < 3)
-                { // TODO: use min-points size or 3?
+                if (clusterPoints.size() < 3) // NOTE: 3 points as the minimum to fit a plane
+                {
                     // NOTE: Do NOT call factor->remove() here, since the smoother won't re-key factors
                     clusterStates_[clusterId] = ClusterState::Pruned;
                 }
