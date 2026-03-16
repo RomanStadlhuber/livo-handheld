@@ -5,29 +5,34 @@
 namespace mapping
 {
     uint32_t States::createKeyframeSubmap(
-        const gtsam::Pose3 &world_T_lidar,
+        const gtsam::Pose3 &world_T_imu,
         double keyframeTimestamp,
         std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap)
     {
         // Increment keyframe counter
         const uint32_t idxNewKf = keyframeCounter_++;
 
+        const gtsam::Pose3 world_T_lidar = world_T_imu.compose(imu_T_lidar_);
         // Transform submap to its estimated pose in the world frame
         ptrKeyframeSubmap->Transform(world_T_lidar.matrix());
         keyframeSubmaps_[idxNewKf] = ptrKeyframeSubmap;
         keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_lidar);
+        keyframeImuPoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_imu);
         keyframeTimestamps_[idxNewKf] = keyframeTimestamp;
         return idxNewKf;
     }
 
-    void States::updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &w_T_l)
+    void States::updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &world_T_imu)
     {
+        // imu_T_lidar_ is the optimised extrinsic at this point (Smoother reads it back before calling here)
+        const gtsam::Pose3 world_T_lidar = world_T_imu.compose(imu_T_lidar_);
         // let D be the delta that needs to be left-applied via Open3D's transform
         // D * T1 = T2 | (...) * T1^-1
         // => D = T2 * T1^-1
-        const gtsam::Pose3 deltaPose = w_T_l.compose(keyframePoses_[keyframeIdx]->inverse());
+        const gtsam::Pose3 deltaPose = world_T_lidar.compose(keyframePoses_[keyframeIdx]->inverse());
         keyframeSubmaps_[keyframeIdx]->Transform(deltaPose.matrix());
-        keyframePoses_[keyframeIdx] = std::make_shared<gtsam::Pose3>(w_T_l);
+        keyframePoses_[keyframeIdx] = std::make_shared<gtsam::Pose3>(world_T_lidar);
+        keyframeImuPoses_[keyframeIdx] = std::make_shared<gtsam::Pose3>(world_T_imu);
     }
 
     void States::removeKeyframe(const uint32_t idxKeyframe)
@@ -36,6 +41,7 @@ namespace mapping
             marginalizedSubmaps_.push_back(keyframeSubmaps_[idxKeyframe]);
         keyframeSubmaps_.erase(idxKeyframe);
         keyframePoses_.erase(idxKeyframe);
+        keyframeImuPoses_.erase(idxKeyframe);
         keyframeTimestamps_.erase(idxKeyframe);
     }
 
@@ -79,15 +85,18 @@ namespace mapping
         // preserve recovery keyframe data
         auto recoverySubmap = keyframeSubmaps_.at(idxRecovery);
         auto recoveryPose = keyframePoses_.at(idxRecovery);
+        auto recoveryImuPose = keyframeImuPoses_.at(idxRecovery);
         double recoveryTimestamp = keyframeTimestamps_.at(idxRecovery);
 
         // clear all keyframe maps and re-insert only the recovery keyframe
         keyframeSubmaps_.clear();
         keyframePoses_.clear();
+        keyframeImuPoses_.clear();
         keyframeTimestamps_.clear();
 
         keyframeSubmaps_[idxRecovery] = recoverySubmap;
         keyframePoses_[idxRecovery] = recoveryPose;
+        keyframeImuPoses_[idxRecovery] = recoveryImuPose;
         keyframeTimestamps_[idxRecovery] = recoveryTimestamp;
 
         // reset navigation state to recovery estimate

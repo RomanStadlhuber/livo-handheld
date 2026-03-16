@@ -27,20 +27,21 @@ namespace mapping
         SystemState getLifecycleState() const { return systemState_; };
 
         /// @brief Store new keyframe submap and initialized pose
-        /// @param keyframePose Pose of the keyframe in world frame
+        /// @param world_T_imu IMU pose of the keyframe in world frame
         /// @param keyframeTimestamp Timestamp of the keyframe
         /// @param ptrKeyframeSubmap Pointcloud of the keyframe submap
         /// @return Index of the newly created keyframe
         uint32_t createKeyframeSubmap(
-            const gtsam::Pose3 &keyframePose,
+            const gtsam::Pose3 &world_T_imu,
             double keyframeTimestamp,
             std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap);
 
-        /// @brief Update a keyframe's submap to a new world pose
-        /// @details Will internally compute the left-applied pose delta `w_dT_w * w_pts_l`.
+        /// @brief Update a keyframe's submap to a new optimised IMU pose.
+        /// @details Derives the LiDAR pose internally via the current extrinsic calibration,
+        /// computes the left-applied delta for the submap pointcloud, and stores both poses.
         /// @param keyframeIdx Index of the keyframe to update
-        /// @param w_T_l New pose in world frame
-        void updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &w_T_l);
+        /// @param world_T_imu Updated IMU pose in world frame
+        void updateKeyframeSubmapPose(uint32_t keyframeIdx, const gtsam::Pose3 &world_T_imu);
 
         /// @brief Remove a keyframe (submap, pose, timestamp).
         void removeKeyframe(const uint32_t idxKeyframe);
@@ -81,6 +82,10 @@ namespace mapping
 
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &getKeyframeSubmaps() const { return keyframeSubmaps_; };
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &getKeyframePoses() const { return keyframePoses_; };
+        /// @brief IMU frame poses (w_T_imu) for each keyframe in the sliding window.
+        /// Updated at keyframe creation (propagated estimate) and after each smoother update (optimised estimate).
+        /// Use these for twist computation in temporal calibration instead of inverting the extrinsic from the LiDAR poses.
+        std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &getKeyframeImuPoses() const { return keyframeImuPoses_; };
 
         const gtsam::Values &getSmootherEstimate() const { return smootherEstimate_; };
         void setSmootherEstimate(const gtsam::Values &newEstimate) { smootherEstimate_ = newEstimate; };
@@ -116,6 +121,7 @@ namespace mapping
         // map data
         mutable std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
+        mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframeImuPoses_;
         mutable std::map<uint32_t, double> keyframeTimestamps_;
         /// @brief whether to keep marginalized submap PCDs for visualization interfaces.
         bool collectMarginalizedSubmaps_ = false;
