@@ -65,11 +65,17 @@ namespace mapping
         /// which is needed by the FeatureManager for factor removal, replacements & marginalization.
         const gtsam::NonlinearFactorGraph &getFactors() const {return smoother_.getFactors();};
 
+        /// @brief Insert initial calibration values, timestamps, and priors into the smoother buffers.
+        void setCalibrationPriors(const MappingConfig &config, const gtsam::Pose3 &initialExtrinsic);
+
     private:
         // shorthand indicator on whether to add priors before the update pass
         bool hasPriors() const { return !initialPriors_.empty(); };
 
     private:
+        bool temporalCalibrationEnabled_{false};
+        bool extrinsicCalibrationEnabled_{false};
+
         /// @brief The GTSAM fixed lag smoother instance (based on iSAM2).
         gtsam::IncrementalFixedLagSmoother smoother_;
         // buffer for initial state values, prior factors and timestamps to add on the first update pass

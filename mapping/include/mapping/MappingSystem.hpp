@@ -70,6 +70,11 @@ namespace mapping
         /// Disabled by default to avoid unbounded memory growth in headless mode.
         void setCollectMarginalizedSubmaps(bool enable);
 
+        /// @brief Get the current (possibly optimized) IMU-to-LiDAR extrinsic calibration.
+        gtsam::Pose3 getImuToLidarExtrinsic() const { return states_.getImuToLidarExtrinsic(); }
+        /// @brief Get the current (possibly optimized) temporal offset [s].
+        double getTemporalOffset() const { return states_.getTemporalOffset(); }
+
     private:
         /// @brief Static state (assumption-based) system initialization.
         /// @details Uses all IMU measurements up to the first LiDAR timestamp

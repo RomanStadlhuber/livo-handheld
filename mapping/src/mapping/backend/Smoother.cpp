@@ -21,6 +21,8 @@ namespace mapping
         initialValues_.clear();
         initialSmootherIndices_.clear();
         bootstrapped_ = false;
+        temporalCalibrationEnabled_ = config.extrinsics.temporal_calibration_enabled;
+        extrinsicCalibrationEnabled_ = config.extrinsics.extrinsic_calibration_enabled;
     }
 
     void Smoother::setPriors(
@@ -41,6 +43,28 @@ namespace mapping
         initialSmootherIndices_[X(idxKeyframe)] = 0.0;
         initialSmootherIndices_[V(idxKeyframe)] = 0.0;
         initialSmootherIndices_[B(idxKeyframe)] = 0.0;
+    }
+
+    void Smoother::setCalibrationPriors(const MappingConfig &config, const gtsam::Pose3 &initialExtrinsic)
+    {
+        if (config.extrinsics.temporal_calibration_enabled)
+        {
+            gtsam::Vector1 dt0;
+            dt0 << config.extrinsics.imu_t_lidar;
+            initialValues_.insert(T(0), dt0);
+            initialSmootherIndices_[T(0)] = 0.0;
+            initialPriors_.addPrior(T(0), dt0,
+                gtsam::noiseModel::Isotropic::Sigma(1, 0.01)); // 10ms sigma
+        }
+        if (config.extrinsics.extrinsic_calibration_enabled)
+        {
+            initialValues_.insert(E(0), initialExtrinsic);
+            initialSmootherIndices_[E(0)] = 0.0;
+            gtsam::Vector6 sigma;
+            sigma << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01; // rad, m
+            initialPriors_.addPrior(E(0), initialExtrinsic,
+                gtsam::noiseModel::Diagonal::Sigmas(sigma));
+        }
     }
 
     void Smoother::updateAndOptimizeGraph(
@@ -70,6 +94,11 @@ namespace mapping
         newSmootherIndices[X(idxKeyframe)] = tSmootherCurr;
         newSmootherIndices[V(idxKeyframe)] = tSmootherCurr;
         newSmootherIndices[B(idxKeyframe)] = tSmootherCurr;
+        // bump calibration timestamps to keep them alive in the sliding window
+        if (temporalCalibrationEnabled_)
+            newSmootherIndices[T(0)] = tSmootherCurr;
+        if (extrinsicCalibrationEnabled_)
+            newSmootherIndices[E(0)] = tSmootherCurr;
         // add priors if provided
         if (hasPriors() && !bootstrapped_)
         {
@@ -102,6 +131,13 @@ namespace mapping
             states.getSmootherEstimate().at(V(idxKeyframe)).cast<gtsam::Vector3>()));
         states.setCurrentBias(states.getSmootherEstimate().at(B(idxKeyframe)).cast<gtsam::imuBias::ConstantBias>());
         states.setPreintegrationRefState(states.getCurrentState());
+        // read back calibration estimates
+        if (extrinsicCalibrationEnabled_)
+            states.setImuToLidarExtrinsic(
+                states.getSmootherEstimate().at(E(0)).cast<gtsam::Pose3>());
+        if (temporalCalibrationEnabled_)
+            states.setTemporalOffset(
+                states.getSmootherEstimate().at(T(0)).cast<gtsam::Vector1>()(0));
         // update the poses of all keyframe submaps
         for (auto const &[idxKf, _] : states.getKeyframePoses())
         {

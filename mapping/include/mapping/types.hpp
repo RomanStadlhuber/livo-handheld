@@ -17,6 +17,8 @@
 #include <open3d/geometry/PointCloud.h>
 
 using gtsam::symbol_shorthand::B;
+using gtsam::symbol_shorthand::E; // Extrinsic calibration (Pose3)
+using gtsam::symbol_shorthand::T; // Temporal calibration (Vector1)
 using gtsam::symbol_shorthand::V;
 using gtsam::symbol_shorthand::X;
 

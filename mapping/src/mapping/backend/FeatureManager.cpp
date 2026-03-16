@@ -19,6 +19,14 @@ namespace mapping
         clusterIdCounter_ = 0;
         newSmootherFactors_ = gtsam::NonlinearFactorGraph();
         factorsToRemove_.clear();
+        dtKey_ = boost::none;
+        extrinsicKey_ = boost::none;
+    }
+
+    void FeatureManager::setCalibrationKeys(boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey)
+    {
+        dtKey_ = dtKey;
+        extrinsicKey_ = extrinsicKey;
     }
 
     void FeatureManager::createNewClusters(const States &states, const uint32_t &idxKeyframe, double voxelSize)
@@ -238,6 +246,17 @@ namespace mapping
                         // scan points are passed to factor in world frame
                         lidar_points[key] = keyframePoses[idxKeyframe]->transformTo(keyframeSubmaps[idxKeyframe]->points_[idxPoint]);
                     }
+                    // Precompute per-keyframe twists for temporal calibration
+                    std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists;
+                    if (dtKey_)
+                    {
+                        for (auto const &[idxKeyframe, idxPoint] : clusterPoints)
+                        {
+                            // TODO: compute twist from preintegration data or consecutive poses
+                            // twist = Logmap(delta_T_preintegration) / dt_since_last_keyframe
+                            keyframeTwists[X(idxKeyframe)] = {Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
+                        }
+                    }
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto factor = boost::make_shared<PointToPlaneFactor>(
@@ -247,7 +266,10 @@ namespace mapping
                         clusterNormal,
                         clusterCenter,
                         robustNoise,
-                        clusterId);
+                        clusterId,
+                        dtKey_,
+                        extrinsicKey_,
+                        keyframeTwists);
                     newSmootherFactors_.add(factor);
                     // factor->print();
                     clusterFactors_[clusterId] = factor;
@@ -279,6 +301,16 @@ namespace mapping
                         keys.push_back(key);
                         lidar_points[key] = keyframePoses[kfIdx]->transformTo(keyframeSubmaps[kfIdx]->points_[ptIdx]);
                     }
+                    // Precompute per-keyframe twists for temporal calibration
+                    std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists;
+                    if (dtKey_)
+                    {
+                        for (auto const &[kfIdx2, ptIdx2] : clusterPoints)
+                        {
+                            // TODO: compute twist from preintegration data or consecutive poses
+                            keyframeTwists[X(kfIdx2)] = {Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
+                        }
+                    }
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto newFactor = boost::make_shared<PointToPlaneFactor>(
@@ -288,7 +320,10 @@ namespace mapping
                         clusterNormal,
                         clusterCenter,
                         robustNoise,
-                        clusterId);
+                        clusterId,
+                        dtKey_,
+                        extrinsicKey_,
+                        keyframeTwists);
                     newSmootherFactors_.add(newFactor);
                     clusterFactors_[clusterId] = newFactor;
                     // std::cout << "::: [DEBUG] replaced factor for cluster " << clusterId << " with " << keys.size() << " keys :::" << std::endl;
@@ -344,6 +379,16 @@ namespace mapping
                     keys.push_back(key);
                     lidar_points[key] = keyframePoses[kfIdx]->transformTo(keyframeSubmaps[kfIdx]->points_[ptIdx]);
                 }
+                // Precompute per-keyframe twists for temporal calibration
+                std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists;
+                if (dtKey_)
+                {
+                    for (auto const &[kfIdx2, ptIdx2] : clusterPoints)
+                    {
+                        // TODO: compute twist from preintegration data or consecutive poses
+                        keyframeTwists[X(kfIdx2)] = {Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
+                    }
+                }
                 const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                 auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                 const auto newFactor = boost::make_shared<PointToPlaneFactor>(
@@ -353,7 +398,10 @@ namespace mapping
                     clusterNormal,
                     clusterCenter,
                     robustNoise,
-                    clusterId);
+                    clusterId,
+                    dtKey_,
+                    extrinsicKey_,
+                    keyframeTwists);
                 newSmootherFactors_.add(newFactor);
                 clusterFactors_[clusterId] = newFactor;
                 numFactorsUpdated++;

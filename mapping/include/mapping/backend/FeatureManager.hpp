@@ -114,6 +114,14 @@ namespace mapping
         /// see also: https://gtsam.org/doxygen/a03860.html
         gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_{
             gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(new gtsam::noiseModel::mEstimator::GemanMcClure(1.0))};
+
+    public:
+        /// @brief Set optional calibration keys for temporal and extrinsic calibration.
+        void setCalibrationKeys(boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey);
+
+    private:
+        boost::optional<gtsam::Key> dtKey_;
+        boost::optional<gtsam::Key> extrinsicKey_;
     };
 } // namespace mapping
 

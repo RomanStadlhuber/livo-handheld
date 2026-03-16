@@ -54,6 +54,11 @@ namespace mapping
         gtsam::Values markovBlanket;
         for (uint32_t k = idxMarginalize; k < idxKeyframe; k++)
             markovBlanket.insert(X(k), smootherEstimate_.at(X(k)));
+        // Include calibration variables if they exist (factors now connect to them)
+        if (smootherEstimate_.exists(E(0)))
+            markovBlanket.insert(E(0), smootherEstimate_.at(E(0)));
+        if (smootherEstimate_.exists(T(0)))
+            markovBlanket.insert(T(0), smootherEstimate_.at(T(0)));
         return markovBlanket;
     }
 

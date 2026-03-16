@@ -183,7 +183,9 @@ namespace mapping
     struct ExtrinsicsConfig
     {
         bool temporal_calibration_enabled = false;
+        bool extrinsic_calibration_enabled = false;
         ImuLidarTransformConfig imu_T_lidar;
+        double imu_t_lidar = 0.0; // initial temporal offset [s]
     };
 
     inline void declare_config(ExtrinsicsConfig &config)
@@ -191,7 +193,9 @@ namespace mapping
         using namespace config;
         name("ExtrinsicsConfig");
         field(config.temporal_calibration_enabled, "temporal_calibration_enabled");
+        field(config.extrinsic_calibration_enabled, "extrinsic_calibration_enabled");
         field(config.imu_T_lidar, "imu_T_lidar");
+        field(config.imu_t_lidar, "imu_t_lidar", "s");
     }
 
     /// @brief Main mapping system configuration

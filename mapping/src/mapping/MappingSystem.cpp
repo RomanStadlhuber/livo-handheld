@@ -19,7 +19,13 @@ namespace mapping
           imu_T_lidar_(config.extrinsics.imu_T_lidar.toPose3())
     {
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
+        states_.setTemporalOffset(config_.extrinsics.imu_t_lidar);
         smoother_.reset(config_);
+        featureManager_.setCalibrationKeys(
+            config_.extrinsics.temporal_calibration_enabled
+                ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+            config_.extrinsics.extrinsic_calibration_enabled
+                ? boost::optional<gtsam::Key>(E(0)) : boost::none);
     }
 
     void MappingSystem::setConfig(const MappingConfig &config)
@@ -27,7 +33,13 @@ namespace mapping
         config_ = config;
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
+        states_.setTemporalOffset(config_.extrinsics.imu_t_lidar);
         smoother_.reset(config_);
+        featureManager_.setCalibrationKeys(
+            config_.extrinsics.temporal_calibration_enabled
+                ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+            config_.extrinsics.extrinsic_calibration_enabled
+                ? boost::optional<gtsam::Key>(E(0)) : boost::none);
     }
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
@@ -69,6 +81,11 @@ namespace mapping
 
             // reset all components
             featureManager_.reset();
+            featureManager_.setCalibrationKeys(
+                config_.extrinsics.temporal_calibration_enabled
+                    ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+                config_.extrinsics.extrinsic_calibration_enabled
+                    ? boost::optional<gtsam::Key>(E(0)) : boost::none);
             states_.reset(w_X_recovery);
             buffers_.reset();
 
@@ -78,6 +95,7 @@ namespace mapping
             gtsam::NonlinearFactorGraph priors = constructSystemPriors(
                 idxKfRecovery, w_X_recovery, bPrior);
             smoother_.setPriors(idxKfRecovery, priors, w_X_recovery, bPrior);
+            smoother_.setCalibrationPriors(config_, states_.getImuToLidarExtrinsic());
 
             // reset preintegrator with current bias estimate
             imuFrontend_.resetPreintegrator(states_);
@@ -167,6 +185,7 @@ namespace mapping
         // build prior factors for the first keyframe
         gtsam::NonlinearFactorGraph priors = constructSystemPriors(idxNewKF, x0, priorImuBias);
         smoother_.setPriors(idxNewKF, priors, x0, priorImuBias);
+        smoother_.setCalibrationPriors(config_, imu_T_lidar_);
         // set initial navigation state
         states_.setCurrentState(x0);
         states_.setPreintegrationRefState(x0);
@@ -211,7 +230,7 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
             lidarFrontend_.accumulateUndistortedScans(states_, buffers_, config_);
 
-        const gtsam::Pose3 world_T_lidar = states_.getCurrentState().pose().compose(imu_T_lidar_);
+        const gtsam::Pose3 world_T_lidar = states_.getCurrentState().pose().compose(states_.getImuToLidarExtrinsic());
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe = states_.createKeyframeSubmap(world_T_lidar, states_.tLastScan_, ptrNewSubmapVoxelized);
 
