@@ -141,12 +141,8 @@ namespace mapping
         // update the poses of all keyframe submaps
         for (auto const &[idxKf, _] : states.getKeyframePoses())
         {
-            const gtsam::Pose3
-                // updated IMU pose in world frame
-                world_T_imu = states.getSmootherEstimate().at(X(idxKf)).cast<gtsam::Pose3>(),
-                // updated lidar pose in world frame
-                world_T_lidar = world_T_imu.compose(states.getImuToLidarExtrinsic());
-            states.updateKeyframeSubmapPose(idxKf, world_T_lidar);
+            const gtsam::Pose3 world_T_imu = states.getSmootherEstimate().at(X(idxKf)).cast<gtsam::Pose3>();
+            states.updateKeyframeSubmapPose(idxKf, world_T_imu);
         }
     }
 }

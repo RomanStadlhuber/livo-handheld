@@ -158,7 +158,7 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
 
         // modifies states_: stores keyframe submap, pose, timestamp, increments keyframe counter
-        const uint32_t idxNewKF = states_.createKeyframeSubmap(w_T_l0, 0.0, ptrNewSubmapVoxelized);
+        const uint32_t idxNewKF = states_.createKeyframeSubmap(w_T_i0, 0.0, ptrNewSubmapVoxelized);
         // modifies featureManager_: creates premature clusters for each point in the keyframe
         featureManager_.createNewClusters(states_, idxNewKF, /*voxelSize=*/0);
         lidarBuffer.clear();
@@ -230,9 +230,8 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
             lidarFrontend_.accumulateUndistortedScans(states_, buffers_, config_);
 
-        const gtsam::Pose3 world_T_lidar = states_.getCurrentState().pose().compose(states_.getImuToLidarExtrinsic());
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
-        const uint32_t idxKeyframe = states_.createKeyframeSubmap(world_T_lidar, states_.tLastScan_, ptrNewSubmapVoxelized);
+        const uint32_t idxKeyframe = states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
 
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
          * so that the smoother update won't reference dissociated variables.
