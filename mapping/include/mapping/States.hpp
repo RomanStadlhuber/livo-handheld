@@ -74,7 +74,9 @@ namespace mapping
         double getTemporalOffset() const { return temporalOffset_; }
 
         std::map<uint32_t, double> &getKeyframeTimestamps() const { return keyframeTimestamps_; };
+        /// @brief Get the index of the latest currently active keyframe.
         uint32_t getLatestKeyframeIdx() const { return keyframeCounter_ - 1; };
+        /// @brief Get the total number of keyframes created since system start, including marginalized ones.
         uint32_t getKeyframeCount() const { return keyframeCounter_; };
 
         gtsam::Pose3 &lastKeyframePose() const { return *keyframePoses_.rbegin()->second; };
