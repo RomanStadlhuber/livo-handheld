@@ -90,6 +90,14 @@ namespace mapping
         /// @param factors The factor graph to summarize obtained from `Smoother::getFactors()`.
         void summarizeFactors(const gtsam::NonlinearFactorGraph &factors) const;
 
+    private:
+        /// @brief Compute the twists required for extrapolation based on temporal calibration.
+        /// @param states The current states used to obtain the IMU frame body poses and timestamps.
+        /// @return Mapping of `gtsam::Key` to `(angVel, linVel)` twists between all states in the sliding window,
+        /// `k-w, k-w+1, ..., k`, where `twist[k]` is used to extrapolate the pose of `k`.
+        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> computeTemporalCalibrationTwists(
+            const States &states);
+
     public: // attributes
         /**
          * NOTE: feature attributes get updated a lot, so currently it makes sense to make them public

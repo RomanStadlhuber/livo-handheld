@@ -132,7 +132,7 @@ namespace mapping
                     }
                 }
                 removePointFromCluster(clusterId, idxKeyframe, /*firstInHistory=*/true); // remove point and thickness history entry
-                if (clusterPoints.size() < 3) // NOTE: 3 points as the minimum to fit a plane
+                if (clusterPoints.size() < 3)                                            // NOTE: 3 points as the minimum to fit a plane
                 {
                     // NOTE: Do NOT call factor->remove() here, since the smoother won't re-key factors
                     clusterStates_[clusterId] = ClusterState::Pruned;
@@ -207,6 +207,51 @@ namespace mapping
         clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
     }
 
+    std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> FeatureManager::computeTemporalCalibrationTwists(
+        const States &states)
+    {
+        const std::map<uint32_t, double> &keyframeTimestamps = states.getKeyframeTimestamps();
+        std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &imuPoses = states.getKeyframeImuPoses();
+        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists;
+
+        /**
+         * NOTE: currently time deltas are computed in LiDAR time
+         * - it's the most accessible given how keyframe timestamps are stored (LiDAR time)
+         * - converting between IMU and LiDAR time needs the calibration, but this is not
+         *   a good idea since this twist will be used to estimate that in the first place
+         */
+
+        // twists between keyframes existing in the sliding window
+        for (auto itKf = imuPoses.begin(), itKfNext = std::next(imuPoses.begin()); itKfNext != imuPoses.end(); ++itKf, ++itKfNext)
+        {
+            const uint32_t idxKf = itKf->first, idxKfNext = itKfNext->first;
+            const gtsam::Pose3 &poseCurr = *itKf->second;
+            const gtsam::Pose3 &poseNext = *itKfNext->second;
+            // compute twist between consecutive keyframes
+            const gtsam::Pose3 deltaPose = poseCurr.between(poseNext);
+            const gtsam::Vector6 deltaVec = gtsam::Pose3::Logmap(deltaPose);
+            // time delta between KFs + numerical offset to avoid branching
+            const double dt = keyframeTimestamps.at(idxKfNext) - keyframeTimestamps.at(idxKf) + 1e-6;
+            if (dt > 0)
+                // (angVel, linVel)
+                keyframeTwists[X(idxKf)] = {deltaVec.head<3>() / dt, deltaVec.tail<3>() / dt};
+        }
+        // the twist between the last sliding window pose and the current predicted pose
+        {
+            const uint32_t &idxKfCurr = states.getLatestKeyframeIdx();
+            const gtsam::Pose3 &
+                w_T_i_last = *imuPoses.rbegin()->second,
+               w_T_i_pred = states.getCurrentState().pose(),
+               dT_pred = w_T_i_last.between(w_T_i_pred);
+            const gtsam::Vector6 dT_pred_vec = gtsam::Pose3::Logmap(dT_pred);
+            // time delta between last KF in the window and the predicted state
+            const double dt_pred = states.tLastScan_ - keyframeTimestamps.rbegin()->second + 1e-6;
+            // (angVel, linVel)
+            keyframeTwists[X(idxKfCurr)] = {dT_pred_vec.head<3>() / dt_pred, dT_pred_vec.tail<3>() / dt_pred};
+        }
+        return keyframeTwists;
+    }
+
     std::pair<gtsam::NonlinearFactorGraph, gtsam::FactorIndices>
     FeatureManager::createAndUpdateFactors(
         const States &states,
@@ -214,6 +259,7 @@ namespace mapping
     {
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &keyframePoses = states.getKeyframePoses();
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();
+        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists = computeTemporalCalibrationTwists(states);
         std::size_t numFactorsAdded{0}, numFactorsUpdated{0}, numFactorsRemoved{0};
         for (auto const &[clusterId, clusterPoints] : clusters_)
         {
@@ -246,17 +292,7 @@ namespace mapping
                         // scan points are passed to factor in world frame
                         lidar_points[key] = keyframePoses[idxKeyframe]->transformTo(keyframeSubmaps[idxKeyframe]->points_[idxPoint]);
                     }
-                    // Precompute per-keyframe twists for temporal calibration
-                    std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists;
-                    if (dtKey_)
-                    {
-                        for (auto const &[idxKeyframe, idxPoint] : clusterPoints)
-                        {
-                            // TODO: compute twist from preintegration data or consecutive poses
-                            // twist = Logmap(delta_T_preintegration) / dt_since_last_keyframe
-                            keyframeTwists[X(idxKeyframe)] = {Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
-                        }
-                    }
+                    std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &imuPoses = states.getKeyframeImuPoses();
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto factor = boost::make_shared<PointToPlaneFactor>(
@@ -300,16 +336,6 @@ namespace mapping
                         const gtsam::Key key = X(kfIdx);
                         keys.push_back(key);
                         lidar_points[key] = keyframePoses[kfIdx]->transformTo(keyframeSubmaps[kfIdx]->points_[ptIdx]);
-                    }
-                    // Precompute per-keyframe twists for temporal calibration
-                    std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists;
-                    if (dtKey_)
-                    {
-                        for (auto const &[kfIdx2, ptIdx2] : clusterPoints)
-                        {
-                            // TODO: compute twist from preintegration data or consecutive poses
-                            keyframeTwists[X(kfIdx2)] = {Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
-                        }
                     }
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
@@ -378,16 +404,6 @@ namespace mapping
                     const gtsam::Key key = X(kfIdx);
                     keys.push_back(key);
                     lidar_points[key] = keyframePoses[kfIdx]->transformTo(keyframeSubmaps[kfIdx]->points_[ptIdx]);
-                }
-                // Precompute per-keyframe twists for temporal calibration
-                std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists;
-                if (dtKey_)
-                {
-                    for (auto const &[kfIdx2, ptIdx2] : clusterPoints)
-                    {
-                        // TODO: compute twist from preintegration data or consecutive poses
-                        keyframeTwists[X(kfIdx2)] = {Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
-                    }
                 }
                 const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                 auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
