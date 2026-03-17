@@ -14,8 +14,10 @@ namespace mapping
         boost::optional<gtsam::Key> extrinsicKey)
     {
         gtsam::KeyVector allKeys = poseKeys;
-        if (dtKey) allKeys.push_back(*dtKey);
-        if (extrinsicKey) allKeys.push_back(*extrinsicKey);
+        if (dtKey)
+            allKeys.push_back(*dtKey);
+        if (extrinsicKey)
+            allKeys.push_back(*extrinsicKey);
         return allKeys;
     }
 
@@ -157,17 +159,29 @@ namespace mapping
     {
         const double meanFactor = 1.0 / static_cast<double>(lidar_points_.size());
         std::vector<gtsam::Matrix> Hs;
-        Hs.reserve(keys().size());
+        // the number of jacobians required based on the keys associated with this factor
+        // needs to be extended i.e. when using system calibration
+        std::size_t numJacobians = keys().size();
+        /**
+         * NOTE: jacobians need to be inserted respecting the order of the key associations!!
+         * See buildFullKeys(), where the associations are put together based on available variables
+         * this ordering needs to be respected!!
+         */
+        if (dtKey_)
+            numJacobians++;
+        if (extrinsicKey_)
+            numJacobians++;
+        Hs.reserve(numJacobians);
         // the returned error is a scalar
         gtsam::Vector errorVec = gtsam::Vector::Zero(1);
 
         // --- Read calibration values once (before pose loop) ---
         const gtsam::Pose3 imu_T_lidar = extrinsicKey_ && values.exists(*extrinsicKey_)
-            ? values.at<gtsam::Pose3>(*extrinsicKey_)
-            : imu_T_lidar_;
+                                             ? values.at<gtsam::Pose3>(*extrinsicKey_)
+                                             : imu_T_lidar_;
         const double dt = dtKey_ && values.exists(*dtKey_)
-            ? values.at<gtsam::Vector1>(*dtKey_)(0)
-            : 0.0;
+                              ? values.at<gtsam::Vector1>(*dtKey_)(0)
+                              : 0.0;
 
         // accumulators for calibration Jacobians (summed across all keyframes)
         gtsam::Matrix H_dt_accum = gtsam::Matrix::Zero(1, 1);
@@ -193,8 +207,8 @@ namespace mapping
             {
                 const auto &[omega_k, v_k] = keyframeTwists_.at(key);
                 w_T_imu_ext = w_T_imu * gtsam::Pose3(
-                    gtsam::Rot3::Expmap(omega_k * dt),
-                    v_k * dt);
+                                            gtsam::Rot3::Expmap(omega_k * dt),
+                                            v_k * dt);
             }
 
             // accumulator for Jacobian terms
@@ -215,11 +229,28 @@ namespace mapping
             Hx.head<3>() = 2 * meanFactor * r_i * -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
             Hx.tail<3>() = 2 * meanFactor * r_i * nT * w_R_i;
             Hs.push_back(Hx);
-
-            // TODO: formulate residual/jacobian contribution for temporal calibration
-            // H_dt_accum += ...;
-            // TODO: formulate residual/jacobian contribution for extrinsic calibration
-            // H_ext_accum += ...;
+            // LiDAR-to-IMU temporal calibration jacobian
+            if (dtKey_ && keyframeTwists_.count(key))
+            {
+                const auto &[omega_k, v_k] = keyframeTwists_.at(key);
+                const Eigen::Matrix3d
+                    omega_skew_k = gtsam::skewSymmetric(omega_k),
+                    // short-hand expression for body rate in world frame
+                    // d(w_R_i)d(t) = w_R_i * omega_skew
+                    // this should be in the jacobian derivation docs
+                    ohm = w_R_i * omega_skew_k;
+                // velocity of the LiDAR point in the world frame from temporal extrapolation
+                // this should b e in the jacobian derivation docs
+                const Eigen::Vector3d phi = ohm * i_R_l * l_p + ohm * i_t_l + w_R_i * v_k;
+                H_dt_accum += 2 * meanFactor * r_i * nT * phi;
+            }
+            // IMU-to-LiDAR extrinsic calibration jacobian
+            if(extrinsicKey_)
+            {
+                const Eigen::Matrix3d w_R_l = w_R_i * i_R_l;
+                H_ext_accum.block<1, 3>(0, 0) += 2* meanFactor * r_i * nT * w_R_l * gtsam::skewSymmetric(l_p);
+                H_ext_accum.block<1, 3>(0, 3) += 2* meanFactor * r_i * nT * w_R_l;
+            }
         }
         errorVec *= meanFactor;
 
