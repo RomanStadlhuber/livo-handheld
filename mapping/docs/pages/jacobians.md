@@ -155,3 +155,10 @@ all planar clusters. The core idea is that the LiDAR pose follows from
 extrapolating the preintegrated IMU pose by a time-interval
 \f$ {}^{I}t_{L} \f$, that is the temporal IMU-to-LiDAR calibration.
 
+In general, temporal calibration factors into the residual of a SLAM
+system by appling feature velocities over calibration offset time deltas
+to each individual feature point (3D LiDAR points which in this case are
+expressed in the world frame). See Eq. (4) of
+[Online Temporal Calibration for Monocular Visual-Inertial Systems](https://arxiv.org/abs/1808.00692)
+for the example of a monocular VI system.
+
