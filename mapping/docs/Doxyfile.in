@@ -31,6 +31,7 @@ GENERATE_LATEX         = NO
 # --- MathJax ---
 USE_MATHJAX            = YES
 MATHJAX_VERSION        = MathJax_3
+MATHJAX_CODEFILE       = @CMAKE_CURRENT_SOURCE_DIR@/docs/mathjax_macros.js
 
 # --- doxygen-awesome-css theme ---
 HTML_EXTRA_STYLESHEET  = @AWESOME_CSS_DIR@/doxygen-awesome.css

@@ -44,16 +44,16 @@ the following for each non-pruned cluster:
 
 3. **Local plane fit** -- Call `planeFitSVD` on the KNN neighborhood:
    \f[
-     \underset{\mathbf{n}}{\text{min}} \;\sum_{i} \bigl(\mathbf{n}^\top (\mathbf{p}_i - \mathbf{c})\bigr)^2
+     \underset{\bvec{n}}{\text{min}} \;\sum_{i} \bigl(\bvec{n}^\top (\bvec{p}_i - \bvec{c})\bigr)^2
      \quad\Longrightarrow\quad
-     \mathbf{n} = \mathbf{v}_3 \text{ (smallest right-singular vector of centered points)}
+     \bvec{n} = \bvec{v}_3 \text{ (smallest right-singular vector of centered points)}
    \f]
    Reject if the fit is invalid or `planeTrackThickness > max_plane_thickness`.
 
 4. **Outlier test** -- For non-premature clusters, check the second-nearest
    neighbor against the existing cluster plane:
    \f[
-     \left| \mathbf{n}_{\text{cluster}}^\top (\mathbf{p}_{\text{KNN}} - \mathbf{c}_{\text{cluster}}) \right|
+     \left| \bvec{n}_{\text{cluster}}^\top (\bvec{p}_{\text{KNN}} - \bvec{c}_{\text{cluster}}) \right|
      \;<\; 3\,\sigma_{\text{cluster}}
    \f]
 
@@ -67,7 +67,7 @@ the following for each non-pruned cluster:
 
 7. **Normal consistency check** -- Accept only if:
    \f[
-     \left| \mathbf{n}_{\text{new}} \cdot \mathbf{n}_{\text{existing}} \right|
+     \left| \bvec{n}_{\text{new}} \cdot \bvec{n}_{\text{existing}} \right|
      \;>\; \texttt{thresh_normal}
    \f]
    Otherwise undo the provisional addition and set state to `Idle`.
@@ -82,10 +82,10 @@ which could degrade performance.
 
 `planeFitSVD` computes a least-squares plane from a set of 3D points:
 
-1. Compute centroid \f$ \mathbf{c} \f$.
-2. Build the centered matrix \f$ \mathbf{M} \in \mathbb{R}^{N \times 3} \f$.
-3. Thin SVD: \f$ \mathbf{M} = \mathbf{U} \boldsymbol{\Sigma} \mathbf{V}^\top \f$.
-4. The plane normal is \f$ \mathbf{v}_3 \f$ (column of \f$ \mathbf{V} \f$
+1. Compute centroid \f$ \bvec{c} \f$.
+2. Build the centered matrix \f$ \mtx{M} \in \mathbb{R}^{N \times 3} \f$.
+3. Thin SVD: \f$ \mtx{M} = \mtx{U} \mtx{\Sigma} \mtx{V}^\top \f$.
+4. The plane normal is \f$ \bvec{v}_3 \f$ (column of \f$ \mtx{V} \f$
    corresponding to the smallest singular value \f$ \sigma_3 \f$).
 
 Validity checks:
@@ -94,7 +94,7 @@ Validity checks:
 
 Plane thickness (used as a noise proxy):
 \f[
-  \Gamma_{\text{fit}} = \frac{1}{N} \sum_{i=1}^{N} \bigl(\mathbf{n}^\top (\mathbf{p}_i - \mathbf{c})\bigr)^2
+  \Gamma_{\text{fit}} = \frac{1}{N} \sum_{i=1}^{N} \bigl(\bvec{n}^\top (\bvec{p}_i - \bvec{c})\bigr)^2
 \f]
 
 
@@ -111,7 +111,7 @@ plane fit on the adjacent points in that keyframe's submap:
 
 \f[
   \Gamma_k = \frac{1}{N_{\text{KNN}}} \sum_{i=1}^{N_{\text{KNN}}}
-    \bigl(\mathbf{n}_{\text{KNN}}^\top (\mathbf{p}_i - \mathbf{c}_{\text{KNN}})\bigr)^2
+    \bigl(\bvec{n}_{\text{KNN}}^\top (\bvec{p}_i - \bvec{c}_{\text{KNN}})\bigr)^2
 \f]
 
 This value captures how "thick" (noisy) the local surface patch is at the point

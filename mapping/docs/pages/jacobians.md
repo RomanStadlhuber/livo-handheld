@@ -21,15 +21,15 @@ derivatives that will follow.
 Which, in the context of this work, will apply to the squared resiudal
 formulation. Informally,
 \f[
-    \frac{d}{d \boldsymbol{p}} \frac{1}{n_j}
-    (\boldsymbol{n}^{T} \cdot \boldsymbol{p} + d)^{2} =
+    \frac{d}{d \bvec{p}} \frac{1}{n_j}
+    (\bvec{n}^{T} \cdot \bvec{p} + d)^{2} =
     \frac{2}{n_j}
-    (\boldsymbol{n}^{T} \cdot \boldsymbol{p} + d)
-    \cdot \boldsymbol{n}^{T}
+    (\bvec{n}^{T} \cdot \bvec{p} + d)
+    \cdot \bvec{n}^{T}
 \text{ .}\f]
 Where, in what will follow, all derivatives will be computed through
 the position of the LiDAR scan point in the world frame (informally
-\f$ \boldsymbol{p} \f$).
+\f$ \bvec{p} \f$).
 
 ### 2. Linearizing the Exponential Map
 
@@ -62,30 +62,30 @@ while an isometry exists that represents any skew-symmetric matrix as a
 vector and vice-versa.
 
 In 3D, skew symmetric matrices are equivalent to the cross-product, i.e.
-left-applying \f$ {\bigl[\boldsymbol{a}\bigr]}_{\times} \cdot \boldsymbol{b} \f$
-is the same as \f$ \boldsymbol{a} \times \boldsymbol{b} \f$.
+left-applying \f$ \skewOf{\bvec{a}} \cdot \bvec{b} \f$
+is the same as \f$ \bvec{a} \times \bvec{b} \f$.
 Skew symmetric matrices have the property that
-\f$ \boldsymbol{A}^{T} = -\boldsymbol{A}\f$ and from that directly follows
+\f$ \mtx{A}^{T} = -\mtx{A}\f$ and from that directly follows
 that
 
 \f[
-  {\bigl[\boldsymbol{a}\bigr]}_{\times} \cdot \boldsymbol{b}  =
-  -  {\bigl[\boldsymbol{b}\bigr]}_{\times} \cdot \boldsymbol{a}
+  \skewOf{\bvec{a}} \cdot \bvec{b}  =
+  -  \skewOf{\bvec{b}} \cdot \bvec{a}
 \text{ ,}\f]
 
 which can be intuitively explained by the fact that flipping the operands
 of the cross-product similarly yields
 
 \f[
-    \boldsymbol{a} \times \boldsymbol{b} =
-    - \boldsymbol{b} \times \boldsymbol{a}
+    \bvec{a} \times \bvec{b} =
+    - \bvec{b} \times \bvec{a}
 
 \text{ .}\f]
 
 This property will be used to turn skew-symmetric expressions of body rates
-\f$ {\bigl[\boldsymbol{\omega}\bigr]}_{\times} \cdot \boldsymbol{p} \f$ into
-vectors (\f$ = - {\bigl[\boldsymbol{p}\bigr]}_{\times} \cdot \boldsymbol{\omega} \f$)
-to compute their derivative with respect to \f$ \omega \f$.
+\f$ \skewOf{\omg} \cdot \bvec{p} \f$ into
+vectors (\f$ = - \skewOf{\bvec{p}} \cdot \omg \f$)
+to compute their derivative with respect to \f$ \omg \f$.
 
 
 ## The Residual
@@ -108,16 +108,16 @@ is the mean of the squared point-to-plane distances
 
 \f[
 r_{j}(X(n), ..., X(m)) = \frac{1}{n_{j}} \sum_{k}
-({\boldsymbol{n}_{j}}^{T} \cdot {}^{w}\boldsymbol{p}_{k} + d_j)^{2}
+({\bvec{n}_{j}}^{T} \cdot {}^{w}\bvec{p}_{k} + d_j)^{2}
 \text{ .} \f]
 
-Where \f$ {\boldsymbol{n}_{j}}^{T} \cdot {}^{w}\boldsymbol{p}_{k} + d_j \f$
-results from the cluster center \f$ {}^{w}\boldsymbol{c}_{k} \f$, meaning
+Where \f$ {\bvec{n}_{j}}^{T} \cdot {}^{w}\bvec{p}_{k} + d_j \f$
+results from the cluster center \f$ {}^{w}\bvec{c}_{k} \f$, meaning
 \f$
-{\boldsymbol{n}_{j}}^{T} \cdot {}^{w}\boldsymbol{p}_{k}
-- {\boldsymbol{n}_{j}}^{T} \cdot {}^{w}\boldsymbol{c}_{k}
+{\bvec{n}_{j}}^{T} \cdot {}^{w}\bvec{p}_{k}
+- {\bvec{n}_{j}}^{T} \cdot {}^{w}\bvec{c}_{k}
 \f$ -- i.e.
-\f$ d_{j} = - {\boldsymbol{n}_{j}}^{T} \cdot {}^{w}\boldsymbol{c}_{k} \f$,
+\f$ d_{j} = - {\bvec{n}_{j}}^{T} \cdot {}^{w}\bvec{c}_{k} \f$,
 which at inference-time is treated as a constant and will therefore be ignored
 when computing the jacobian expressions.
 
@@ -126,9 +126,9 @@ when computing the jacobian expressions.
 The LiDAR point plane clusters influence the estimator poses
 \f$ X(i) \f$, that is
 \f$
-{}^{w}\boldsymbol{T}_{I} =
-\left[ 
-    {}^{w}\boldsymbol{R}_{I} \mid {}^{w}\boldsymbol{p}_{I}
+\wTi =
+\left[
+    \wRi \mid \wpi
 \right]
 \in SE(3)
 \f$ .
@@ -140,7 +140,7 @@ This uses the same following as the pose jacobians, due to the LiDAR
 pose being obtained by composing the IMU-pose with the IMU-to-LiDAR
 extrinsic calibration
 \f$
-{}^{w}\boldsymbol{T}_{L} = {}^{w}\boldsymbol{T}_{I} \cdot {}^{I}\boldsymbol{T}_{L}
+\wTl = \wTi \cdot \iTl
 \f$ .
 
 ## Temporal Calibration Jacobian

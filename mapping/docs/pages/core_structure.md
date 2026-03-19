@@ -107,9 +107,9 @@ the submap, pose, and timestamp.
 When iSAM2 refines poses, each keyframe submap is corrected via a left-applied
 delta:
 \f[
-  \Delta T = T_{\text{new}} \cdot T_{\text{old}}^{-1},
+  \dT = \mtx{T}_{\text{new}} \cdot \mtx{T}_{\text{old}}^{-1},
   \qquad
-  \mathbf{p}' = \Delta T \cdot \mathbf{p}
+  \bvec{p}' = \dT \cdot \bvec{p}
 \f]
 
 This avoids re-transforming from scratch and preserves floating-point consistency.

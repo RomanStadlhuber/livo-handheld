@@ -72,9 +72,9 @@ The system updates:
 - Preintegration reference state (for the next integration cycle)
 - All keyframe submap poses via left-composed deltas:
   \f[
-    \Delta T = T_{\text{new}} \cdot T_{\text{old}}^{-1},
+    \dT = \mtx{T}_{\text{new}} \cdot \mtx{T}_{\text{old}}^{-1},
     \qquad
-    \mathbf{p}_{\text{world}}' = \Delta T \cdot \mathbf{p}_{\text{world}}
+    \bvec{p}_{\text{world}}' = \dT \cdot \bvec{p}_{\text{world}}
   \f]
 
 

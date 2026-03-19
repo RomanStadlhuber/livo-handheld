@@ -42,14 +42,14 @@ reference window gives the constant-velocity motion model:
 \f[
   \boldsymbol{\xi} =
     \frac{1}{\Delta t_{12}} \;
-    \text{Log}\bigl({{}^w\mathbf{T}_{l_1}}^{-1} \; {}^w\mathbf{T}_{l_2}\bigr)
+    \text{Log}\bigl({}^{w}\mtx{T}_{L_1}^{-1} \; {}^{w}\mtx{T}_{L_2}\bigr)
 \f]
 
 The initial recovery pose is then extrapolated forward:
 
 \f[
-  {}^w\mathbf{T}_{l,\text{init}} =
-    {}^w\mathbf{T}_{l_1} \;
+  {}^{w}\mtx{T}_{L,\text{init}} =
+    {}^{w}\mtx{T}_{L_1} \;
     \text{Exp}\bigl(\boldsymbol{\xi} \cdot \Delta t_{1 \to \text{rec}}\bigr)
 \f]
 
@@ -71,7 +71,7 @@ Open3D's
 [point-to-plane ICP](https://www.open3d.org/docs/release/tutorial/pipelines/icp_registration.html#Point-to-point-ICP)
 aligns the query against the reference, starting
 from the extrapolated pose. The output is the refined recovery pose
-\f$ {}^w\mathbf{T}_{l,\text{ICP}} \f$.
+\f$ {}^{w}\mtx{T}_{L,\text{ICP}} \f$.
 
 #### Some notes about the Configuration
 
@@ -103,15 +103,15 @@ tracking is usually lost during high dynamic motion).
 
 ### 3. Velocity correction
 
-The pre-tracking velocity \f$ {}^w\mathbf{v} \f$ from the IMU propagation is
+The pre-tracking velocity \f$ {}^{w}\bvec{v} \f$ from the IMU propagation is
 still expressed in the predicted (failed) body frame. It is rotated into the
 ICP-refined frame:
 
 \f[
-  {}^w\mathbf{v}_{\text{rec}} =
-    {}^w\mathbf{R}_{\text{ICP}} \;
-    {}^w\mathbf{R}_{\text{pred}}^{-1} \;
-    {}^w\mathbf{v}_{\text{pred}}
+  {}^{w}\bvec{v}_{\text{rec}} =
+    {}^{w}\mtx{R}_{\text{ICP}} \;
+    {}^{w}\mtx{R}_{\text{pred}}^{-1} \;
+    {}^{w}\bvec{v}_{\text{pred}}
 \f]
 
 The final `gtsam::NavState` combines the ICP pose with the corrected velocity.
