@@ -113,6 +113,9 @@ namespace mapping
         {
             throw std::runtime_error("::: [ERROR] Attempting to update smoother without bootstrapping, this should not happen :::");
         }
+        // capture calibration values before update for delta logging
+        const double dt_before = temporalCalibrationEnabled_ ? states.getTemporalOffset() : 0.0;
+        const gtsam::Pose3 E_before = extrinsicCalibrationEnabled_ ? states.getImuToLidarExtrinsic() : gtsam::Pose3();
         // update estimator
         smoother_.update(newAndUpdatedFactors, newValues, newSmootherIndices, factorsToRemove);
         /**
@@ -131,13 +134,26 @@ namespace mapping
             states.getSmootherEstimate().at(V(idxKeyframe)).cast<gtsam::Vector3>()));
         states.setCurrentBias(states.getSmootherEstimate().at(B(idxKeyframe)).cast<gtsam::imuBias::ConstantBias>());
         states.setPreintegrationRefState(states.getCurrentState());
-        // read back calibration estimates
+        // read back calibration estimates and log updates
         if (extrinsicCalibrationEnabled_)
+        {
             states.setImuToLidarExtrinsic(
                 states.getSmootherEstimate().at(E(0)).cast<gtsam::Pose3>());
+            const gtsam::Pose3 &E_after = states.getImuToLidarExtrinsic();
+            const gtsam::Vector6 delta = gtsam::Pose3::Logmap(E_before.between(E_after));
+            std::cout << "::: [INFO] delta i_T_l [rot | trans]: ["
+                      << delta.transpose() << "]" << std::endl;
+            std::cout << "::: [INFO] i_T_l : rotation rpy ["
+                      << E_after.rotation().rpy().transpose() << "] translation ["
+                      << E_after.translation().transpose() << "]" << std::endl;
+        }
         if (temporalCalibrationEnabled_)
-            states.setTemporalOffset(
-                states.getSmootherEstimate().at(T(0)).cast<gtsam::Vector1>()(0));
+        {
+            const double dt_after = states.getSmootherEstimate().at(T(0)).cast<gtsam::Vector1>()(0);
+            states.setTemporalOffset(dt_after);
+            std::cout << "::: [INFO] l_t_i: " << (dt_after - dt_before)
+                      << " [sec.], current value: " << dt_after << " [sec.]" << std::endl;
+        }
         // update the poses of all keyframe submaps
         for (auto const &[idxKf, _] : states.getKeyframePoses())
         {
