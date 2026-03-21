@@ -2,8 +2,8 @@
 /// @ingroup frontend_camera
 #pragma once
 
-#ifndef MAPPING_FRONTEND_LIDARFRONTEND_HPP_
-#define MAPPING_FRONTEND_LIDARFRONTEND_HPP_
+#ifndef MAPPING_FRONTEND_CAMERAFRONTEND_HPP_
+#define MAPPING_FRONTEND_CAMERAFRONTEND_HPP_
 
 #include <array>
 #include <vector>
@@ -67,4 +67,4 @@ namespace mapping
     };
 }
 
-#endif // MAPPING_FRONTEND_LIDARFRONTEND_HPP_
+#endif // MAPPING_FRONTEND_CAMERAFRONTEND_HPP_
