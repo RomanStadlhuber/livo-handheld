@@ -148,5 +148,8 @@ namespace mapping
 
     /// @brief Invalid cluster ID sentinel value
     constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
+
+    /// @brief The "default color", inidcating that a point was not colorized from the camera image.
+    const Eigen::Vector3d NO_COLOR{Eigen::Vector3d::Zero()};
 } // namespace mapping
 #endif // MAPPING_TYPES_HPP_

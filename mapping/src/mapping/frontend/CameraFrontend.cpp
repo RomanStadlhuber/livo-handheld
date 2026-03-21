@@ -50,8 +50,8 @@ namespace mapping
         const int imgWidth = img.cols;
         const int imgHeight = img.rows;
 
-        // initialize pointcloud colors
-        ptrPcd->colors_.resize(ptrPcd->points_.size(), Eigen::Vector3d::Zero());
+        // initialize pointcloud colors (default defined in types.hpp)
+        ptrPcd->colors_.resize(ptrPcd->points_.size(), mapping::NO_COLOR);
 
         // transform points to camera frame, keeping only those in front of the camera
         std::vector<int> validIndices;
