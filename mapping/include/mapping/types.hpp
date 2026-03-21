@@ -40,6 +40,13 @@ namespace mapping
         std::vector<double> offset_times;
     };
 
+    /// @ingroup types
+    /// @brief Camera image data.
+    struct CameraData
+    {
+        cv::Mat img;
+    };
+
     template <typename T>
     using InputBuffer = std::map<double, std::shared_ptr<T>>;
 
@@ -51,6 +58,31 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> pcd;
         /// @brief Pose of the scan w.r.t. the latest keyframe pose
         std::shared_ptr<gtsam::Pose3> kf_T_scan;
+    };
+
+    /// @ingroup types
+    /// @brief The type of camera calibration for the `CameraFrontend` to use.
+    enum class CameraCalibrationType
+    {
+        // OpenCV default, use this when distortion is low.
+        PinholeRadTan,
+        /**
+         * NOTE: maybe this can be supported in the future?
+         * afaik, only needs to use cv::fisheye namespace
+         */
+        PInholeEquidistant,
+    };
+
+    /// @ingroup types
+    /// @brief The color space within which the system should operate.
+    /// Change this if you have any specific requirements for interfacing
+    /// with the system.
+    enum class CameraColorSpace
+    {
+        // The default with which the system operates.
+        RGB,
+        // Only used with OpenCV whenever necessary.
+        BGR,
     };
 
     /// @ingroup types
