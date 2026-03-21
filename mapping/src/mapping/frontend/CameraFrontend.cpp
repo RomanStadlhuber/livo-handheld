@@ -39,12 +39,68 @@ namespace mapping
         Buffers &buffers,
         const MappingConfig &config)
     {
-        /**
-         * TODO: synchronization logic
-         * - current (latest) time is determined by newest LiDAR buffer timestamp-key
-         * - images oulder than (tNow - tKeepalive) are discarded (newer than tNow are kept)
-         * - for each timestamp in the LiDAR buffer, find the temporally closest image
-         * - if std::abs(tImg - tLiDAR) <= config.camera_frontend.keepalive_window, set the sync association
-         */
+        auto &lidarBuffer = buffers.getLidarBuffer();
+        auto &cameraBuffer = buffers.getCameraBuffer();
+
+        if (lidarBuffer.empty() || cameraBuffer.empty())
+            return;
+
+        const double tNow = lidarBuffer.rbegin()->first;
+        const double keepalive = config.camera_frontend.keepalive_window;
+        const double tolerance = config.camera_frontend.sync_tolerance;
+
+        // discard images older than (tNow - keepalive_window), but keep images newer than tNow
+        for (auto it = cameraBuffer.begin(); it != cameraBuffer.end();)
+        {
+            if (it->first < tNow - keepalive)
+                it = cameraBuffer.erase(it);
+            else
+                ++it;
+        }
+
+        if (cameraBuffer.empty())
+            return;
+
+        // for each LiDAR scan without a synced image, find the temporally closest camera image
+        for (auto &[tLidar, lidarData] : lidarBuffer)
+        {
+            if (lidarData->syncedCameraData != nullptr)
+                continue;
+
+            // lower_bound gives first entry with key >= tLidar
+            auto it = cameraBuffer.lower_bound(tLidar);
+
+            double tBest;
+            std::shared_ptr<CameraData> bestImg;
+
+            if (it == cameraBuffer.end())
+            {
+                auto prev = std::prev(it);
+                tBest = prev->first;
+                bestImg = prev->second;
+            }
+            else if (it == cameraBuffer.begin())
+            {
+                tBest = it->first;
+                bestImg = it->second;
+            }
+            else
+            {
+                auto prev = std::prev(it);
+                if (std::abs(it->first - tLidar) <= std::abs(tLidar - prev->first))
+                {
+                    tBest = it->first;
+                    bestImg = it->second;
+                }
+                else
+                {
+                    tBest = prev->first;
+                    bestImg = prev->second;
+                }
+            }
+
+            if (std::abs(tBest - tLidar) <= tolerance)
+                lidarData->syncedCameraData = bestImg;
+        }
     }
 }
