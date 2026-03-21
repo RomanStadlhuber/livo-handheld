@@ -74,6 +74,8 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> pcd;
         /// @brief Pose of the scan w.r.t. the latest keyframe pose
         std::shared_ptr<gtsam::Pose3> kf_T_scan;
+        /// @brief Temporally synced camera image for this scan (nullptr if no association exists)
+        std::shared_ptr<CameraData> syncedCameraData{nullptr};
     };
 
     /// @ingroup types

@@ -41,9 +41,11 @@ namespace mapping
         /// Use the scan buffer entries pose data to transform the scan to the desired frame.
         /// @param scanPoseToLastKeyframe Pose of the scan relative to last keyframe
         /// @param pcdScan Voxelized pointcloud of the scan
+        /// @param syncedCameraData Temporally synced camera image (nullptr if no association exists)
         void bufferScan(
             const gtsam::Pose3 &scanPoseToLastKeyframe,
-            std::shared_ptr<open3d::geometry::PointCloud> pcdScan);
+            std::shared_ptr<open3d::geometry::PointCloud> pcdScan,
+            std::shared_ptr<CameraData> syncedCameraData = nullptr);
 
         /// @brief Get mutexes for lock guard or unique lock.
         /// You should always lock the corresponding mutex before accessing the buffers.

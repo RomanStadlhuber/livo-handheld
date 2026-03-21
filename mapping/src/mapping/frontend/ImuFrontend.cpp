@@ -150,8 +150,8 @@ namespace mapping
             open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, config.point_filter.min_distance, config.point_filter.max_distance);
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(config.lidar_frontend.voxel_size);
 
-            // Buffer undistorted scan
-            buffers.bufferScan(kf_T_scan, ptrPcdScanVoxelized);
+            // Buffer undistorted scan, carrying the camera association forward
+            buffers.bufferScan(kf_T_scan, ptrPcdScanVoxelized, scan->syncedCameraData);
             // update pose and time reference for computing delta between scans in next iteration
             deltaPoseLastScanToKeyframe = kf_T_scan;
             tLastScan = tScan;

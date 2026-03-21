@@ -33,8 +33,9 @@ namespace mapping
 
     void Buffers::bufferScan(
         const gtsam::Pose3 &scanPoseToLastKeyframe,
-        std::shared_ptr<open3d::geometry::PointCloud> pcdScan)
+        std::shared_ptr<open3d::geometry::PointCloud> pcdScan,
+        std::shared_ptr<CameraData> syncedCameraData)
     {
-        scanBuffer_.push_back(ScanBuffer{pcdScan, std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe)});
+        scanBuffer_.push_back(ScanBuffer{pcdScan, std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe), syncedCameraData});
     }
 }
