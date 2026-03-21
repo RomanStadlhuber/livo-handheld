@@ -14,6 +14,9 @@
 #include <Eigen/Dense>
 
 #include <mapping/types.hpp>
+#include <mapping/Config.hpp>
+#include <mapping/Buffers.hpp>
+#include <mapping/States.hpp>
 
 namespace mapping
 {
@@ -53,6 +56,23 @@ namespace mapping
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcd,
             Eigen::Isometry3d camera_T_lidar,
             cv::Mat img);
+
+        /// @brief Check the buffers to sync LiDAR & Camera
+        ///
+        /// Assuming that the buffer contains unprocessed LiDAR data, it will try to find
+        /// temporal associations to images, which can be used for SLAM and colorization.
+        ///
+        /// NOTE: this will modify the `LidarData::syncedCameraData` attribute if possible,
+        /// otherwise it will stay unchanged.
+        /// @param states Used to obtain extrinsic calibration between LiDAR and camera.
+        /// @param buffers Is accessed and modified based on the available camera & LiDAR data.
+        /// @param config Used to control the temporal synchronization tolerance
+        /// & camera buffer keepalive-time.
+        /// @note Modifies `buffers` in-place!
+        void syncCameraToLiDAR(
+            const States &states,
+            Buffers &buffers,
+            const MappingConfig &config);
 
     private:
         /// @brief The color space used to process images.

@@ -33,4 +33,18 @@ namespace mapping
          * - if within bounds, set its color from the image
          */
     }
+
+    void CameraFrontend::syncCameraToLiDAR(
+        const States &states,
+        Buffers &buffers,
+        const MappingConfig &config)
+    {
+        /**
+         * TODO: synchronization logic
+         * - current (latest) time is determined by newest LiDAR buffer timestamp-key
+         * - images oulder than (tNow - tKeepalive) are discarded (newer than tNow are kept)
+         * - for each timestamp in the LiDAR buffer, find the temporally closest image
+         * - if std::abs(tImg - tLiDAR) <= config.camera_frontend.keepalive_window, set the sync association
+         */
+    }
 }
