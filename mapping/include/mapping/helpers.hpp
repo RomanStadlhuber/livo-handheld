@@ -98,6 +98,33 @@ namespace mapping
         return {isValid, planeNormal, planeCenter, planePoints, planeThickness};
     }
 
+    /// @brief In-place modification to remove all points without color.
+    /// @note Points where `colors_[i] == NO_COLOR` are removed, along with their position entry.
+    /// If the pointcloud has no colors at all, all points are removed.
+    /// @param ptrPcd
+    inline void removeUncoloredPoints(
+        std::shared_ptr<open3d::geometry::PointCloud> ptrPcd)
+    {
+        if (!ptrPcd->HasColors())
+        {
+            ptrPcd->points_.clear();
+            return;
+        }
+
+        size_t writeIdx = 0;
+        for (size_t i = 0; i < ptrPcd->colors_.size(); ++i)
+        {
+            if (ptrPcd->colors_[i] != NO_COLOR)
+            {
+                ptrPcd->points_[writeIdx] = ptrPcd->points_[i];
+                ptrPcd->colors_[writeIdx] = ptrPcd->colors_[i];
+                ++writeIdx;
+            }
+        }
+        ptrPcd->points_.resize(writeIdx);
+        ptrPcd->colors_.resize(writeIdx);
+    }
+
 } // namespace mapping
 
 #endif // MAPPING_HELPERS_HPP_
