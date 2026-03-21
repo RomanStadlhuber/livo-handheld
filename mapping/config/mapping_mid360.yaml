@@ -21,6 +21,12 @@ lidar_frontend:
     thresh_angle: 0.175 # [rad], ~10 degrees
     thresh_elapsed_scans: 5
 
+camera_frontend:
+  color_space: RGB # can be RGB or BGR (both 8-bit)
+  colorize_scans: true # if enabled, will colorize points within the image
+  sync_tolerance: 0.01 # [sec.], tolerance for syncing images to LiDAR scans
+  keepalive_window: 0.6 # [sec.], how long images are kept for sync before being discarded
+
 recovery:
   voxel_size: 0.2 # [m], voxel size to use for recovery reference point cloud
   reference_window_size: 10 # [keyframes], number of keyframes to use for recovery reference
