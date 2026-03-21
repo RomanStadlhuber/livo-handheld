@@ -5,9 +5,8 @@
 #ifndef MAPPING_FRONTEND_CAMERAFRONTEND_HPP_
 #define MAPPING_FRONTEND_CAMERAFRONTEND_HPP_
 
-#include <array>
-#include <vector>
 #include <memory>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
 #include <open3d/geometry/PointCloud.h>
@@ -78,10 +77,10 @@ namespace mapping
     private:
         /// @brief The color space used to process images.
         mapping::CameraColorSpace colorSpace_{mapping::CameraColorSpace::RGB};
-        /// @brief pinhole parameters in order `fx, fy, cx, cy`.
-        std::array<float, 4U> pinholeParams_{1, 1, 0, 0};
-        /// @brief Coefficients of the distortion model
-        std::vector<float> distortionCoefficients_;
+        /// @brief 3x3 pinhole intrinsic matrix, built once on setCalibration.
+        cv::Mat K_;
+        /// @brief Distortion coefficients, stored as cv::Mat for direct use with cv::projectPoints.
+        cv::Mat distCoeffs_;
         /// @brief The calibration type expressed by the coefficients.
         mapping::CameraCalibrationType calibrationType_;
         bool hasCalibration_{false};

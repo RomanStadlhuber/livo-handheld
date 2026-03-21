@@ -16,8 +16,11 @@ namespace mapping
         std::vector<float> distortionCoefficients)
     {
         calibrationType_ = calibrationType;
-        pinholeParams_ = {fx, fy, cx, cy};
-        distortionCoefficients_ = distortionCoefficients;
+        K_ = (cv::Mat_<double>(3, 3) <<
+            fx, 0,  cx,
+            0,  fy, cy,
+            0,  0,  1);
+        distCoeffs_ = cv::Mat(distortionCoefficients, /*copyData=*/true);
         hasCalibration_ = true;
     }
 
@@ -30,7 +33,7 @@ namespace mapping
         cv::Mat img;
         if (cameraData.colorSpace != colorSpace_)
         {
-            // only RGB <-> BGR conversions are supported
+            // only one conversion needed, as COLOR_BGR2RGB just flips 1st & 3rd channels
             cv::cvtColor(cameraData.img, img, cv::COLOR_BGR2RGB);
         }
         else
@@ -38,12 +41,47 @@ namespace mapping
             img = cameraData.img;
         }
 
-        /**
-         * TODO:
-         * - transform LiDAR-frame point to Camera-frame
-         * - project 3D point to image space
-         * - if within bounds, set its color from the image
-         */
+        if (!hasCalibration_)
+            return;
+
+        const cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64F);
+        const cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64F);
+
+        const int imgWidth = img.cols;
+        const int imgHeight = img.rows;
+
+        // initialize pointcloud colors
+        ptrPcd->colors_.resize(ptrPcd->points_.size(), Eigen::Vector3d::Zero());
+
+        // transform points to camera frame, keeping only those in front of the camera
+        std::vector<int> validIndices;
+        std::vector<cv::Point3d> pointsCam;
+        for (int i = 0; i < static_cast<int>(ptrPcd->points_.size()); ++i)
+        {
+            const Eigen::Vector3d pCam = camera_T_lidar * ptrPcd->points_[i];
+            if (pCam.z() <= 0.0)
+                continue;
+            validIndices.push_back(i);
+            pointsCam.emplace_back(pCam.x(), pCam.y(), pCam.z());
+        }
+
+        if (pointsCam.empty())
+            return;
+
+        // project to image plane (points are already in camera frame, so rvec/tvec are identity)
+        std::vector<cv::Point2d> projected;
+        cv::projectPoints(pointsCam, rvec, tvec, K_, distCoeffs_, projected);
+
+        // sample pixel color for each point within image bounds
+        for (int j = 0; j < static_cast<int>(projected.size()); ++j)
+        {
+            const int u = static_cast<int>(std::round(projected[j].x));
+            const int v = static_cast<int>(std::round(projected[j].y));
+            if (u < 0 || u >= imgWidth || v < 0 || v >= imgHeight)
+                continue;
+            const cv::Vec3b &pixel = img.at<cv::Vec3b>(v, u);
+            ptrPcd->colors_[validIndices[j]] = Eigen::Vector3d(pixel[0], pixel[1], pixel[2]) / 255.0;
+        }
     }
 
     void CameraFrontend::syncCameraToLiDAR(
