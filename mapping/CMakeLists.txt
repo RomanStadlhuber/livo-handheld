@@ -22,6 +22,7 @@ find_package(visualization_msgs REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2_storage REQUIRED)
+find_package(OpenCV REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
@@ -57,6 +58,7 @@ add_library(mapping
   # frontends
   src/mapping/frontend/ImuFrontend.cpp
   src/mapping/frontend/LidarFrontend.cpp
+  src/mapping/frontend/CameraFrontend.cpp
   src/mapping/frontend/RecoveryFrontend.cpp
   # backend
   src/mapping/backend/FeatureManager.cpp
@@ -67,7 +69,8 @@ target_include_directories(mapping PUBLIC include)
 
 target_link_libraries(mapping
   Eigen3::Eigen 
-  Open3D::Open3D 
+  ${OpenCV_LIBS}
+  Open3D::Open3D
   gtsam 
   gtsam_unstable 
   config_utilities::config_utilities
