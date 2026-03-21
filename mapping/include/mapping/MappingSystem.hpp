@@ -11,6 +11,7 @@
 #include <mapping/States.hpp>
 #include <mapping/frontend/ImuFrontend.hpp>
 #include <mapping/frontend/LidarFrontend.hpp>
+#include <mapping/frontend/CameraFrontend.hpp>
 #include <mapping/frontend/RecoveryFrontend.hpp>
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/backend/Smoother.hpp>
@@ -115,6 +116,7 @@ namespace mapping
         States states_;
         ImuFrontend imuFrontend_;
         LidarFrontend lidarFrontend_;
+        CameraFrontend cameraFrontend_;
         FeatureManager featureManager_;
         Smoother smoother_;
 
