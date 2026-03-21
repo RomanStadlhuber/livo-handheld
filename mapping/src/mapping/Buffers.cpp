@@ -16,6 +16,12 @@ namespace mapping
         lidarBuffer_[timestamp] = lidar_data;
     }
 
+    void Buffers::feedCamera(const std::shared_ptr<CameraData> &camera_data, double timestamp)
+    {
+        std::lock_guard<std::mutex> lock(mtxCameraBuffer);
+        cameraBuffer_[timestamp] = camera_data;
+    }
+
     void Buffers::reset()
     {
         std::lock_guard<std::mutex> lockImu(mtxImuBuffer_);

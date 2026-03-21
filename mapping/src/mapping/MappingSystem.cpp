@@ -23,9 +23,11 @@ namespace mapping
         smoother_.reset(config_);
         featureManager_.setCalibrationKeys(
             config_.extrinsics.temporal_calibration_enabled
-                ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+                ? boost::optional<gtsam::Key>(T(0))
+                : boost::none,
             config_.extrinsics.extrinsic_calibration_enabled
-                ? boost::optional<gtsam::Key>(E(0)) : boost::none);
+                ? boost::optional<gtsam::Key>(E(0))
+                : boost::none);
     }
 
     void MappingSystem::setConfig(const MappingConfig &config)
@@ -37,9 +39,11 @@ namespace mapping
         smoother_.reset(config_);
         featureManager_.setCalibrationKeys(
             config_.extrinsics.temporal_calibration_enabled
-                ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+                ? boost::optional<gtsam::Key>(T(0))
+                : boost::none,
             config_.extrinsics.extrinsic_calibration_enabled
-                ? boost::optional<gtsam::Key>(E(0)) : boost::none);
+                ? boost::optional<gtsam::Key>(E(0))
+                : boost::none);
     }
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
@@ -50,6 +54,11 @@ namespace mapping
     void MappingSystem::feedLidar(const std::shared_ptr<LidarData> &lidar_data, double timestamp)
     {
         buffers_.feedLidar(lidar_data, timestamp);
+    }
+
+    void MappingSystem::feedCamera(const std::shared_ptr<CameraData> &camera_data, double timestamp)
+    {
+        buffers_.feedCamera(camera_data, timestamp);
     }
 
     void MappingSystem::update()
@@ -83,9 +92,11 @@ namespace mapping
             featureManager_.reset();
             featureManager_.setCalibrationKeys(
                 config_.extrinsics.temporal_calibration_enabled
-                    ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+                    ? boost::optional<gtsam::Key>(T(0))
+                    : boost::none,
                 config_.extrinsics.extrinsic_calibration_enabled
-                    ? boost::optional<gtsam::Key>(E(0)) : boost::none);
+                    ? boost::optional<gtsam::Key>(E(0))
+                    : boost::none);
             states_.reset(w_X_recovery);
             buffers_.reset();
 

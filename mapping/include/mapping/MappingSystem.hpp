@@ -47,6 +47,11 @@ namespace mapping
         /// @param timestamp Scan timestamp
         void feedLidar(const std::shared_ptr<LidarData> &lidar_data, double timestamp);
 
+        /// @brief Feed images to the system.
+        /// @param cam_data The image (+ color space)
+        /// @param timestamp Image timestamp
+        void feedCamera(const std::shared_ptr<CameraData> &camera_data, double timestamp);
+
         /// @brief Process buffered measurements and update state estimate
         void update();
 
@@ -99,7 +104,7 @@ namespace mapping
         ///
         /// NOTE: in the case of system recovery, it still makes sense to use the last available bias estimate,
         /// while the pose and velocity will be recovered by the `RelocalizationFrontend`.
-        /// 
+        ///
         /// USAGE: Use the returned `gtsam::NonlinearFactorGraph priors` with `smoother_.setPriors(idxKeyframe, priors, xPrior, bPrior);`.
         /// @param idxKeyframe Index of the initialization keyframe.
         /// @param xPrior Initial navigation state prior, obtained from static initialization or recovery.
