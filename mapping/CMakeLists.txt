@@ -22,6 +22,7 @@ find_package(visualization_msgs REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2_storage REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(GTSAM_UNSTABLE REQUIRED)
@@ -77,7 +78,7 @@ ament_target_dependencies(mapper
   rclcpp std_msgs geometry_msgs sensor_msgs
   livox_ros_driver2 rosbag2_cpp rosbag2_storage
   tf2 tf2_ros nav_msgs open3d_conversions
-  visualization_msgs
+  cv_bridge visualization_msgs
 )
 target_link_libraries(mapper mapping)
 
