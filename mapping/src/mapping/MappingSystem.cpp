@@ -242,6 +242,20 @@ namespace mapping
                   << " (thresh " << config_.lidar_frontend.keyframe.thresh_angle << "), scans elapsed: " << scansSinceLastKeyframe
                   << " (thresh " << config_.lidar_frontend.keyframe.thresh_elapsed_scans << ") :::" << std::endl;
 
+        // colorize each buffered scan in-place while still in LiDAR frame, before accumulation transforms them
+        if (config_.camera_frontend.colorize_scans)
+        {
+            const Eigen::Isometry3d imu_T_camera = config_.extrinsics.imu_T_camera.toIsometry3d();
+            const Eigen::Isometry3d imu_T_lidar = Eigen::Isometry3d(states_.getImuToLidarExtrinsic().matrix());
+            const Eigen::Isometry3d camera_T_lidar = imu_T_camera.inverse() * imu_T_lidar;
+            for (auto &scan : buffers_.getScanBuffer())
+            {
+                if (scan.syncedCameraData == nullptr)
+                    continue;
+                cameraFrontend_.colorizeInPlace(scan.pcd, camera_T_lidar, *scan.syncedCameraData);
+            }
+        }
+
         // modifies buffers_: clears scan buffer after merging all buffered scans
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
             lidarFrontend_.accumulateUndistortedScans(states_, buffers_, config_);

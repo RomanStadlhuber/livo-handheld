@@ -24,8 +24,20 @@ namespace mapping
     void CameraFrontend::colorizeInPlace(
         std::shared_ptr<open3d::geometry::PointCloud> ptrPcd,
         Eigen::Isometry3d camera_T_lidar,
-        cv::Mat img)
+        const CameraData &cameraData)
     {
+        // convert color space if it doesn't match the frontend's configured color space
+        cv::Mat img;
+        if (cameraData.colorSpace != colorSpace_)
+        {
+            // only RGB <-> BGR conversions are supported
+            cv::cvtColor(cameraData.img, img, cv::COLOR_BGR2RGB);
+        }
+        else
+        {
+            img = cameraData.img;
+        }
+
         /**
          * TODO:
          * - transform LiDAR-frame point to Camera-frame
