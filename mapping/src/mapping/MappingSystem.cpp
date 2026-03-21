@@ -220,6 +220,11 @@ namespace mapping
         const double angleDiff = (lastKfPose.rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
         states_.setCurrentState(w_X_propagated);
 
+
+        // temporal synchronization between LiDAR scans and camera images
+        // IMPORTANT: syncing uses the raw LiDAR buffer & must happen before undistort,
+        // as undistortScans() clears the raw LiDAR buffer!!
+        cameraFrontend_.syncCameraToLiDAR(states_, buffers_, config_);
         /* Undistort all scans using constant-velocity motion model and buffer them.
          * Modifies buffers_ (fills scan buffer, clears lidar buffer)
          * and states_ (updates tLastScan_).
