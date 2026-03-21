@@ -4,7 +4,7 @@ namespace mapping
 {
     void CameraFrontend::setColorSpace(mapping::ColorSpace colorSpace)
     {
-        _colorSpace = colorSpace;
+        colorSpace_ = colorSpace;
     }
 
     void CameraFrontend::setCalibration(
@@ -15,10 +15,10 @@ namespace mapping
         double cy,
         std::vector<float> distortionCoefficients = {})
     {
-        _calibrationType = calibrationType;
-        _pinholeParams = {fx, fy, cx, cy};
-        _distortionCoefficients = distortionCoefficients;
-        _hasCalibration = true;
+        calibrationType_ = calibrationType;
+        pinholeParams_ = {fx, fy, cx, cy};
+        distortionCoefficients_ = distortionCoefficients;
+        hasCalibration_ = true;
     }
 
     void CameraFrontend::colorizeInPlace(

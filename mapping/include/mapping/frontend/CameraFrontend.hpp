@@ -55,14 +55,14 @@ namespace mapping
 
     private:
         /// @brief The color space used to process images.
-        mapping::CameraColorSpace _colorSpace{mapping::CameraColorSpace::RGB};
+        mapping::CameraColorSpace colorSpace_{mapping::CameraColorSpace::RGB};
         /// @brief pinhole parameters in order `fx, fy, cx, cy`.
-        std::array<float, 4U> _pinholeParams{1, 1, 0, 0};
+        std::array<float, 4U> pinholeParams_{1, 1, 0, 0};
         /// @brief Coefficients of the distortion model
-        std::vector<float> _distortionCoefficients;
+        std::vector<float> distortionCoefficients_;
         /// @brief The calibration type expressed by the coefficients.
-        mapping::CameraCalibrationType _calibrationType;
-        bool _hasCalibration{false};
+        mapping::CameraCalibrationType calibrationType_;
+        bool hasCalibration_{false};
     };
 }
 
