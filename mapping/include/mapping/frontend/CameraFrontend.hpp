@@ -47,16 +47,6 @@ namespace mapping
             float cy,
             std::vector<float> distortionCoefficients = {});
 
-        /// @brief Colorize a pointcloud (LiDAR-frame) in-place.
-        /// @param ptrPcd Shared ptr to the pointcloud (assumed in LiDAR-frame!!)
-        /// @param camera_T_lidar Extrinsic calibration to express a LiDAR point in the camera frame.
-        /// @param cameraData Camera image with its color space.
-        /// @note If the image color space does not match the frontend's configured color space, it will be converted.
-        void colorizeInPlace(
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcd,
-            Eigen::Isometry3d camera_T_lidar,
-            const CameraData &cameraData);
-
         /// @brief Check the buffers to sync LiDAR & Camera
         ///
         /// Assuming that the buffer contains unprocessed LiDAR data, it will try to find
@@ -73,6 +63,31 @@ namespace mapping
             const States &states,
             Buffers &buffers,
             const MappingConfig &config);
+
+        /// @brief Colorize an accumulated submap from the most recent synchronized image in the scan window.
+        /// @note Falls back to earlier scans if the last scan has no synced image. This introduces a small
+        /// geometric error when the picked image was not captured at the last scan's pose, as camera_T_lidar
+        /// is computed relative to the last scan's LiDAR frame.
+        /// @param states Used to compute the extrinsic between camera and LiDAR
+        /// @param buffers Used to find the most recent synced image across the buffered scan window
+        /// @param ptrPcd The submap pointcloud, assumed to be in the LiDAR frame, colorization is in-place.
+        void colorizeSubmapInPlace(
+            const States &states,
+            Buffers &buffers,
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcd
+        );
+
+    private:
+        /// @brief Colorize a pointcloud (LiDAR-frame) in-place.
+        /// @param ptrPcd Shared ptr to the pointcloud (assumed in LiDAR-frame!!)
+        /// @param camera_T_lidar Extrinsic calibration to express a LiDAR point in the camera frame.
+        /// @param cameraData Camera image with its color space.
+        /// @note If the image color space does not match the frontend's configured color space, it will be converted.
+        void colorizeInPlace(
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcd,
+            Eigen::Isometry3d camera_T_lidar,
+            const CameraData &cameraData);
+
 
     private:
         /// @brief The color space used to process images.

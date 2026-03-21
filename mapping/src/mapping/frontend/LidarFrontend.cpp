@@ -21,7 +21,7 @@ namespace mapping
          *
          * It is important that the scans in the buffer are not transformed before this.
          */
-        std::list<ScanBuffer> &scanBuffer = buffers.getScanBuffer();
+        const std::list<ScanBuffer> &scanBuffer = buffers.getScanBuffer();
         const gtsam::Pose3 newKf_T_lastKf = scanBuffer.rbegin()->kf_T_scan->inverse();
         for (auto reverseIt = scanBuffer.rbegin(); reverseIt != scanBuffer.rend(); ++reverseIt)
         {
@@ -33,7 +33,6 @@ namespace mapping
             newSubmap += *(scan.pcd);
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config.lidar_frontend.voxel_size);
-        buffers.getScanBuffer().clear(); // reset undistorted scan buffer
         return ptrNewSubmapVoxelized;
     }
 

@@ -26,7 +26,6 @@ namespace mapping
         ~LidarFrontend() = default;
 
         /// @brief Accumulated undistorted scans from the buffer into a single keyframe submap.
-        /// **NOTE:** this will internally reset the undistorted scan buffer!
         /// @param states The current state of the system, used for reference (not modified).
         /// @param buffers The buffers to be used for accumulation.
         /// @return The accumulated submap PointCloud as shared_ptr.

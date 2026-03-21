@@ -70,6 +70,9 @@ namespace mapping
         void setImuToLidarExtrinsic(const gtsam::Pose3 &newExtrinsic) { imu_T_lidar_ = newExtrinsic; };
         gtsam::Pose3 &getImuToLidarExtrinsic() const { return imu_T_lidar_; };
 
+        void setImuToCameraExtrinsic(const gtsam::Pose3 &newExtrinsic) { imu_T_camera_ = newExtrinsic; };
+        gtsam::Pose3 &getImuToCameraExtrinsic() const { return imu_T_camera_; };
+
         void setTemporalOffset(double dt) { temporalOffset_ = dt; }
         double getTemporalOffset() const { return temporalOffset_; }
 
@@ -132,7 +135,8 @@ namespace mapping
         // estimator lifecycle values
         mutable gtsam::NavState w_X_curr_, w_X_preint_;
         gtsam::imuBias::ConstantBias currBias_;
-        mutable gtsam::Pose3 imu_T_lidar_; // imu-lidar extrinsic calibration.
+        mutable gtsam::Pose3 imu_T_lidar_;   // imu-lidar extrinsic calibration.
+        mutable gtsam::Pose3 imu_T_camera_;  // imu-camera extrinsic calibration.
         double temporalOffset_{0.0};      // temporal offset [s]
         /// @brief Latest estimate of the smoother after updates are completed.
         gtsam::Values smootherEstimate_;

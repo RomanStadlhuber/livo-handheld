@@ -84,6 +84,37 @@ namespace mapping
         }
     }
 
+    void CameraFrontend::colorizeSubmapInPlace(
+        const States &states,
+        Buffers &buffers,
+        std::shared_ptr<open3d::geometry::PointCloud> ptrPcd)
+    {
+        // find the most recent synced image across all buffered scans
+        /** NOTE: using an image from an earlier scan introduces a small geometric error since
+         * camera_T_lidar is computed relative to the last scan's LiDAR pose, but the image may
+         * have been captured at a different pose
+         **/
+        std::shared_ptr<CameraData> syncedImage;
+        for (auto it = buffers.getScanBuffer().rbegin(); it != buffers.getScanBuffer().rend(); ++it)
+        {
+            if (it->syncedCameraData != nullptr)
+            {
+                syncedImage = it->syncedCameraData;
+                break;
+            }
+        }
+        if (syncedImage == nullptr)
+            return;
+
+        // build extrinsics between LiDAR and camera 
+        const Eigen::Isometry3d
+            imu_T_camera = Eigen::Isometry3d(states.getImuToCameraExtrinsic().matrix()),
+            imu_T_lidar = Eigen::Isometry3d(states.getImuToLidarExtrinsic().matrix()),
+            camera_T_lidar = imu_T_camera.inverse() * imu_T_lidar;
+
+        colorizeInPlace(ptrPcd, camera_T_lidar, *syncedImage);
+    }
+
     void CameraFrontend::syncCameraToLiDAR(
         const States &states,
         Buffers &buffers,

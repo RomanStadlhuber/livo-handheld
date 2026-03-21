@@ -215,6 +215,14 @@ namespace mapping
             tf.translation() = translation;
             return tf;
         }
+
+        /// @brief Convert config to gtsam::Pose3
+        gtsam::Pose3 toPose3() const
+        {
+            Eigen::Quaterniond quat(rotation(3), rotation(0), rotation(1), rotation(2));
+            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()),
+                                gtsam::Point3(translation));
+        }
     };
 
     inline void declare_config(ImuCameraTransformConfig &config)
