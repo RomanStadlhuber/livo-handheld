@@ -15,6 +15,7 @@
 #include <gtsam/navigation/NavState.h>
 #include <gtsam/inference/Symbol.h>
 #include <open3d/geometry/PointCloud.h>
+#include <opencv2/opencv.hpp>
 
 using gtsam::symbol_shorthand::B;
 using gtsam::symbol_shorthand::E; // Extrinsic calibration (Pose3)

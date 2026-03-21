@@ -9,11 +9,11 @@
 #include <vector>
 #include <memory>
 
-#include <opencv4/opencv2/opencv.hpp>
+#include <opencv2/opencv.hpp>
 #include <open3d/geometry/PointCloud.h>
 #include <Eigen/Dense>
 
-#include <types.hpp>
+#include <mapping/types.hpp>
 
 namespace mapping
 {
@@ -21,11 +21,12 @@ namespace mapping
     class CameraFrontend
     {
     public:
+        /// @note The camera frontend defaults to processing and outputting RGB!
         CameraFrontend() = default;
         ~CameraFrontend() = default;
 
         /// @brief Change the color space within which images are processed.
-        void setColorSpace(mapping::ColorSpace colorSpace);
+        void setColorSpace(mapping::CameraColorSpace colorSpace);
 
         /// @brief Set the initial calibration (perspective camera).
         /// @param calibrationType The type of camera that is being used.
@@ -38,10 +39,10 @@ namespace mapping
         /// `PinholeEquidistant` uses `cv::fisheye` and is **not supported as of yet**.
         void setCalibration(
             mapping::CameraCalibrationType calibrationType,
-            double fx,
-            double fy,
-            double cx,
-            double cy,
+            float fx,
+            float fy,
+            float cx,
+            float cy,
             std::vector<float> distortionCoefficients = {});
 
         /// @brief Colorize a pointcloud (LiDAR-frame) in-place.
