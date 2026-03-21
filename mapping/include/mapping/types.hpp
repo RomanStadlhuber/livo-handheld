@@ -26,22 +26,6 @@ using gtsam::symbol_shorthand::X;
 namespace mapping
 {
     /// @ingroup types
-    /// @brief IMU measurement data
-    struct ImuData
-    {
-        Eigen::Vector3d acceleration;
-        Eigen::Vector3d angular_velocity;
-    };
-
-    /// @ingroup types
-    /// @brief LiDAR scan data with per-point timestamps
-    struct LidarData
-    {
-        std::vector<Eigen::Vector3d> points;
-        std::vector<double> offset_times;
-    };
-
-    /// @ingroup types
     /// @brief The color space within which the system should operate.
     /// Change this if you have any specific requirements for interfacing
     /// with the system.
@@ -59,6 +43,24 @@ namespace mapping
     {
         cv::Mat img;
         CameraColorSpace colorSpace;
+    };
+
+    /// @ingroup types
+    /// @brief IMU measurement data
+    struct ImuData
+    {
+        Eigen::Vector3d acceleration;
+        Eigen::Vector3d angular_velocity;
+    };
+
+    /// @ingroup types
+    /// @brief LiDAR scan data with per-point timestamps
+    struct LidarData
+    {
+        std::vector<Eigen::Vector3d> points;
+        std::vector<double> offset_times;
+        /// @note Expect this to be `nullptr` most of the time!
+        std::shared_ptr<CameraData> syncedCameraData;
     };
 
     template <typename T>
