@@ -155,6 +155,27 @@ namespace mapping
         check(config.max_distance, GT, config.min_distance, "max_distance");
     }
 
+    /// @brief Camera frontend processing parameters
+    struct CameraFrontendConfig
+    {
+        std::string color_space = "RGB"; // "RGB" or "BGR"
+        bool colorize_scans = true;
+        double sync_tolerance = 0.01;  // [s], max. temporal offset for LiDAR-camera sync
+        double keepalive_window = 0.6; // [s], how long images are kept before being discarded
+    };
+
+    inline void declare_config(CameraFrontendConfig &config)
+    {
+        using namespace config;
+        name("CameraFrontendConfig");
+        field(config.color_space, "color_space");
+        field(config.colorize_scans, "colorize_scans");
+        field(config.sync_tolerance, "sync_tolerance", "s");
+        field(config.keepalive_window, "keepalive_window", "s");
+        check(config.sync_tolerance, GT, 0.0, "sync_tolerance");
+        check(config.keepalive_window, GT, 0.0, "keepalive_window");
+    }
+
     /// @brief IMU-LiDAR extrinsic calibration
     struct ImuLidarTransformConfig
     {
@@ -179,12 +200,38 @@ namespace mapping
         field(config.rotation, "rotation");
     }
 
+    /// @brief IMU-Camera extrinsic calibration
+    struct ImuCameraTransformConfig
+    {
+        Eigen::Vector3d translation{0, 0, 0}; // [m]
+        Eigen::Vector4d rotation{0, 0, 0, 1}; // hamilton quaternion (x, y, z, w)
+
+        /// @brief Convert config to Eigen::Isometry3d
+        Eigen::Isometry3d toIsometry3d() const
+        {
+            Eigen::Quaterniond quat(rotation(3), rotation(0), rotation(1), rotation(2));
+            Eigen::Isometry3d tf = Eigen::Isometry3d::Identity();
+            tf.linear() = quat.normalized().toRotationMatrix();
+            tf.translation() = translation;
+            return tf;
+        }
+    };
+
+    inline void declare_config(ImuCameraTransformConfig &config)
+    {
+        using namespace config;
+        name("ImuCameraTransformConfig");
+        field(config.translation, "translation", "m");
+        field(config.rotation, "rotation");
+    }
+
     /// @brief Extrinsic calibration parameters
     struct ExtrinsicsConfig
     {
         bool temporal_calibration_enabled = false;
         bool extrinsic_calibration_enabled = false;
         ImuLidarTransformConfig imu_T_lidar;
+        ImuCameraTransformConfig imu_T_camera;
         double imu_t_lidar = 0.0; // initial temporal offset [s]
     };
 
@@ -195,6 +242,7 @@ namespace mapping
         field(config.temporal_calibration_enabled, "temporal_calibration_enabled");
         field(config.extrinsic_calibration_enabled, "extrinsic_calibration_enabled");
         field(config.imu_T_lidar, "imu_T_lidar");
+        field(config.imu_T_camera, "imu_T_camera");
         field(config.imu_t_lidar, "imu_t_lidar", "s");
     }
 
@@ -203,6 +251,7 @@ namespace mapping
     {
         BackendConfig backend;
         LidarFrontendConfig lidar_frontend;
+        CameraFrontendConfig camera_frontend;
         PointFilterConfig point_filter;
         ExtrinsicsConfig extrinsics;
         RecoveryConfig recovery;
@@ -214,6 +263,7 @@ namespace mapping
         name("MappingConfig");
         field(config.backend, "backend");
         field(config.lidar_frontend, "lidar_frontend");
+        field(config.camera_frontend, "camera_frontend");
         field(config.point_filter, "point_filter");
         field(config.extrinsics, "extrinsics");
         field(config.recovery, "recovery");
