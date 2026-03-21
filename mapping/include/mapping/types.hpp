@@ -42,10 +42,23 @@ namespace mapping
     };
 
     /// @ingroup types
+    /// @brief The color space within which the system should operate.
+    /// Change this if you have any specific requirements for interfacing
+    /// with the system.
+    enum class CameraColorSpace
+    {
+        // The default with which the system operates.
+        RGB,
+        // Only used with OpenCV whenever necessary.
+        BGR,
+    };
+
+    /// @ingroup types
     /// @brief Camera image data.
     struct CameraData
     {
         cv::Mat img;
+        CameraColorSpace colorSpace;
     };
 
     template <typename T>
@@ -72,18 +85,6 @@ namespace mapping
          * afaik, only needs to use cv::fisheye namespace
          */
         PInholeEquidistant,
-    };
-
-    /// @ingroup types
-    /// @brief The color space within which the system should operate.
-    /// Change this if you have any specific requirements for interfacing
-    /// with the system.
-    enum class CameraColorSpace
-    {
-        // The default with which the system operates.
-        RGB,
-        // Only used with OpenCV whenever necessary.
-        BGR,
     };
 
     /// @ingroup types
