@@ -7,6 +7,8 @@
 #include <rosbag2_cpp/reader.hpp>
 #include <rosbag2_cpp/readers/sequential_reader.hpp>
 #include <rosbag2_storage/storage_options.hpp>
+#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/rgb_colors.h>
 
 // Mapping
 #include <mapping/MappingSystem.hpp>
@@ -70,18 +72,27 @@ public:
         // use callback groups so to keep feeding IMU while keyframe updates are running
         callbackGroupImu_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         callbackGroupLidar_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+        callbackGroupCamera_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
-        auto imuSubOpt = rclcpp::SubscriptionOptions();
+        rclcpp::SubscriptionOptions
+            imuSubOpt = rclcpp::SubscriptionOptions(),
+            lidarSubOpt = rclcpp::SubscriptionOptions(),
+            cameraSubOpt = rclcpp::SubscriptionOptions();
         imuSubOpt.callback_group = callbackGroupImu_;
-        auto lidarSubOpt = rclcpp::SubscriptionOptions();
         lidarSubOpt.callback_group = callbackGroupLidar_;
+        cameraSubOpt.callback_group = callbackGroupCamera_;
 
+        // --- subscribers ---
         subImu_ = this->create_subscription<sensor_msgs::msg::Imu>(
             // 2 seconds assuming 500 [Hz] IMU
             "/livox/imu", 1000, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1), imuSubOpt);
         subLidar_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
             // 2 seconds assuming 10 [Hz] LiDAR
             "livox/lidar", 20, std::bind(&MapperNode::lidarCallback, this, std::placeholders::_1), lidarSubOpt);
+        subCamera_ = this->create_subscription<sensor_msgs::msg::Image>(
+            // 2 seconds assuming 20 FPS
+            "/camera/image_raw", 40, std::bind(&MapperNode::cameraCallback, this, std::placeholders::_1), cameraSubOpt);
+        // --- publishers ----
         pubSlidingWindowPath_ = this->create_publisher<nav_msgs::msg::Path>(
             "mapping/window", 10);
         pubHistoricalPosesPath_ = this->create_publisher<nav_msgs::msg::Path>(
@@ -150,6 +161,30 @@ private:
         slam_.feedLidar(lidar_data, timestamp);
         slam_.update();
         publishStates();
+    }
+
+    void cameraCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+    {
+        if (!hasStartTime_) /// NOTE: camere is auxiliary (skips until system starts)
+            return;
+
+        double timestamp = (rclcpp::Time(msg->header.stamp) - startTime_).seconds();
+
+        cv_bridge::CvImageConstPtr cvPtr;
+        try
+        {
+            cvPtr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::RGB8);
+        }
+        catch (const cv_bridge::Exception &e)
+        {
+            RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+            return;
+        }
+        auto cam_data = std::make_shared<mapping::CameraData>();
+        cam_data->img = cvPtr->image;
+        cam_data->colorSpace = mapping::CameraColorSpace::RGB;
+        // feed to SLAM system
+        slam_.feedCamera(cam_data, timestamp);
     }
 
 private:
@@ -297,10 +332,16 @@ private:
     }
 
 private:
-    rclcpp::CallbackGroup::SharedPtr callbackGroupImu_;
-    rclcpp::CallbackGroup::SharedPtr callbackGroupLidar_;
+    /// @brief asynchronous, mutually exclusive, ROS2 callback-groups for the different sensors
+    /// this allows to process high-rate incoming data without halting the system.
+    /// @note Some of the data might be discarded due to the async nature of the process!
+    rclcpp::CallbackGroup::SharedPtr
+        callbackGroupImu_,
+        callbackGroupLidar_,
+        callbackGroupCamera_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subImu_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLidar_;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr subCamera_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubSlidingWindowPath_, pubHistoricalPosesPath_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubKeyframeSubmap_, pubGlobalMap_;
     // visualize the tracking factors as markers
@@ -314,6 +355,7 @@ private:
     // accessed from both IMU and LiDAR callback threads without a lock
     // TODO: in the future, use a mutex for values like this
     std::atomic<bool> hasStartTime_ = false;
+    /// @brief Scaling constant required to transform Livox IMU-data from `[g]` to `[m/s^2]`
     static constexpr double kLivoxImuScale = 9.81;
 
     mapping::MappingSystem slam_;
