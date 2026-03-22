@@ -44,8 +44,7 @@ namespace mapping
         if (!hasCalibration_)
             return;
 
-        const cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64F);
-        const cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64F);
+        const cv::Mat vec0{cv::Mat::zeros(3, 1, CV_64F)};
 
         const int imgWidth = img.cols;
         const int imgHeight = img.rows;
@@ -54,9 +53,9 @@ namespace mapping
         ptrPcd->colors_.resize(ptrPcd->points_.size(), mapping::NO_COLOR);
 
         // transform points to camera frame, keeping only those in front of the camera
-        std::vector<int> validIndices;
+        std::vector<std::size_t> validIndices;
         std::vector<cv::Point3d> pointsCam;
-        for (int i = 0; i < static_cast<int>(ptrPcd->points_.size()); ++i)
+        for (std::size_t i = 0; i < ptrPcd->points_.size(); ++i)
         {
             const Eigen::Vector3d pCam = camera_T_lidar * ptrPcd->points_[i];
             if (pCam.z() <= 0.0)
@@ -70,7 +69,7 @@ namespace mapping
 
         // project to image plane (points are already in camera frame, so rvec/tvec are identity)
         std::vector<cv::Point2d> projected;
-        cv::projectPoints(pointsCam, rvec, tvec, K_, distCoeffs_, projected);
+        cv::projectPoints(pointsCam, /*rvec=*/ vec0, /*tvec=*/ vec0, K_, distCoeffs_, projected);
 
         // sample pixel color for each point within image bounds
         for (int j = 0; j < static_cast<int>(projected.size()); ++j)
