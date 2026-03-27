@@ -46,3 +46,10 @@ If you want to know how the system works, it's probably a good idea to start out
 ### Sample Rosbags
 
 Rosbags I recorded with this very setup can be found [here](https://drive.google.com/drive/folders/16HWhqn81sXnHMIYXJMcS7yg8begUQgFc?usp=sharing).
+
+
+## Camera Integration
+
+This software uses ROS2.
+For a ROS2-compatible calibration toolbox, check out
+[Toyotas kalibr fork](https://github.com/ToyotaResearchInstitute/kalibr)!
