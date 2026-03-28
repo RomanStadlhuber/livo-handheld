@@ -83,36 +83,7 @@ namespace mapping
         }
         case SystemState::Recovery:
         {
-            const uint32_t idxKfRecovery = states_.getLatestKeyframeIdx();
-
-            // the initialization state from recovery (pose + velocity)
-            gtsam::NavState w_X_recovery = RecoveryFrontend::estimateRecoveryState(states_, config_);
-
-            // reset all components
-            featureManager_.reset();
-            featureManager_.setCalibrationKeys(
-                config_.extrinsics.temporal_calibration_enabled
-                    ? boost::optional<gtsam::Key>(T(0))
-                    : boost::none,
-                config_.extrinsics.extrinsic_calibration_enabled
-                    ? boost::optional<gtsam::Key>(E(0))
-                    : boost::none);
-            states_.reset(w_X_recovery);
-            buffers_.reset();
-
-            // rebuild smoother with new graph anchored at recovery keyframe
-            smoother_.reset(config_);
-            gtsam::imuBias::ConstantBias bPrior = states_.getCurrentBias();
-            gtsam::NonlinearFactorGraph priors = constructSystemPriors(
-                idxKfRecovery, w_X_recovery, bPrior);
-            smoother_.setPriors(idxKfRecovery, priors, w_X_recovery, bPrior);
-            smoother_.setCalibrationPriors(config_, states_.getImuToLidarExtrinsic());
-
-            // reset preintegrator with current bias estimate
-            imuFrontend_.resetPreintegrator(states_);
-            // bootstrap new clusters from recovery keyframe submap
-            featureManager_.createNewClusters(states_, idxKfRecovery, /*voxelSize=*/0);
-            // resume tracking
+            recoverState();
             states_.setLifecycleState(SystemState::Tracking);
             break;
         }
@@ -222,7 +193,7 @@ namespace mapping
 
         // temporal synchronization between LiDAR scans and camera images
         // IMPORTANT: syncing uses the raw LiDAR buffer & must happen before undistort,
-        // as undistortScans() clears the raw LiDAR buffer!!
+        // undistort does not clear the scan buffer, since it is needed for LiDAR-cam syncing
         cameraFrontend_.syncCameraToLiDAR(states_, buffers_, config_);
         /* Undistort all scans using constant-velocity motion model and buffer them.
          * Modifies buffers_ (fills scan buffer, clears lidar buffer)
@@ -279,10 +250,7 @@ namespace mapping
          * tracking factors. std::exchange is used internally to clear the factor buffers.
          */
         // modifies featureManager_: creates/updates/removes LiDAR factors, clears internal factor buffers
-        std::pair<gtsam::NonlinearFactorGraph, gtsam::FactorIndices> featureFactorsAndRemovals =
-            featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
-        gtsam::NonlinearFactorGraph &featureFactors = featureFactorsAndRemovals.first;
-        gtsam::FactorIndices &factorsToRemove = featureFactorsAndRemovals.second;
+        auto const &[featureFactors, factorsToRemove] = featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
 
         gtsam::CombinedImuFactor imuFactor = imuFrontend_.createPreintegrationFactor(idxKeyframe - 1, idxKeyframe);
 
@@ -300,13 +268,48 @@ namespace mapping
         // modifies imuFrontend_: resets preintegrator with updated bias from smoother estimate
         imuFrontend_.resetPreintegrator(states_);
 
-        // insert new clusters from a lagged keyframe to allow maturation before tracking
+        // insert new clusters from a keyframe htat has been optimized in multiple passes,
+        // as the feature positions from those are usually more mature than using e.g. the most recent KF
         if (idxKeyframe > config_.lidar_frontend.clustering.insert_lag + 1)
-            // modifies featureManager_: creates new premature clusters from the lagged keyframe
             featureManager_.createNewClusters(
                 states_,
                 idxKeyframe - config_.lidar_frontend.clustering.insert_lag,
                 config_.lidar_frontend.clustering.sampling_voxel_size);
+    }
+
+    void MappingSystem::recoverState()
+    {
+        const uint32_t idxKfRecovery = states_.getLatestKeyframeIdx();
+
+        // the initialization state from recovery (pose + velocity)
+        gtsam::NavState w_X_recovery = RecoveryFrontend::estimateRecoveryState(states_, config_);
+
+        // reset all components
+        featureManager_.reset();
+        featureManager_.setCalibrationKeys(
+            config_.extrinsics.temporal_calibration_enabled
+                ? boost::optional<gtsam::Key>(T(0))
+                : boost::none,
+            config_.extrinsics.extrinsic_calibration_enabled
+                ? boost::optional<gtsam::Key>(E(0))
+                : boost::none);
+        states_.reset(w_X_recovery);
+        buffers_.reset();
+
+        // rebuild smoother with new graph anchored at recovery keyframe
+        smoother_.reset(config_);
+        gtsam::imuBias::ConstantBias bPrior = states_.getCurrentBias();
+        gtsam::NonlinearFactorGraph priors = constructSystemPriors(
+            idxKfRecovery, w_X_recovery, bPrior);
+        smoother_.setPriors(idxKfRecovery, priors, w_X_recovery, bPrior);
+        smoother_.setCalibrationPriors(config_, states_.getImuToLidarExtrinsic());
+
+        // reset preintegrator with current bias estimate
+        imuFrontend_.resetPreintegrator(states_);
+        // bootstrap new clusters from recovery keyframe submap
+        // NOTE: voxelSize=0 uses all keyframe points (good for initialization)
+        featureManager_.createNewClusters(states_, idxKfRecovery, /*voxelSize=*/0);
+        // resume tracking
     }
 
     void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)

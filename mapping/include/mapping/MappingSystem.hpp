@@ -91,6 +91,12 @@ namespace mapping
         /// create keyframes, track clusters, and optimize the factor graph.
         void track();
 
+        /// @brief Attempty to recover the full system state  using the `RecoveryFrontend`.
+        ///
+        /// If recovery is successful, it will re-initialize at the recovered state so that
+        /// the system can keep tracking.
+        void recoverState();
+
         /// @brief Remove old keyframes and their cluster associations outside the sliding window.
         /// @details Must be called BEFORE tracking so that marginalization factors
         /// are created before the smoother update.
