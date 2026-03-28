@@ -5,6 +5,9 @@
 #ifndef MAPPING_CONFIG_HPP_
 #define MAPPING_CONFIG_HPP_
 
+#include <string>
+#include <vector>
+
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 
@@ -254,6 +257,60 @@ namespace mapping
         field(config.imu_t_lidar, "imu_t_lidar", "s");
     }
 
+    /// @brief Pinhole camera projection parameters
+    struct PinholeParameters
+    {
+        double fx = 0.0; // [px]
+        double fy = 0.0; // [px]
+        double cx = 0.0; // [px]
+        double cy = 0.0; // [px]
+    };
+
+    inline void declare_config(PinholeParameters &config)
+    {
+        using namespace config;
+        name("PinholeParameters");
+        field(config.fx, "fx", "px");
+        field(config.fy, "fy", "px");
+        field(config.cx, "cx", "px");
+        field(config.cy, "cy", "px");
+        check(config.fx, GT, 0.0, "fx");
+        check(config.fy, GT, 0.0, "fy");
+        check(config.cx, GT, 0.0, "cx");
+        check(config.cy, GT, 0.0, "cy");
+    }
+
+    /// @brief Camera intrinsic calibration
+    /// @note `model` must be "PinholeRadTan" (RadTan distortion) or "PinholeEquidistant" (fisheye, unsupported).
+    struct CameraIntrinsicsConfig
+    {
+        std::string model = "PinholeRadTan";
+        PinholeParameters pinhole_parameters;
+        std::vector<double> distortion_coefficients;
+    };
+
+    inline void declare_config(CameraIntrinsicsConfig &config)
+    {
+        using namespace config;
+        name("CameraIntrinsicsConfig");
+        field(config.model, "model");
+        field(config.pinhole_parameters, "pinhole_parameters");
+        field(config.distortion_coefficients, "distortion_coefficients");
+    }
+
+    /// @brief Intrinsic calibration parameters
+    struct IntrinsicsConfig
+    {
+        CameraIntrinsicsConfig camera;
+    };
+
+    inline void declare_config(IntrinsicsConfig &config)
+    {
+        using namespace config;
+        name("IntrinsicsConfig");
+        field(config.camera, "camera");
+    }
+
     /// @brief Main mapping system configuration
     struct MappingConfig
     {
@@ -263,6 +320,7 @@ namespace mapping
         PointFilterConfig point_filter;
         ExtrinsicsConfig extrinsics;
         RecoveryConfig recovery;
+        IntrinsicsConfig intrinsics;
     };
 
     inline void declare_config(MappingConfig &config)
@@ -275,6 +333,7 @@ namespace mapping
         field(config.point_filter, "point_filter");
         field(config.extrinsics, "extrinsics");
         field(config.recovery, "recovery");
+        field(config.intrinsics, "intrinsics");
     }
 
 } // namespace mapping
