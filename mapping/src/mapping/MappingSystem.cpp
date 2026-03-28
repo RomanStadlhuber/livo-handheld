@@ -15,20 +15,8 @@ namespace mapping
     }
 
     MappingSystem::MappingSystem(const MappingConfig &config)
-        : config_(config),
-          imu_T_lidar_(config.extrinsics.imu_T_lidar.toPose3())
     {
-        states_.setImuToLidarExtrinsic(imu_T_lidar_);
-        states_.setImuToCameraExtrinsic(config.extrinsics.imu_T_camera.toPose3());
-        states_.setTemporalOffset(config_.extrinsics.imu_t_lidar);
-        smoother_.reset(config_);
-        featureManager_.setCalibrationKeys(
-            config_.extrinsics.temporal_calibration_enabled
-                ? boost::optional<gtsam::Key>(T(0))
-                : boost::none,
-            config_.extrinsics.extrinsic_calibration_enabled
-                ? boost::optional<gtsam::Key>(E(0))
-                : boost::none);
+        setConfig(config);
     }
 
     void MappingSystem::setConfig(const MappingConfig &config)
@@ -46,6 +34,14 @@ namespace mapping
             config_.extrinsics.extrinsic_calibration_enabled
                 ? boost::optional<gtsam::Key>(E(0))
                 : boost::none);
+        const auto &intr = config_.intrinsics.camera;
+        cameraFrontend_.setCalibration(
+            intr.model == "PinholeRadTan" ? CameraCalibrationType::PinholeRadTan : CameraCalibrationType::PInholeEquidistant,
+            static_cast<float>(intr.pinhole_parameters.fx),
+            static_cast<float>(intr.pinhole_parameters.fy),
+            static_cast<float>(intr.pinhole_parameters.cx),
+            static_cast<float>(intr.pinhole_parameters.cy),
+            std::vector<float>(intr.distortion_coefficients.begin(), intr.distortion_coefficients.end()));
     }
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
