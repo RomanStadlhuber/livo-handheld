@@ -47,5 +47,19 @@ extrinsics:
   imu_t_lidar: 0.0 # initial guess for (or constant) temporal IMU-LiDAR offset
   imu_T_camera:
     translation : [-0.0711, -0.02329, 0.09012]
-    quaternion  : [0.5792236085917082, -0.5792236085917082, -0.40558600968228625, 0.40558600968228625]  (x, y, z, w)
+    quaternion  : [0.5792236085917082, -0.5792236085917082, -0.40558600968228625, 0.40558600968228625]
     
+intrinsics:
+  camera:
+    model: "PinholeRadTan" # or "PinholeEquidistant", but not supported yet
+    pinhole_parameters: # 640x480
+      fx: 807.406
+      fy: 806.768
+      cx: 327.545
+      cy: 233.247
+    distortion_coefficients:
+      - -0.501859
+      - 0.270368
+      - 0.000114465
+      - -0.00185591
+
