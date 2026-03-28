@@ -34,6 +34,8 @@ namespace mapping
             config_.extrinsics.extrinsic_calibration_enabled
                 ? boost::optional<gtsam::Key>(E(0))
                 : boost::none);
+        cameraFrontend_.setColorSpace(
+            config_.camera_frontend.color_space == "RGB" ? CameraColorSpace::RGB : CameraColorSpace::BGR);
         const auto &intr = config_.intrinsics.camera;
         cameraFrontend_.setCalibration(
             intr.model == "PinholeRadTan" ? CameraCalibrationType::PinholeRadTan : CameraCalibrationType::PInholeEquidistant,
