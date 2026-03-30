@@ -93,9 +93,14 @@ to compute their derivative with respect to \f$ \omg \f$.
 We begin with the residual function itself, for which the all LiDAR
 point-related derivatives will be computed.
 
+Throughout the derivations, \f$ k \f$ indexes **keyframe-point pairs**: each
+cluster contributes exactly one LiDAR point \f$ {}^{L}\bvec{p}_k \f$ per
+associated keyframe \f$ X(k) \f$, so the sum over points and the sum over
+keyframes are one and the same.
+
 The mapping system expresses features as multiple clusters, the location and
 parameters of these cluster are not *estimated* explicitly, rather they are
-inferred from the pose variables \f$ X(i) \f$ themselves. I.e. the cluster
+inferred from the pose variables \f$ X(k) \f$ themselves. I.e. the cluster
 center, the plane normal vector and the noise parameter \f$ \sigma_j \f$ will
 be estimated given the coordinates of the points in the LiDAR frames, composed
 with the current IMU body-pose in the world frame.
@@ -293,7 +298,7 @@ homogeneous coordinate form as
 
 \f[
 \begin{aligned}
-    {}^{L}\bvec{v}_{k} &= \wTi_{k} \cdot \mtx{\tau} \cdot \iTl \cdot
+    \boldsymbol{\phi}_k &= \wTi_{k} \cdot \mtx{\tau} \cdot \iTl \cdot
     \begin{bmatrix}
     {}^{L}\bvec{p}_{k} \\ 1
     \end{bmatrix} \\[6pt]
@@ -325,7 +330,7 @@ Defining the world-frame angular rate matrix \f$ \Ohm_k = \wRi_k \, \skewOf{\omg
 as a shorthand yields
 
 \f[
-{}^{L}\bvec{v}_{k}=
+\boldsymbol{\phi}_k =
 \begin{bmatrix}
         \Ohm_k \iRl & \Ohm_k \ipl + \wRi_{k} \bvec{v}_{k} \\
         0 & 0
@@ -334,6 +339,7 @@ as a shorthand yields
 \begin{bmatrix}
     {}^{L}\bvec{p}_{k} \\ 1
 \end{bmatrix}
+\text{ ,}
 \f]
 
 which transports the body angular rate into the world frame.
