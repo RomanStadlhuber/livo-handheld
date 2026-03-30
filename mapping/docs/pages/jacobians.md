@@ -38,7 +38,7 @@ the exponential map.  In order to compute derivatiles from \f$ exp \f$,
 it is approximated linearly
 
 \f[
- X \cdot exp \{ \tau \} \simeq
+ X \cdot \exp \{ \tau \} \approx
  X \cdot \left[ I + \tau \right]
 \text{ .}\f]
 
@@ -103,8 +103,20 @@ All residuals are calculated in the world frame, meaning the cluster center
 and the plane normal (orientation) are explained in the world frame as well.
 
 The \f$ n_j \f$ points of cluster \f$ j \f$ are associated with one keyframe in
-the sliding window, each. On a high level, the residual for that cluster factor
-is the mean of the squared point-to-plane distances
+the sliding window, each. Each LiDAR point \f$ {}^{L}\bvec{p}_k \f$ is
+transformed to the world frame via the IMU pose \f$ \wTi_k \f$ and the
+IMU-to-LiDAR extrinsic \f$ \iTl \f$:
+
+\f[
+  {}^{w}\bvec{p}_k = \wTi_k \cdot \iTl \cdot {}^{L}\bvec{p}_k
+  = \wRi_k \underbrace{\bigl(\iRl \, {}^{L}\bvec{p}_k + \ipl\bigr)}_{{}^{I}\bvec{p}_k} + {}^{w}\bvec{t}_{I,k}
+\text{ ,}\f]
+
+where \f$ {}^{I}\bvec{p}_k = \iRl \, {}^{L}\bvec{p}_k + \ipl \f$ is the point
+expressed in the IMU body frame.
+
+On a high level, the residual for that cluster factor is the mean of the
+squared point-to-plane distances
 
 \f[
 r_{j}(X(n), ..., X(m)) = \frac{1}{n_{j}} \sum_{k}
@@ -124,28 +136,121 @@ when computing the jacobian expressions.
 ## Pose Jacobian
 
 The LiDAR point plane clusters influence the estimator poses
-\f$ X(i) \f$, that is
+\f$ X(k) \f$, that is
 \f$
-\wTi =
+\wTi_k =
 \left[
-    \wRi \mid \wpi
+    \wRi_k \mid {}^{w}\bvec{t}_{I,k}
 \right]
 \in SE(3)
-\f$ .
+\f$.
+
+We perturb \f$ \wTi_k \f$ in the right tangent space with
+\f$ \xi = [\delta\boldsymbol{\phi};\, \delta\bvec{t}] \in se(3) \f$:
+
+\f[
+  \wTi_k(\xi) = \wTi_k \cdot \exp \{\xi \}
+\text{ .}\f]
+
+First-order expansion of the world point (using rule 2):
+
+\f[
+  {}^{w}\bvec{p}_k(\xi) \approx
+    \wRi_k \bigl(\mtx{I} + \skewOf{\delta\boldsymbol{\phi}}\bigr) {}^{I}\bvec{p}_k
+    + {}^{w}\bvec{t}_{I,k}
+    + \wRi_k \, \delta\bvec{t}
+\text{ .}\f]
+
+Applying the skew-symmetric identity (rule 3),
+\f$ \skewOf{\delta\boldsymbol{\phi}} \cdot {}^{I}\bvec{p}_k = -\skewOf{{}^{I}\bvec{p}_k} \cdot \delta\boldsymbol{\phi} \f$,
+yields the partial derivatives
+
+\f[
+  \frac{\partial\, {}^{w}\bvec{p}_k}{\partial\, \delta\boldsymbol{\phi}}
+    = -\wRi_k \, \skewOf{{}^{I}\bvec{p}_k},
+  \qquad
+  \frac{\partial\, {}^{w}\bvec{p}_k}{\partial\, \delta\bvec{t}}
+    = \wRi_k
+\text{ .}\f]
+
+The per-point signed residual is
+\f$ \tilde{r}_k = \bvec{n}^{T} ({}^{w}\bvec{p}_k - \bvec{c}) \f$,
+so the gradient of its square with respect to \f$ \xi_k \f$ is
+
+\f[
+  \mtx{H} =
+    \frac{2}{n_j} \tilde{r}_k \left[
+      -\bvec{n}^{T} \cdot \wRi_k \, \skewOf{{}^{I}\bvec{p}_k}
+      \;\Big|\;
+      \bvec{n}^{T} \cdot \wRi_k
+    \right]
+    \in \mathbb{R}^{1 \times 6}
+\text{ ,}\f]
+
+where \f$ {}^{I}\bvec{p}_k = \iRl \, {}^{L}\bvec{p}_k + \ipl \f$ and \f$ n_j \f$
+is the number of points in the cluster.
 
 
 ## Extrinsic Calibration Jacobian
 
-This uses the same following as the pose jacobians, due to the LiDAR
-pose being obtained by composing the IMU-pose with the IMU-to-LiDAR
-extrinsic calibration
-\f$
-\wTl = \wTi \cdot \iTl
-\f$ .
+The world-frame LiDAR pose is the composition
+\f$ \wTl_k = \wTi_k \cdot \iTl \f$,
+so any perturbation of \f$ \iTl \f$ shifts every world point.
+
+We perturb \f$ \iTl \f$ in the right tangent space with
+\f$ \xi_{\text{ext}} = [\delta\boldsymbol{\phi};\, \delta\boldsymbol{\rho}] \in se(3) \f$:
+
+\f[
+  \iTl(\xi_{\text{ext}}) = \iTl \cdot \exp \{\xi_{\text{ext}}\}
+\text{ .}\f]
+
+First-order expansion of the IMU-frame point
+\f$ {}^{I}\bvec{p}_k(\xi_{\text{ext}}) \f$:
+
+\f[
+  {}^{I}\bvec{p}_k(\xi_{\text{ext}}) \approx
+    \iRl \bigl(\mtx{I} + \skewOf{\delta\boldsymbol{\phi}}\bigr) {}^{L}\bvec{p}_k
+    + \ipl + \delta\boldsymbol{\rho}
+\text{ .}\f]
+
+The partial derivatives with respect to the two blocks of \f$ \xi_{\text{ext}} \f$ are
+
+\f[
+  \frac{\partial\, {}^{I}\bvec{p}_k}{\partial\, \delta\boldsymbol{\phi}}
+    = \iRl \, \skewOf{{}^{L}\bvec{p}_k},
+  \qquad
+  \frac{\partial\, {}^{I}\bvec{p}_k}{\partial\, \delta\boldsymbol{\rho}}
+    = \mtx{I}_3
+\text{ ,}\f]
+
+which, propagated to the world frame via \f$ \wRi_k \f$, give
+
+\f[
+  \frac{\partial\, {}^{w}\bvec{p}_k}{\partial\, \delta\boldsymbol{\phi}}
+    = \wRi_k \iRl \, \skewOf{{}^{L}\bvec{p}_k}
+    = \wRl_k \, \skewOf{{}^{L}\bvec{p}_k},
+  \qquad
+  \frac{\partial\, {}^{w}\bvec{p}_k}{\partial\, \delta\boldsymbol{\rho}}
+    = \wRl_k
+\text{ ,}\f]
+
+where \f$ \wRl_k = \wRi_k \iRl \f$ is the world-frame rotation of the LiDAR.
+
+The extrinsic Jacobian accumulates contributions from all \f$ n_j \f$ cluster points:
+
+\f[
+  \mtx{H}_{\text{ext}} =
+    \frac{2}{n_j} \sum_{k} \tilde{r}_k \left[
+      \bvec{n}^{T} \cdot \wRl_k \, \skewOf{{}^{L}\bvec{p}_k}
+      \;\Big|\;
+      \bvec{n}^{T} \cdot \wRl_k
+    \right]
+    \in \mathbb{R}^{1 \times 6}
+\text{ .}\f]
 
 ## Temporal Calibration Jacobian
 
-There are different ways to find residuals for extrinsic calibration,
+There are different ways to find residuals for temporal calibration,
 also note that [MSC-LIO](https://arxiv.org/abs/2407.07589) (Eqs. (21)
 and (22)) does it by estimating velocities of associations they deem
 to be the same physical point.
@@ -161,4 +266,92 @@ to each individual feature point (3D LiDAR points which in this case are
 expressed in the world frame). See Eq. (4) of
 [Online Temporal Calibration for Monocular Visual-Inertial Systems](https://arxiv.org/abs/1808.00692)
 for the example of a monocular VI system.
+
+### Derivation
+
+For each keyframe \f$ k \f$, a body-frame twist
+\f$ \mtx{\tau} = (\omg_k,\, \bvec{v}_k) \f$ is precomputed from the IMU propagation.
+The temporally-extrapolated IMU pose at offset \f$ dt \f$ is
+
+\f[
+  \wTi_{k,\text{extr}}(dt)
+    = \wTi_k \cdot \exp \{ \mtx{\tau} \cdot dt \}
+\text{ .}\f]
+
+First-order expansion (rule 2):
+
+
+\f[
+    \wTi_{k,\text{extr}}(dt)
+    \approx \wTi_k \cdot \left[ \mtx{I} + \mtx{\tau} \cdot dt \right]
+    \text{ ,}
+\f]
+
+where the derivative computes only w.r.t. the part that multiplies with \f$ \mtx{\tau} \cdot dt \f$.
+Expainding in matrix form, the velocity of point \f$  {}^{L}\bvec{p}_{k} \f$ is then expressed in
+homogeneous coordinate form as
+
+\f[
+\begin{aligned}
+    {}^{L}\bvec{v}_{k} &= \wTi_{k} \cdot \mtx{\tau} \cdot \iTl \cdot
+    \begin{bmatrix}
+    {}^{L}\bvec{p}_{k} \\ 1
+    \end{bmatrix} \\[6pt]
+    &= \begin{bmatrix}
+        \wRi_{k} & \wpi_{k} \\
+        0 & 1
+    \end{bmatrix}
+    \cdot
+    \begin{bmatrix}
+        \skewOf{\omg_{k}} &  \bvec{v}_{k} \\
+        0 & 0
+    \end{bmatrix}
+    \cdot
+    \begin{bmatrix}
+        \iRl & \ipl \\
+        0 & 1
+    \end{bmatrix}
+    \cdot
+    \begin{bmatrix}
+        {}^{L}\bvec{p}_{k} \\ 1
+    \end{bmatrix}
+    \text{ .}
+\end{aligned}
+\f]
+
+
+
+Defining the world-frame angular rate matrix \f$ \Ohm_k = \wRi_k \, \skewOf{\omg_k} \f$
+as a shorthand yields
+
+\f[
+{}^{L}\bvec{v}_{k}=
+\begin{bmatrix}
+        \Ohm_k \iRl & \Ohm_k \ipl + \wRi_{k} \bvec{v}_{k} \\
+        0 & 0
+\end{bmatrix}
+\cdot
+\begin{bmatrix}
+    {}^{L}\bvec{p}_{k} \\ 1
+\end{bmatrix}
+\f]
+
+which transports the body angular rate into the world frame.
+The velocity of the world point \f$ {}^{w}\bvec{p}_k \f$
+with respect to \f$ dt \f$ is then
+
+\f[
+  \boldsymbol{\phi}_k
+    = \frac{\partial\, {}^{w}\bvec{p}_k}{\partial\, dt}
+    = \Ohm_k \, {}^{I}\bvec{p}_k + \wRi_k \, \bvec{v}_k
+    = \Ohm_k \bigl(\iRl \, {}^{L}\bvec{p}_k + \ipl\bigr) + \wRi_k \, \bvec{v}_k
+\text{ .}\f]
+
+The temporal Jacobian is a scalar that accumulates over all \f$ n_j \f$ cluster points:
+
+\f[
+  \mtx{H}_{dt}
+    = \frac{2}{n_j} \sum_{k} \tilde{r}_k \cdot \bvec{n}^{T} \boldsymbol{\phi}_k
+    \in \mathbb{R}^{1 \times 1}
+\text{ .}\f]
 
