@@ -18,7 +18,7 @@ Where \f$r_{j}\f$ is the residual of the \f$ j \f$ _-th_ cluster with respect to
 
 | Module | Description |
 |--------|-------------|
-| @ref frontend | IMU preintegration, LiDAR scan processing and Point-Cloud Colorization |
+| @ref frontend | IMU preintegration, LiDAR scan processing and point-cloud colorization |
 | @ref backend | Factor graph optimization and feature management |
 | @ref factors | Custom GTSAM factors (point-to-plane) |
 | @ref core | Shared types, configuration, buffers, and state |

@@ -9,6 +9,10 @@
 /// @ingroup frontend
 /// @brief LiDAR scan accumulation and cluster tracking.
 
+/// @defgroup frontend_camera Camera Frontend
+/// @ingroup frontend
+/// @brief Point-cloud colorization from camera images and extrinsic calibration.
+
 /// @defgroup frontend_recovery Recovery Frontend
 /// @ingroup frontend
 /// @brief Full state recovery on tracking loss.
