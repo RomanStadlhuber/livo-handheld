@@ -147,6 +147,33 @@ The project uses **Doxygen 1.13.2**, built from source in the Dockerfile
 several broken features (e.g. `GROUP_NESTED_COMPOUNDS`, missing MathJax v3
 support). Do **not** downgrade to the apt version.
 
+### Building the docs without ROS (standalone Docker)
+
+`Dockerfile.doxygen` at the repo root provides a minimal Ubuntu 22.04 image
+with only CMake, Doxygen 1.13.2 and Graphviz — no ROS, GTSAM, or Open3D.
+It uses `docs/CMakeLists.txt`, a standalone extraction of the main docs
+target, so the build follows the same FetchContent + configure_file path.
+
+```bash
+# All commands are run from the repository root (livo-handheld/).
+
+# Build the image
+docker build -f Dockerfile.doxygen -t livo-docs .
+
+# Generate the docs
+docker run --rm -v $(pwd)/mapping:/source livo-docs
+```
+
+Output is written to `mapping/docs/output/html/` on the host, identical to
+the CMake-based build.
+
+The entry point `docs/build_docs.sh` also works locally without Docker if
+Doxygen 1.13+ and CMake are on `PATH`:
+
+```bash
+./mapping/docs/build_docs.sh
+```
+
 ### Important caveats
 
 - **Use `@ingroup` on each entity**, not `@{` / `@}` scope markers. This is
