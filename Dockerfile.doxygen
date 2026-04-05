@@ -1,0 +1,20 @@
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake flex bison python3 graphviz wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build Doxygen 1.13.2 from source.
+# The Ubuntu 22.04 apt package (1.9.1) lacks MathJax v3 support and several
+# config tags used in Doxyfile.in (MATHJAX_VERSION, HTML_COLORSTYLE, etc.).
+RUN wget -q https://github.com/doxygen/doxygen/releases/download/Release_1_13_2/doxygen-1.13.2.src.tar.gz \
+        -O /tmp/doxygen.tar.gz \
+    && tar -xzf /tmp/doxygen.tar.gz -C /tmp \
+    && cmake -S /tmp/doxygen-1.13.2 -B /tmp/doxygen-build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /tmp/doxygen-build -j$(nproc) \
+    && cmake --install /tmp/doxygen-build \
+    && rm -rf /tmp/doxygen*
+
+WORKDIR /source
+ENTRYPOINT ["/source/docs/build_docs.sh"]

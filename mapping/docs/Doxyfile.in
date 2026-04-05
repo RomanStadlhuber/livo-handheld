@@ -1,0 +1,61 @@
+# Doxyfile for LIVO Handheld Mapping
+# Generated placeholders are substituted by CMake's configure_file()
+
+PROJECT_NAME           = "LIVO Handheld Mapping"
+PROJECT_BRIEF          = "LiDAR-Inertial Visual Odometry for Handheld Mapping"
+OUTPUT_DIRECTORY       = @CMAKE_CURRENT_SOURCE_DIR@/docs/output
+
+# --- Input ---
+INPUT                  = @CMAKE_CURRENT_SOURCE_DIR@/include \
+                         @CMAKE_CURRENT_SOURCE_DIR@/src \
+                         @CMAKE_CURRENT_SOURCE_DIR@/docs/pages \
+                         @CMAKE_CURRENT_SOURCE_DIR@/docs/groups.dox
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp *.cpp *.h *.md *.dox
+USE_MDFILE_AS_MAINPAGE = @CMAKE_CURRENT_SOURCE_DIR@/docs/pages/mainpage.md
+
+# --- Extraction ---
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+
+# --- Source browsing ---
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = NO
+
+# --- Output ---
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+
+# --- MathJax ---
+USE_MATHJAX            = YES
+MATHJAX_VERSION        = MathJax_3
+MATHJAX_CODEFILE       = @CMAKE_CURRENT_SOURCE_DIR@/docs/mathjax_macros.js
+
+# --- doxygen-awesome-css theme ---
+HTML_EXTRA_STYLESHEET  = @AWESOME_CSS_DIR@/doxygen-awesome.css
+HTML_COLORSTYLE        = TOGGLE
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+
+# --- Graphs ---
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+
+# --- Warnings ---
+WARN_IF_UNDOCUMENTED   = YES
+WARN_NO_PARAMDOC       = YES
+
+# --- Layout ---
+# Hide the empty "Related Pages" tab (subpages are accessible via the sidebar and mainpage links)
+LAYOUT_FILE            = @CMAKE_CURRENT_SOURCE_DIR@/docs/DoxygenLayout.xml
+
+# --- Grouping ---
+GROUP_NESTED_COMPOUNDS = NO
+SUBGROUPING            = YES
+INLINE_GROUPED_CLASSES = YES

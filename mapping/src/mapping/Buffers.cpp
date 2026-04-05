@@ -1,0 +1,41 @@
+/// @file
+/// @ingroup buffers
+#include <mapping/Buffers.hpp>
+
+namespace mapping
+{
+    void Buffers::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
+    {
+        std::lock_guard<std::mutex> lock(mtxImuBuffer_);
+        imuBuffer_[timestamp] = imu_data;
+    }
+
+    void Buffers::feedLidar(const std::shared_ptr<LidarData> &lidar_data, double timestamp)
+    {
+        std::lock_guard<std::mutex> lock(mtxLidarBuffer_);
+        lidarBuffer_[timestamp] = lidar_data;
+    }
+
+    void Buffers::feedCamera(const std::shared_ptr<CameraData> &camera_data, double timestamp)
+    {
+        std::lock_guard<std::mutex> lock(mtxCameraBuffer);
+        cameraBuffer_[timestamp] = camera_data;
+    }
+
+    void Buffers::reset()
+    {
+        std::lock_guard<std::mutex> lockImu(mtxImuBuffer_);
+        std::lock_guard<std::mutex> lockLidar(mtxLidarBuffer_);
+        imuBuffer_.clear();
+        lidarBuffer_.clear();
+        scanBuffer_.clear();
+    }
+
+    void Buffers::bufferScan(
+        const gtsam::Pose3 &scanPoseToLastKeyframe,
+        std::shared_ptr<open3d::geometry::PointCloud> pcdScan,
+        std::shared_ptr<CameraData> syncedCameraData)
+    {
+        scanBuffer_.push_back(ScanBuffer{pcdScan, std::make_shared<gtsam::Pose3>(scanPoseToLastKeyframe), syncedCameraData});
+    }
+}

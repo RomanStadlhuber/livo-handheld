@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup factors
 #include <mapping/factors/PlanarClusterFactor.hpp>
 
 namespace mapping

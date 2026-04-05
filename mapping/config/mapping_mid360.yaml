@@ -21,12 +21,45 @@ lidar_frontend:
     thresh_angle: 0.175 # [rad], ~10 degrees
     thresh_elapsed_scans: 5
 
+camera_frontend:
+  color_space: RGB # can be RGB or BGR (both 8-bit)
+  colorize_scans: true # if enabled, will colorize points within the image
+  sync_tolerance: 0.01 # [sec.], tolerance for syncing images to LiDAR scans
+  keepalive_window: 0.6 # [sec.], how long images are kept for sync before being discarded
+
+recovery:
+  voxel_size: 0.2 # [m], voxel size to use for recovery reference point cloud
+  reference_window_size: 10 # [keyframes], number of keyframes to use for recovery reference
+  reference_lag: 2 # keyframe delay to use for recovery reference
+  icp_iterations: 50
+  max_correspondence_distance: 0.05 # [m], max. dist. for point-to-plane ICP correspondences
+
 point_filter:
   min_distance: 2.5 # [m]
   max_distance: 100.0 # [m]
 
 extrinsics:
   temporal_calibration_enabled: false
-  imu_T_lidar:
+  extrinsic_calibration_enabled: false
+  imu_T_lidar: # initial guess for (or constant) extrinsic IMU-LiDAR calibration
     translation: [-0.011, -0.02329, 0.04412] # [m]
     rotation: [0, 0, 0, 1] # hamilton quaternion (x, y, z, w)
+  imu_t_lidar: 0.0 # initial guess for (or constant) temporal IMU-LiDAR offset
+  imu_T_camera:
+    translation: [0.0491,  -0.02329, -0.00188]
+    rotation: [0.40558601, -0.40558601,  0.57922361, -0.57922361] # (x, y, z, w)
+    
+intrinsics:
+  camera:
+    model: "PinholeRadTan" # or "PinholeEquidistant", but not supported yet
+    pinhole_parameters: # 640x480
+      fx: 807.406
+      fy: 806.768
+      cx: 327.545
+      cy: 233.247
+    distortion_coefficients:
+      - -0.501859
+      - 0.270368
+      - 0.000114465
+      - -0.00185591
+

@@ -1,0 +1,15 @@
+# Doxygen generated output
+docs/output/
+
+# Override parent gitignore *.dox exclusion — we want to track our group definitions
+!docs/*.dox
+
+# Build directories
+build/
+install/
+log/
+
+# Editor/IDE
+.vscode/
+*.swp
+*~

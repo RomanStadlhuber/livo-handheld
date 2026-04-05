@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup factors
 #pragma once
 
 #ifndef MAPPING_FACTORS_POINTTOPLANEFACTOR_HPP_
@@ -16,7 +18,7 @@
 
 namespace mapping
 {
-
+    /// @ingroup factors
     /// @brief Point-to-plane factor supporting multiple keyframe poses
     /// @details This factor constrains multiple keyframe poses by enforcing that observed
     /// points from each keyframe lie on a common plane. The plane is defined by its normal
@@ -41,6 +43,19 @@ namespace mapping
             const gtsam::SharedNoiseModel &noiseModel,
             const uint32_t &clusterId);
 
+        /// @brief Extended constructor with optional calibration keys for temporal and extrinsic calibration.
+        PointToPlaneFactor(
+            const gtsam::KeyVector &poseKeys,
+            const gtsam::Pose3 &imu_T_lidar,
+            const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
+            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+            const gtsam::SharedNoiseModel &noiseModel,
+            const uint32_t &clusterId,
+            boost::optional<gtsam::Key> dtKey,
+            boost::optional<gtsam::Key> extrinsicKey,
+            const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists = {});
+
         /// @brief Evaluate unwhitened error for all poses involved in this factor
         /// @param values Current estimates of all variables in the factor graph
         /// @param H Optional Jacobians w.r.t. each pose (one matrix per key)
@@ -61,6 +76,15 @@ namespace mapping
             const std::shared_ptr<Eigen::Vector3d> &planeNormal,
             const std::shared_ptr<Eigen::Vector3d> &planeCenter,
             const gtsam::SharedNoiseModel &noiseModel);
+
+        /// @brief Add a new keyframe with an associated twist for temporal calibration.
+        void add(
+            const gtsam::Key &key,
+            const Eigen::Vector3d &lidar_point,
+            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+            const gtsam::SharedNoiseModel &noiseModel,
+            const std::pair<Eigen::Vector3d, Eigen::Vector3d> &twist);
 
         ///@brief Remove a keyframe from the cluster factor.
         void remove(
@@ -98,6 +122,11 @@ namespace mapping
     private:
         std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> computeErrorAndJacobians(const gtsam::Values &values) const;
 
+        static gtsam::KeyVector buildFullKeys(
+            const gtsam::KeyVector &poseKeys,
+            boost::optional<gtsam::Key> dtKey,
+            boost::optional<gtsam::Key> extrinsicKey);
+
     private:
         gtsam::Pose3 imu_T_lidar_;
         std::map<gtsam::Key, Eigen::Vector3d> lidar_points_;
@@ -110,6 +139,16 @@ namespace mapping
     public:
         /// @brief Identifier for the cluster associated with this factor used for lookup to replace/delete.
         const uint32_t clusterId_;
+
+    private:
+        size_t numPoseKeys_;                        // boundary: keys_[0..numPoseKeys_) are pose keys
+        boost::optional<gtsam::Key> dtKey_;         // T(0) when temporal calibration enabled
+        boost::optional<gtsam::Key> extrinsicKey_;  // E(0) when extrinsic calibration enabled
+        /// @brief Per-keyframe precomputed twist for temporal extrapolation.
+        /// twist = Logmap(delta_T_preintegration) / dt_since_last_keyframe.
+        /// Stored as (angular_velocity, linear_velocity) in IMU frame.
+        /// Only populated when temporal calibration is enabled.
+        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists_;
     };
 
 } // namespace mapping

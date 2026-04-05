@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup factors
 #include <mapping/factors/PointToPlaneFactor.hpp>
 
 #include <gtsam/base/Matrix.h>
@@ -5,6 +7,19 @@
 
 namespace mapping
 {
+
+    gtsam::KeyVector PointToPlaneFactor::buildFullKeys(
+        const gtsam::KeyVector &poseKeys,
+        boost::optional<gtsam::Key> dtKey,
+        boost::optional<gtsam::Key> extrinsicKey)
+    {
+        gtsam::KeyVector allKeys = poseKeys;
+        if (dtKey)
+            allKeys.push_back(*dtKey);
+        if (extrinsicKey)
+            allKeys.push_back(*extrinsicKey);
+        return allKeys;
+    }
 
     PointToPlaneFactor::PointToPlaneFactor(
         const gtsam::KeyVector &keys,
@@ -20,7 +35,35 @@ namespace mapping
           planeNormal_(planeNormal),
           planeCenter_(planeCenter),
           adaptiveNoiseModel_(noiseModel),
-          clusterId_(clusterId)
+          clusterId_(clusterId),
+          numPoseKeys_(keys.size()),
+          dtKey_(boost::none),
+          extrinsicKey_(boost::none)
+    {
+    }
+
+    PointToPlaneFactor::PointToPlaneFactor(
+        const gtsam::KeyVector &poseKeys,
+        const gtsam::Pose3 &imu_T_lidar,
+        const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
+        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+        const gtsam::SharedNoiseModel &noiseModel,
+        const uint32_t &clusterId,
+        boost::optional<gtsam::Key> dtKey,
+        boost::optional<gtsam::Key> extrinsicKey,
+        const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists)
+        : NoiseModelFactor(noiseModel, buildFullKeys(poseKeys, dtKey, extrinsicKey)),
+          imu_T_lidar_(imu_T_lidar),
+          lidar_points_(lidar_points),
+          planeNormal_(planeNormal),
+          planeCenter_(planeCenter),
+          adaptiveNoiseModel_(noiseModel),
+          clusterId_(clusterId),
+          numPoseKeys_(poseKeys.size()),
+          dtKey_(dtKey),
+          extrinsicKey_(extrinsicKey),
+          keyframeTwists_(keyframeTwists)
     {
     }
 
@@ -31,9 +74,23 @@ namespace mapping
         const std::shared_ptr<Eigen::Vector3d> &planeCenter,
         const gtsam::SharedNoiseModel &noiseModel)
     {
-        this->keys_.push_back(key);
+        // Insert pose key before calibration keys
+        this->keys_.insert(this->keys_.begin() + numPoseKeys_, key);
+        numPoseKeys_++;
         lidar_points_[key] = lidar_point;
         updatePlaneParameters(planeNormal, planeCenter, noiseModel);
+    }
+
+    void PointToPlaneFactor::add(
+        const gtsam::Key &key,
+        const Eigen::Vector3d &lidar_point,
+        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+        const gtsam::SharedNoiseModel &noiseModel,
+        const std::pair<Eigen::Vector3d, Eigen::Vector3d> &twist)
+    {
+        add(key, lidar_point, planeNormal, planeCenter, noiseModel);
+        keyframeTwists_[key] = twist;
     }
 
     void PointToPlaneFactor::remove(
@@ -42,12 +99,17 @@ namespace mapping
         const std::shared_ptr<Eigen::Vector3d> &planeCenter,
         const gtsam::SharedNoiseModel &noiseModel)
     {
-        // erase variable key connection
-        auto it = std::find(keys().begin(), keys().end(), key);
-        if (it != keys().end())
+        // erase variable key connection (only search among pose keys)
+        auto beginIt = keys().begin();
+        auto endIt = keys().begin() + numPoseKeys_;
+        auto it = std::find(beginIt, endIt, key);
+        if (it != endIt)
         {
             keys().erase(it);
+            numPoseKeys_--;
         }
+        // erase twist for this key if present
+        keyframeTwists_.erase(key);
         // erase lidar points associated with this key
         auto it_map = lidar_points_.find(key);
         if (it_map != lidar_points_.end())
@@ -97,12 +159,38 @@ namespace mapping
     {
         const double meanFactor = 1.0 / static_cast<double>(lidar_points_.size());
         std::vector<gtsam::Matrix> Hs;
-        Hs.reserve(keys().size());
+        // the number of jacobians required based on the keys associated with this factor
+        // needs to be extended i.e. when using system calibration
+        std::size_t numJacobians = keys().size();
+        /**
+         * NOTE: jacobians need to be inserted respecting the order of the key associations!!
+         * See buildFullKeys(), where the associations are put together based on available variables
+         * this ordering needs to be respected!!
+         */
+        if (dtKey_)
+            numJacobians++;
+        if (extrinsicKey_)
+            numJacobians++;
+        Hs.reserve(numJacobians);
         // the returned error is a scalar
         gtsam::Vector errorVec = gtsam::Vector::Zero(1);
-        // accumulate mean-squared error and its jacobians w.r.t. the values
-        for (const gtsam::Key &key : keys())
+
+        // --- Read calibration values once (before pose loop) ---
+        const gtsam::Pose3 imu_T_lidar = extrinsicKey_ && values.exists(*extrinsicKey_)
+                                             ? values.at<gtsam::Pose3>(*extrinsicKey_)
+                                             : imu_T_lidar_;
+        const double dt = dtKey_ && values.exists(*dtKey_)
+                              ? values.at<gtsam::Vector1>(*dtKey_)(0)
+                              : 0.0;
+
+        // accumulators for calibration Jacobians (summed across all keyframes)
+        gtsam::Matrix H_dt_accum = gtsam::Matrix::Zero(1, 1);
+        gtsam::Matrix H_ext_accum = gtsam::Matrix::Zero(1, 6);
+
+        // --- pose loop: iterate only over pose keys [0, numPoseKeys_) ---
+        for (size_t i = 0; i < numPoseKeys_; ++i)
         {
+            const gtsam::Key &key = keys()[i];
             if (!values.exists(key))
             {
                 Hs.push_back(gtsam::Matrix16::Zero());
@@ -112,33 +200,75 @@ namespace mapping
             const Eigen::Vector3d &lidar_point = lidar_points_.at(key);
             // Get the pose estimate for this keyframe using the actual key
             const gtsam::Pose3 w_T_imu = values.at<gtsam::Pose3>(key);
+
+            // Temporal extrapolation: shift IMU pose by dt using precomputed twist
+            gtsam::Pose3 w_T_imu_ext = w_T_imu;
+            if (dtKey_ && keyframeTwists_.count(key))
+            {
+                const auto &[omega_k, v_k] = keyframeTwists_.at(key);
+                w_T_imu_ext = w_T_imu * gtsam::Pose3(
+                                            gtsam::Rot3::Expmap(omega_k * dt),
+                                            v_k * dt);
+            }
+
             // accumulator for Jacobian terms
             gtsam::Matrix16 Hx = gtsam::Matrix16::Zero();
             // Compute error and Jacobian for this keyframes point.
             // Transform point from lidar frame to world frame
             const gtsam::Point3
                 l_p(lidar_point),
-                w_p = w_T_imu.compose(imu_T_lidar_).transformFrom(l_p);
+                w_p = w_T_imu_ext.compose(imu_T_lidar).transformFrom(l_p);
             const double r_i = planeNormal_->dot(w_p - *planeCenter_);
             // Point-to-plane distance (signed)
             errorVec(0) += std::pow(r_i, 2);
             const Eigen::Matrix<double, 1, 3> nT = planeNormal_->transpose();
             const Eigen::Matrix3d
-                i_R_l = imu_T_lidar_.rotation().matrix(),
-                w_R_i = w_T_imu.rotation().matrix();
-            const gtsam::Point3 i_t_l = imu_T_lidar_.translation();
+                i_R_l = imu_T_lidar.rotation().matrix(),
+                w_R_i = w_T_imu_ext.rotation().matrix();
+            const gtsam::Point3 i_t_l = imu_T_lidar.translation();
             Hx.head<3>() = 2 * meanFactor * r_i * -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
             Hx.tail<3>() = 2 * meanFactor * r_i * nT * w_R_i;
             Hs.push_back(Hx);
+            // LiDAR-to-IMU temporal calibration jacobian
+            if (dtKey_ && keyframeTwists_.count(key))
+            {
+                const auto &[omega_k, v_k] = keyframeTwists_.at(key);
+                const Eigen::Matrix3d
+                    omega_skew_k = gtsam::skewSymmetric(omega_k),
+                    // short-hand expression for body rate in world frame
+                    // d(w_R_i)d(t) = w_R_i * omega_skew
+                    // this should be in the jacobian derivation docs
+                    ohm = w_R_i * omega_skew_k;
+                // velocity of the LiDAR point in the world frame from temporal extrapolation
+                // this should b e in the jacobian derivation docs
+                const Eigen::Vector3d phi = ohm * i_R_l * l_p + ohm * i_t_l + w_R_i * v_k;
+                H_dt_accum += 2 * meanFactor * r_i * nT * phi;
+            }
+            // IMU-to-LiDAR extrinsic calibration jacobian
+            if(extrinsicKey_)
+            {
+                const Eigen::Matrix3d w_R_l = w_R_i * i_R_l;
+                H_ext_accum.block<1, 3>(0, 0) += 2* meanFactor * r_i * nT * w_R_l * gtsam::skewSymmetric(l_p);
+                H_ext_accum.block<1, 3>(0, 3) += 2* meanFactor * r_i * nT * w_R_l;
+            }
         }
         errorVec *= meanFactor;
+
+        // --- Append calibration Jacobians after pose loop ---
+        if (dtKey_)
+            Hs.push_back(H_dt_accum);
+        if (extrinsicKey_)
+            Hs.push_back(H_ext_accum);
+
         return {errorVec, Hs};
     }
 
     gtsam::NonlinearFactor::shared_ptr PointToPlaneFactor::clone() const
     {
         return boost::make_shared<PointToPlaneFactor>(
-            keys(), imu_T_lidar_, lidar_points_, planeNormal_, planeCenter_, noiseModel(), clusterId_);
+            gtsam::KeyVector(keys().begin(), keys().begin() + numPoseKeys_),
+            imu_T_lidar_, lidar_points_, planeNormal_, planeCenter_,
+            noiseModel(), clusterId_, dtKey_, extrinsicKey_, keyframeTwists_);
     }
 
     void PointToPlaneFactor::print(const std::string &s, const gtsam::KeyFormatter &keyFormatter) const
@@ -160,6 +290,9 @@ namespace mapping
         const gtsam::Values &values,
         const gtsam::Key &keyToMarginalize) const
     {
+        // NOTE: keyToMarginalize is always a pose key X(k). Calibration Jacobian
+        // entries (for T(0)/E(0)) in Hs are simply ignored here — only the
+        // Jacobian for the marginalized pose key is extracted.
         auto [r, Hs] = computeErrorAndJacobians(values);
         // need to flip the same way as in linearize() to build the system
         // H * dx = -r

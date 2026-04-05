@@ -27,7 +27,8 @@ RUN cd /install/config_utilities/config_utilities && mkdir build && \
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
-RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl* ros-$ROS_DISTRO-open3d-conversions
+RUN apt-get update && apt-get install -y -q ros-$ROS_DISTRO-pcl* ros-$ROS_DISTRO-open3d-conversions \
+    ros-$ROS_DISTRO-cv-bridge
 RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
     cd /ros2_ws/src/livox_ros_driver2 && ./build.sh humble
 ### Download Open3D C++ sources ###
@@ -41,6 +42,20 @@ RUN wget https://github.com/isl-org/Open3D/releases/download/v0.19.0/open3d-deve
 # find_package(Open3D REQUIRED)
 # target_link_libraries(<target_name> Open3D::Open3D)
 # 
+### Install Doxygen from source (1.13.2) ###
+# The Ubuntu 22.04 apt package ships Doxygen 1.9.1 which has broken
+# GROUP_NESTED_COMPOUNDS, no MathJax v3 support, and missing config tags
+# (MATHJAX_VERSION, HTML_COLORSTYLE, FULL_SIDEBAR).
+# Building from source gets us a modern version with full feature support.
+WORKDIR /tmp
+RUN apt-get update && apt-get install -y -q flex bison graphviz && \
+    wget -q https://github.com/doxygen/doxygen/releases/download/Release_1_13_2/doxygen-1.13.2.src.tar.gz && \
+    tar -xzf doxygen-1.13.2.src.tar.gz && \
+    cd doxygen-1.13.2 && mkdir build && cd build && \
+    cmake -G "Unix Makefiles" .. -DCMAKE_BUILD_TYPE=Release && \
+    make -j$(nproc) && make install && \
+    rm -rf /tmp/doxygen*
+
 WORKDIR /ros2_ws
 # make ROS available when sourcing bash as root
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc

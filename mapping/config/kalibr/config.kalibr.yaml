@@ -1,0 +1,21 @@
+board:
+  # NOTE: A0 dimensions
+  # the larger the print, the better
+  target_type: 'aprilgrid' # grid type
+  tagCols: 6               # number of apriltags in the x direction
+  tagRows: 6               # number of apriltags in the y direction
+  tagSize: 0.088           # size of apriltag, edge to edge [m]
+  tagSpacing: 0.302       # ratio of space between tags to tagSize
+
+cameras:
+  camera0:
+    # for fisheye, use
+    # 'pinhole-equi'
+    # see also:
+    # https://docs.openvins.com/gs-calibration.html#gs-calib-cam-static
+    model: 'pinhole-radtan'
+    # NOTE: currently streaming 640x480 [px]
+    focal_length_fallback: 100
+    source:
+      rosbag_path: '/kalibr/data/cam_calib_seq_1/cam_calib_seq_1_0.db3'
+      topic: '/camera/image_raw'

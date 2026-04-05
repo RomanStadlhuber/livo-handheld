@@ -1,3 +1,5 @@
+/// @file
+/// @ingroup types
 #pragma once
 
 #ifndef MAPPING_TYPES_HPP_
@@ -11,10 +13,39 @@
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/NavState.h>
+#include <gtsam/inference/Symbol.h>
 #include <open3d/geometry/PointCloud.h>
+#include <opencv2/opencv.hpp>
+
+using gtsam::symbol_shorthand::B;
+using gtsam::symbol_shorthand::E; // Extrinsic calibration (Pose3)
+using gtsam::symbol_shorthand::T; // Temporal calibration (Vector1)
+using gtsam::symbol_shorthand::V;
+using gtsam::symbol_shorthand::X;
 
 namespace mapping
 {
+    /// @ingroup types
+    /// @brief The color space within which the system should operate.
+    /// Change this if you have any specific requirements for interfacing
+    /// with the system.
+    enum class CameraColorSpace
+    {
+        // The default with which the system operates.
+        RGB,
+        // Only used with OpenCV whenever necessary.
+        BGR,
+    };
+
+    /// @ingroup types
+    /// @brief Camera image data.
+    struct CameraData
+    {
+        cv::Mat img;
+        CameraColorSpace colorSpace;
+    };
+
+    /// @ingroup types
     /// @brief IMU measurement data
     struct ImuData
     {
@@ -22,16 +53,20 @@ namespace mapping
         Eigen::Vector3d angular_velocity;
     };
 
+    /// @ingroup types
     /// @brief LiDAR scan data with per-point timestamps
     struct LidarData
     {
         std::vector<Eigen::Vector3d> points;
         std::vector<double> offset_times;
+        /// @note Expect this to be `nullptr` most of the time!
+        std::shared_ptr<CameraData> syncedCameraData;
     };
 
     template <typename T>
     using InputBuffer = std::map<double, std::shared_ptr<T>>;
 
+    /// @ingroup types
     /// @brief Buffered scan data for keyframe creation
     struct ScanBuffer
     {
@@ -39,8 +74,24 @@ namespace mapping
         std::shared_ptr<open3d::geometry::PointCloud> pcd;
         /// @brief Pose of the scan w.r.t. the latest keyframe pose
         std::shared_ptr<gtsam::Pose3> kf_T_scan;
+        /// @brief Temporally synced camera image for this scan (nullptr if no association exists)
+        std::shared_ptr<CameraData> syncedCameraData{nullptr};
     };
 
+    /// @ingroup types
+    /// @brief The type of camera calibration for the `CameraFrontend` to use.
+    enum class CameraCalibrationType
+    {
+        // OpenCV default, use this when distortion is low.
+        PinholeRadTan,
+        /**
+         * NOTE: maybe this can be supported in the future?
+         * afaik, only needs to use cv::fisheye namespace
+         */
+        PInholeEquidistant,
+    };
+
+    /// @ingroup types
     /// @brief System lifecycle states
     enum class SystemState
     {
@@ -64,6 +115,7 @@ namespace mapping
         std::shared_ptr<Eigen::Vector3d> normal;
     };
 
+    /// @ingroup types
     /// @brief State of a point cluster in the tracking system.
     /// See detail descriptoin for relationship to managing factors.
     enum class ClusterState
@@ -96,5 +148,8 @@ namespace mapping
 
     /// @brief Invalid cluster ID sentinel value
     constexpr ClusterId INVALID_CLUSTER_ID = std::numeric_limits<ClusterId>::max();
-}
+
+    /// @brief The "default color", inidcating that a point was not colorized from the camera image.
+    const Eigen::Vector3d NO_COLOR{Eigen::Vector3d::Zero()};
+} // namespace mapping
 #endif // MAPPING_TYPES_HPP_

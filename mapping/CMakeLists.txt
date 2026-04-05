@@ -22,6 +22,8 @@ find_package(visualization_msgs REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2_storage REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(GTSAM_UNSTABLE REQUIRED)
@@ -50,13 +52,25 @@ add_library(mapping
   src/mapping/factors/PointToPlaneFactor.cpp
   src/mapping/Visualization.cpp
   src/mapping/MappingSystem.cpp
+  # common logic state
+  src/mapping/Buffers.cpp
+  src/mapping/States.cpp
+  # frontends
+  src/mapping/frontend/ImuFrontend.cpp
+  src/mapping/frontend/LidarFrontend.cpp
+  src/mapping/frontend/CameraFrontend.cpp
+  src/mapping/frontend/RecoveryFrontend.cpp
+  # backend
+  src/mapping/backend/FeatureManager.cpp
+  src/mapping/backend/Smoother.cpp
 )
 
 target_include_directories(mapping PUBLIC include)
 
 target_link_libraries(mapping
   Eigen3::Eigen 
-  Open3D::Open3D 
+  ${OpenCV_LIBS}
+  Open3D::Open3D
   gtsam 
   gtsam_unstable 
   config_utilities::config_utilities
@@ -67,7 +81,7 @@ ament_target_dependencies(mapper
   rclcpp std_msgs geometry_msgs sensor_msgs
   livox_ros_driver2 rosbag2_cpp rosbag2_storage
   tf2 tf2_ros nav_msgs open3d_conversions
-  visualization_msgs
+  cv_bridge visualization_msgs
 )
 target_link_libraries(mapper mapping)
 
@@ -77,5 +91,26 @@ install(TARGETS
 )
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+
+# --- Documentation ---
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+  include(FetchContent)
+  FetchContent_Declare(doxygen-awesome-css
+    URL https://github.com/jothepro/doxygen-awesome-css/archive/refs/heads/main.zip
+  )
+  FetchContent_MakeAvailable(doxygen-awesome-css)
+  FetchContent_GetProperties(doxygen-awesome-css SOURCE_DIR AWESOME_CSS_DIR)
+
+  set(DOXYFILE_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
+  set(DOXYFILE_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+  configure_file(${DOXYFILE_IN} ${DOXYFILE_OUT} @ONLY)
+
+  add_custom_target(docs
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYFILE_OUT}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Generating documentation with Doxygen"
+  )
+endif()
 
 ament_package()
