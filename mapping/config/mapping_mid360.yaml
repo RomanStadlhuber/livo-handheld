@@ -46,8 +46,8 @@ extrinsics:
     rotation: [0, 0, 0, 1] # hamilton quaternion (x, y, z, w)
   imu_t_lidar: 0.0 # initial guess for (or constant) temporal IMU-LiDAR offset
   imu_T_camera:
-    translation: [-0.0711, -0.02329, 0.09012]
-    rotation: [0.5792236085917082, -0.5792236085917082, -0.40558600968228625, 0.40558600968228625]
+    translation: [0.0491,  -0.02329, -0.00188]
+    rotation: [0.40558601, -0.40558601,  0.57922361, -0.57922361] # (x, y, z, w)
     
 intrinsics:
   camera:
