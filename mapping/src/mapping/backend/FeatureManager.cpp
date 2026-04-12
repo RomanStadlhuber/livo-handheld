@@ -187,7 +187,9 @@ namespace mapping
                 planeThicknessCovariance += std::pow(thickness, 2.0);
             planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
             clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-            clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
+            // clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
+            // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
+            clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
         }
     }
 
@@ -204,7 +206,9 @@ namespace mapping
             planeThicknessCovariance += std::pow(thickness, 2.0);
         planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
         clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-        clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
+        // clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
+        // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
+        clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
     }
 
     std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> FeatureManager::computeTemporalCalibrationTwists(
@@ -292,7 +296,7 @@ namespace mapping
                         // scan points are passed to factor in world frame
                         lidar_points[key] = keyframePoses[idxKeyframe]->transformTo(keyframeSubmaps[idxKeyframe]->points_[idxPoint]);
                     }
-                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto factor = boost::make_shared<PointToPlaneFactor>(
                         keys,
@@ -336,7 +340,7 @@ namespace mapping
                         keys.push_back(key);
                         lidar_points[key] = keyframePoses[kfIdx]->transformTo(keyframeSubmaps[kfIdx]->points_[ptIdx]);
                     }
-                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto newFactor = boost::make_shared<PointToPlaneFactor>(
                         keys,
@@ -363,7 +367,7 @@ namespace mapping
                 {
                     boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
                     const double adaptiveSigma = clusterSigmas_[clusterId];
-                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     factor->updatePlaneParameters(clusterNormals_[clusterId], clusterCenters_[clusterId], robustNoise);
                 }
@@ -404,7 +408,7 @@ namespace mapping
                     keys.push_back(key);
                     lidar_points[key] = keyframePoses[kfIdx]->transformTo(keyframeSubmaps[kfIdx]->points_[ptIdx]);
                 }
-                const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
+                const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                 auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                 const auto newFactor = boost::make_shared<PointToPlaneFactor>(
                     keys,

@@ -122,6 +122,13 @@ namespace mapping
         /// see also: https://gtsam.org/doxygen/a03860.html
         gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_{
             gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(new gtsam::noiseModel::mEstimator::GemanMcClure(1.0))};
+        // NOTE: for Huber loss, default k = 1.345 which is in standard-deviations,
+        // as the residual is already whitened before applying the kernel!!
+        // https://gtsam.org/doxygen/a04439.html
+        /*gtsam::noiseModel::mEstimator::Huber::shared_ptr kernel_{
+            gtsam::noiseModel::mEstimator::Huber::shared_ptr(new gtsam::noiseModel::mEstimator::Huber())};*/
+        /* gtsam::noiseModel::mEstimator::Null::shared_ptr kernel_{
+            gtsam::noiseModel::mEstimator::Null::shared_ptr(new gtsam::noiseModel::mEstimator::Null())}; */
 
     public:
         /// @brief Set optional calibration keys for temporal and extrinsic calibration.
