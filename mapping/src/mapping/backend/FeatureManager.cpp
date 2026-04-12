@@ -295,7 +295,9 @@ namespace mapping
                 // cluster parameters from new track
                 const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
-                const double adaptiveSigma = clusterSigmas_[clusterId];
+                // add sensor-noise floor to the plane-fit variance for the factor noise model.
+                // kept out of clusterSigmas_ so the front-end gating test remains unaffected.
+                const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
                 if (existingFactorIt == clusterFactors_.end()) // factor does not exist, create
                 {
 
@@ -378,7 +380,8 @@ namespace mapping
                 if (existingFactorIt != clusterFactors_.end())
                 {
                     boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
-                    const double adaptiveSigma = clusterSigmas_[clusterId];
+                    // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P" in MSCKF)
+                    const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     factor->updatePlaneParameters(clusterNormals_[clusterId], clusterCenters_[clusterId], robustNoise);
@@ -395,7 +398,8 @@ namespace mapping
                 }
                 const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
-                const double adaptiveSigma = clusterSigmas_[clusterId];
+                // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P" in MSCKF)
+                const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
                 // 1: Remove old factor from smoother (if still present)
                 auto it = smootherFactorByCluster.find(clusterId);
                 if (it != smootherFactorByCluster.end())

@@ -133,7 +133,13 @@ namespace mapping
     public:
         /// @brief Set optional calibration keys for temporal and extrinsic calibration.
         void setCalibrationKeys(boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey);
+        // Sensor + pose noise floor added to plane-fit variance.
+        // Plane thickness alone only captures fit quality, not LiDAR ranging noise
+        // or residual pose uncertainty at evaluation time.
+        static constexpr double SENSOR_VARIANCE = 1e-4; // [m^2] (variance!)
 
+
+        
     private:
         boost::optional<gtsam::Key> dtKey_;
         boost::optional<gtsam::Key> extrinsicKey_;
