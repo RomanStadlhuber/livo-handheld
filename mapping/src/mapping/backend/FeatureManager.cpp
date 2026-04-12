@@ -187,7 +187,6 @@ namespace mapping
                 planeThicknessCovariance += std::pow(thickness, 2.0);
             planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
             clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-            // clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
             // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
             clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
         }
@@ -206,7 +205,6 @@ namespace mapping
             planeThicknessCovariance += std::pow(thickness, 2.0);
         planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
         clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-        // clusterSigmas_[clusterId] = std::pow(0.5 * planeThicknessCovariance, 0.25);
         // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
         clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
     }
