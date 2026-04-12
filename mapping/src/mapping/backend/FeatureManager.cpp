@@ -292,7 +292,6 @@ namespace mapping
                         // scan points are passed to factor in world frame
                         lidar_points[key] = keyframePoses[idxKeyframe]->transformTo(keyframeSubmaps[idxKeyframe]->points_[idxPoint]);
                     }
-                    std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &imuPoses = states.getKeyframeImuPoses();
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Sigma(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto factor = boost::make_shared<PointToPlaneFactor>(
