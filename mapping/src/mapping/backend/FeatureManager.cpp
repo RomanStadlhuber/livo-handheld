@@ -265,6 +265,23 @@ namespace mapping
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();
         std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists = computeTemporalCalibrationTwists(states);
         std::size_t numFactorsAdded{0}, numFactorsUpdated{0}, numFactorsRemoved{0};
+
+        /* Build a clusterId -> smoother factor index map in a single pass.
+         * Used in the branches below to find the previously-submitted factor
+         * for a cluster so it can be invalidated and queued for removal.
+         *
+         * NOTE: previous impl did a full linear scan of the factor graph per cluster
+         * with a dynamic_pointer_cast at every step — O(N_clusters * M_factors) per
+         * keyframe. Pre-indexing collapses this to O(M_factors + N_clusters).
+         */
+        std::map<uint32_t, size_t> smootherFactorByCluster;
+        for (size_t i = 0; i < currentSmootherFactors.size(); ++i)
+        {
+            const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[i]);
+            if (ptp)
+                smootherFactorByCluster.emplace(ptp->clusterId_, i);
+        }
+
         for (auto const &[clusterId, clusterPoints] : clusters_)
         {
             const ClusterState clusterState = clusterStates_.at(clusterId);
@@ -317,18 +334,15 @@ namespace mapping
                 else // cluster factor exists, remove old and readd with updated keys
                 {
                     // 1: Remove old factor from smoother (if still present)
-                    const gtsam::NonlinearFactorGraph &smootherFactors = currentSmootherFactors;
-                    for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+                    auto it = smootherFactorByCluster.find(clusterId);
+                    if (it != smootherFactorByCluster.end())
                     {
-                        const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
-                        const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
-                        if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
-                        {
-                            existingPtpFactor->markInvalid();
-                            factorsToRemove_.push_back(gtsam::Key{factorKey});
-                            numFactorsRemoved++;
-                            break;
-                        }
+                        const size_t factorKey = it->second;
+                        const auto existingPtpFactor =
+                            boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
+                        existingPtpFactor->markInvalid();
+                        factorsToRemove_.push_back(factorKey);
+                        numFactorsRemoved++;
                     }
                     // 2: Create new factor from ALL current clusterPoints
                     gtsam::KeyVector keys;
@@ -385,18 +399,15 @@ namespace mapping
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
                 const double adaptiveSigma = clusterSigmas_[clusterId];
                 // 1: Remove old factor from smoother (if still present)
-                const gtsam::NonlinearFactorGraph &smootherFactors = currentSmootherFactors;
-                for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+                auto it = smootherFactorByCluster.find(clusterId);
+                if (it != smootherFactorByCluster.end())
                 {
-                    const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
-                    const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
-                    if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
-                    {
-                        existingPtpFactor->markInvalid();
-                        factorsToRemove_.push_back(gtsam::Key{factorKey});
-                        numFactorsRemoved++;
-                        break;
-                    }
+                    const size_t factorKey = it->second;
+                    const auto existingPtpFactor =
+                        boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
+                    existingPtpFactor->markInvalid();
+                    factorsToRemove_.push_back(factorKey);
+                    numFactorsRemoved++;
                 }
                 // 2: Create new factor from ALL current clusterPoints
                 gtsam::KeyVector keys;
@@ -429,19 +440,16 @@ namespace mapping
             break;
             case ClusterState::Pruned: // factor must be removed from the smoother
             {
-                const gtsam::NonlinearFactorGraph &smootherFactors = currentSmootherFactors;
-                for (size_t factorKey = 0; factorKey < smootherFactors.size(); ++factorKey)
+                auto it = smootherFactorByCluster.find(clusterId);
+                if (it != smootherFactorByCluster.end())
                 {
-                    const gtsam::NonlinearFactor::shared_ptr existingFactor = smootherFactors[factorKey];
-                    const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactor);
-                    if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
-                    {
-                        existingPtpFactor->markInvalid(); // mark factor as invalid to avoid further optimization
-                        // mark existing factor for removal
-                        factorsToRemove_.push_back(gtsam::Key{factorKey});
-                        numFactorsRemoved++;
-                        break;
-                    }
+                    const size_t factorKey = it->second;
+                    const auto existingPtpFactor =
+                        boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
+                    existingPtpFactor->markInvalid(); // mark factor as invalid to avoid further optimization
+                    // mark existing factor for removal
+                    factorsToRemove_.push_back(factorKey);
+                    numFactorsRemoved++;
                 }
             }
             break;
