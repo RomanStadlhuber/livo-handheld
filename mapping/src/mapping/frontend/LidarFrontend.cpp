@@ -48,6 +48,21 @@ namespace mapping
         std::vector<double> knnDists(config.lidar_frontend.knn_neighbors);
         knnDists.reserve(config.lidar_frontend.knn_neighbors);
         std::size_t validTracks = 0, numValidClusters = 0;
+
+        // per-keyframe counters for debugging cluster-tracking behavior
+        struct TrackingStatistics
+        {
+            std::size_t enteredTotal{0};
+            std::size_t enteredPremature{0};
+            std::size_t enteredIdle{0};
+            std::size_t enteredShiftedIdle{0};
+            std::size_t enteredTracked{0};
+            std::size_t rejKnnInsufficient{0};
+            std::size_t rejPlaneFitInvalid{0};
+            std::size_t rejGating{0};
+            std::size_t rejConsistency{0};
+            std::size_t promotedTracked{0};
+        } stats;
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();
         // KD-Tree of the current submap, used for cluster tracking
         const open3d::geometry::KDTreeFlann kdTree{*keyframeSubmaps[idxKeyframe]};
@@ -59,14 +74,34 @@ namespace mapping
             // --- ignore pruned clusters ---
             if (clusterState == ClusterState::Pruned)
                 continue;
+            stats.enteredTotal++;
+            switch (clusterState)
+            {
+            case ClusterState::Premature:   stats.enteredPremature++;   break;
+            case ClusterState::Idle:        stats.enteredIdle++;        break;
+            case ClusterState::ShiftedIdle: stats.enteredShiftedIdle++; break;
+            case ClusterState::Tracked:     stats.enteredTracked++;     break;
+            default: break;
+            }
             // --- tracking: KNN search & SVD plane fit ---
             auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.begin(); // get the oldest point in the cluster (more mature)
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps[idxClusterKF]->points_[idxSubmapPt];
-            const int knnFound = kdTree.SearchKNN(
+            const int knnFound = kdTree.SearchHybrid(
                 world_clusterPt,
+                config.lidar_frontend.knn_radius,
                 config.lidar_frontend.knn_neighbors,
                 knnIndices,
                 knnDists);
+            // skip if not enough points within radius; still update cluster parameters from new poses
+            if(knnFound < config.lidar_frontend.knn_neighbors)
+            {
+                stats.rejKnnInsufficient++;
+                if (clusterState == ClusterState::Premature) // don't update premature clusters
+                    continue;
+                featureManager.clusterStates_[clusterId] = ClusterState::Idle;
+                featureManager.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
+                continue;
+            }
             // collect KNN points and fit a plane
             std::vector<Eigen::Vector3d> knnPoints;
             knnPoints.reserve(knnFound);
@@ -76,6 +111,7 @@ namespace mapping
             // --- tracking failed (KNN plane fit invalid): update cluster center & normal, keep thickness ---
             if (!validPlaneTrack || planeTrackThickness > config.lidar_frontend.clustering.max_plane_thickness)
             {
+                stats.rejPlaneFitInvalid++;
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
                 featureManager.clusterStates_[clusterId] = ClusterState::Idle;
@@ -93,6 +129,7 @@ namespace mapping
                 const double adaptiveSigma = std::pow(0.5 * featureManager.clusterSigmas_.at(clusterId), 0.25);
                 if (pointToPlaneDist >= 3.0 * adaptiveSigma)
                 {
+                    stats.rejGating++;
                     featureManager.clusterStates_[clusterId] = ClusterState::Idle;
                     featureManager.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
                     continue;
@@ -126,9 +163,11 @@ namespace mapping
                 // Note: internally uses thickness history to update covariance
                 featureManager.updateClusterParameters(states, clusterId, planeNormal, clusterCenter);
                 numValidClusters++;
+                stats.promotedTracked++;
             }
             else
             {
+                stats.rejConsistency++;
                 // conistency check failed -> mark cluster Idle, remove added pt and recompute parameters from old old associations
                 if (clusterState == ClusterState::Premature) // must not go from premature to idle
                     continue;
@@ -143,6 +182,18 @@ namespace mapping
             return false;
         }
         std::cout << "::: [INFO] keyframe " << idxKeyframe << " had " << validTracks << " tracks and " << numValidClusters << " valid clusters :::" << std::endl;
+        std::cout << "::: [DEBUG] keyframe " << idxKeyframe << " tracking stats :::\n"
+                  << "\tentered: " << stats.enteredTotal
+                  << " (premature: " << stats.enteredPremature
+                  << ", idle: " << stats.enteredIdle
+                  << ", shifted: " << stats.enteredShiftedIdle
+                  << ", tracked: " << stats.enteredTracked << ")\n"
+                  << "\trejected: knn=" << stats.rejKnnInsufficient
+                  << " planeFit=" << stats.rejPlaneFitInvalid
+                  << " gating=" << stats.rejGating
+                  << " consistency=" << stats.rejConsistency << "\n"
+                  << "\tpromoted to Tracked: " << stats.promotedTracked
+                  << ", valid tracks: " << validTracks << std::endl;
         return idxKeyframe < config.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
 }
