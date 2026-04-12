@@ -121,7 +121,7 @@ namespace mapping
         /// @brief Robust kernel for point-to-plane factors
         /// see also: https://gtsam.org/doxygen/a03860.html
         gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_{
-            gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(new gtsam::noiseModel::mEstimator::GemanMcClure(1.0))};
+            gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(new gtsam::noiseModel::mEstimator::GemanMcClure(0.5))};
         // NOTE: for Huber loss, default k = 1.345 which is in standard-deviations,
         // as the residual is already whitened before applying the kernel!!
         // https://gtsam.org/doxygen/a04439.html
