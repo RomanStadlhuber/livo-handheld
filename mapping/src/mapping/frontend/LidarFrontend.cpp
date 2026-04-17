@@ -84,7 +84,7 @@ namespace mapping
             default: break;
             }
             // --- tracking: KNN search & SVD plane fit ---
-            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.begin(); // get the oldest point in the cluster (more mature)
+            auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.rbegin(); // use newest cluster pt as KNN query
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps[idxClusterKF]->points_[idxSubmapPt];
             const int knnFound = kdTree.SearchHybrid(
                 world_clusterPt,
