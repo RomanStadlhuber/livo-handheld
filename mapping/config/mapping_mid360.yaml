@@ -9,21 +9,21 @@ lidar_frontend:
   undistort: true # disable for solid state LiDARs
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
-  normal_consistency_threshold: 0.9 # [0-1], accepting new points based updated normal consistency
+  normal_consistency_threshold: 0.85 # [0-1], accepting new points based updated normal consistency
   clustering:
     min_points: 5
     max_points: 20
-    max_plane_thickness: 0.1 # [m]
+    max_plane_thickness: 0.01 # [m]^2, NOTE: needs to be squared, residuals & thickness values are too
     sampling_voxel_size: 2.5 # [m], voxel size to use for cluster supplementation (0 = all)
-    insert_lag: 2 # keyframe delay to use when inserting new clusters from keyframes
+    insert_lag: 0 # keyframe delay to use when inserting new clusters from keyframes
   keyframe:
     thresh_distance: 0.4 # [m]
-    thresh_angle: 0.175 # [rad], ~10 degrees
+    thresh_angle: 0.262 # [rad], ~15 degrees
     thresh_elapsed_scans: 5
 
 camera_frontend:
   color_space: RGB # can be RGB or BGR (both 8-bit)
-  colorize_scans: true # if enabled, will colorize points within the image
+  colorize_scans: false # if enabled, will colorize points within the image
   sync_tolerance: 0.01 # [sec.], tolerance for syncing images to LiDAR scans
   keepalive_window: 0.6 # [sec.], how long images are kept for sync before being discarded
 
