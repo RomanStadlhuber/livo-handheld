@@ -42,7 +42,7 @@ namespace mapping
         check(config.max_points, GT, config.min_points, "max_points");
         check(config.max_plane_thickness, GT, 0.0, "max_plane_thickness");
         check(config.sampling_voxel_size, GT, 0.0, "sampling_voxel_size");
-        check(config.insert_lag, GT, 0u, "insert_lag");
+        check(config.insert_lag, GE, 0, "insert_lag");
         check(config.normal_consistency_threshold, GT, 0.0, "normal_consistency_threshold");
         check(config.normal_consistency_threshold, LT, 1.0, "normal_consistency_threshold");
     }
