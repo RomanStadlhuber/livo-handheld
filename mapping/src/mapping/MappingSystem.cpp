@@ -270,7 +270,7 @@ namespace mapping
 
         // insert new clusters from a keyframe htat has been optimized in multiple passes,
         // as the feature positions from those are usually more mature than using e.g. the most recent KF
-        if (idxKeyframe > config_.lidar_frontend.clustering.insert_lag + 1)
+        if (idxKeyframe > config_.lidar_frontend.clustering.insert_lag)
             featureManager_.createNewClusters(
                 states_,
                 idxKeyframe - config_.lidar_frontend.clustering.insert_lag,
