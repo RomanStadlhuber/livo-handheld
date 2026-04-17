@@ -17,8 +17,8 @@ lidar_frontend:
     sampling_voxel_size: 2.5 # [m], voxel size to use for cluster supplementation (0 = all)
     insert_lag: 0 # keyframe delay to use when inserting new clusters from keyframes
   keyframe:
-    thresh_distance: 0.4 # [m]
-    thresh_angle: 0.262 # [rad], ~15 degrees
+    thresh_distance: 0.3 # [m]
+    thresh_angle: 0.349 # [rad], ~20 [°]
     thresh_elapsed_scans: 5
 
 camera_frontend:
