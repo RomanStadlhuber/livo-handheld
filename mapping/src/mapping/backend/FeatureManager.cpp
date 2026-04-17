@@ -3,6 +3,9 @@
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/helpers.hpp> // planeFitSVD
 
+#include <algorithm> // std::sort, std::min
+#include <tuple>     // std::make_tuple
+
 namespace mapping
 {
 
@@ -470,29 +473,45 @@ namespace mapping
 
     void FeatureManager::summarizeClusters() const
     {
-        std::cout << "::: [DEBUG] Cluster summary :::" << std::endl;
-        for (auto const &cluster : clusters_)
+        // collect sigmas and thickness values across valid clusters to inspect
+        // the dynamic range of the noise model at runtime
+        std::vector<double> sigmas, thicknesses;
+        std::size_t numTracked = 0, numIdle = 0, numShifted = 0;
+        sigmas.reserve(clusters_.size());
+        thicknesses.reserve(clusters_.size());
+        for (auto const &[clusterId, _] : clusters_)
         {
-            auto const &[clusterId, clusterPoints] = cluster;
-            if (!isClusterValid(clusterId)) // skip invalid clusters, otherwise it's too much logging going on
+            if (!isClusterValid(clusterId))
                 continue;
-            std::string stateStr;
+            sigmas.push_back(clusterSigmas_.at(clusterId));
+            thicknesses.push_back(clusterPlaneThickness_.at(clusterId));
             switch (clusterStates_.at(clusterId))
             {
             case ClusterState::Tracked:
-                stateStr = "tracked";
-                break;
+                numTracked++;
+            break;
             case ClusterState::Idle:
-                stateStr = "idle";
-                break;
-            default: // safeguard (shoud not happen)
-                stateStr = "premature or marked for removal";
-                break;
+                numIdle++;
+            break;
+            case ClusterState::ShiftedIdle:
+                numShifted++;
+            break;
             }
-            std::cout << "\tId: " << clusterId << " size: " << clusterPoints.size() << " thickness: " << clusterPlaneThickness_.at(clusterId)
-                      << " sigma: " << clusterSigmas_.at(clusterId)
-                      << " state: " << stateStr << std::endl;
         }
+        // min / median / 95-percentile / max from an unsorted vector, sort happens in-place
+        auto stats = [](std::vector<double> &v)
+        {
+            std::sort(v.begin(), v.end());
+            const std::size_t n = v.size();
+            const std::size_t idxP95 = std::min(n - 1, static_cast<std::size_t>(0.95 * n));
+            return std::make_tuple(v.front(), v[n / 2], v[idxP95], v.back());
+        };
+        auto const [sMin, sMed, sP95, sMax] = stats(sigmas);
+        auto const [tMin, tMed, tP95, tMax] = stats(thicknesses);
+        std::cout << "::: [DEBUG] cluster summary (valid=" << sigmas.size()
+                  << " tracked=" << numTracked << " idle=" << numIdle << " shifted=" << numShifted << ") :::\n"
+                  << "\tsigmas    [m^4]: min=" << sMin << " median=" << sMed << " p95=" << sP95 << " max=" << sMax << "\n"
+                  << "\tthickness [m^2]: min=" << tMin << " median=" << tMed << " p95=" << tP95 << " max=" << tMax << std::endl;
     }
 
     void FeatureManager::summarizeFactors(const gtsam::NonlinearFactorGraph &factors) const
