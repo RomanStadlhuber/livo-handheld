@@ -2,7 +2,7 @@ backend:
   sliding_window_size: 14 # [keyframes]
   init_time_window: 2.0 # [sec.]
   solver_iterations: 2 
-  isam2_relinearize_threshold: 0.005 # frobenius norm for relinearization on state variables
+  isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
 
 lidar_frontend:
   voxel_size: 1.0 # [m]
