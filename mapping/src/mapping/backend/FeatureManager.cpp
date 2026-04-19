@@ -476,16 +476,16 @@ namespace mapping
     {
         // collect sigmas and thickness values across valid clusters to inspect
         // the dynamic range of the noise model at runtime
-        std::vector<double> sigmas, thicknesses;
+        std::vector<double> sigmas, clusterThicknessValues;
         std::size_t numTracked = 0, numIdle = 0, numShifted = 0;
         sigmas.reserve(clusters_.size());
-        thicknesses.reserve(clusters_.size());
+        clusterThicknessValues.reserve(clusters_.size());
         for (auto const &[clusterId, _] : clusters_)
         {
             if (!isClusterValid(clusterId))
                 continue;
             sigmas.push_back(clusterSigmas_.at(clusterId));
-            thicknesses.push_back(clusterPlaneThickness_.at(clusterId));
+            clusterThicknessValues.push_back(clusterPlaneThickness_.at(clusterId));
             switch (clusterStates_.at(clusterId))
             {
             case ClusterState::Tracked:
@@ -508,7 +508,7 @@ namespace mapping
             return std::make_tuple(v.front(), v[n / 2], v[idxP95], v.back());
         };
         auto const [sMin, sMed, sP95, sMax] = stats(sigmas);
-        auto const [tMin, tMed, tP95, tMax] = stats(thicknesses);
+        auto const [tMin, tMed, tP95, tMax] = stats(clusterThicknessValues);
         std::cout << "::: [DEBUG] cluster summary (valid=" << sigmas.size()
                   << " tracked=" << numTracked << " idle=" << numIdle << " shifted=" << numShifted << ") :::\n"
                   << "\tsigmas    [m^4]: min=" << sMin << " median=" << sMed << " p95=" << sP95 << " max=" << sMax << "\n"
