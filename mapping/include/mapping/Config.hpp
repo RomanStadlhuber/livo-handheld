@@ -17,6 +17,26 @@
 namespace mapping
 {
     /// @ingroup config
+    /// @brief SVD planarity and linearity thresholds for plane fitting
+    struct PlanarityCheckConfig
+    {
+        double planarity = 0.1; // max σ₃/σ₂ ratio (lower = stricter planarity)
+        double linearity = 0.5; // min σ₂/σ₁ ratio (higher = stricter non-linearity)
+    };
+
+    inline void declare_config(PlanarityCheckConfig &config)
+    {
+        using namespace config;
+        name("PlanarityCheckConfig");
+        field(config.planarity, "planarity");
+        field(config.linearity, "linearity");
+        check(config.planarity, GT, 0.0, "planarity");
+        check(config.planarity, LT, 1.0, "planarity");
+        check(config.linearity, GT, 0.0, "linearity");
+        check(config.linearity, LT, 1.0, "linearity");
+    }
+
+    /// @ingroup config
     /// @brief Clustering parameters for point cluster validation
     struct ClusteringConfig
     {
@@ -73,6 +93,7 @@ namespace mapping
         bool undistort = true;   // disable for solid state LiDARs
         double knn_radius = 1.5; // [m]
         int knn_neighbors = 5;
+        PlanarityCheckConfig planarity_check;
         ClusteringConfig clustering;
         KeyframeConfig keyframe;
     };
@@ -85,6 +106,7 @@ namespace mapping
         field(config.undistort, "undistort");
         field(config.knn_radius, "knn_radius", "m");
         field(config.knn_neighbors, "knn_neighbors");
+        field(config.planarity_check, "planarity_check");
         field(config.clustering, "clustering");
         field(config.keyframe, "keyframe");
         check(config.voxel_size, GT, 0.0, "voxel_size");

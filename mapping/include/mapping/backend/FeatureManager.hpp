@@ -12,6 +12,7 @@
 
 #include <mapping/types.hpp>
 #include <mapping/States.hpp>
+#include <mapping/Config.hpp>
 #include <mapping/factors/PointToPlaneFactor.hpp>
 
 #include <iostream>
@@ -57,7 +58,7 @@ namespace mapping
         void removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe, bool firstInHistory = false);
         /// @brief Update cluster parameters from scratch
         /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
-        void updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness);
+        void updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness, const MappingConfig &config);
         /// @brief Set new cluster parameters including thickness (i.e. valid tracking and point was added)
         /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
         void updateClusterParameters(const States &states, const ClusterId &clusterId, const Eigen::Vector3d &newNormal, const Eigen::Vector3d &newCenter);

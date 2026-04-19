@@ -171,7 +171,7 @@ namespace mapping
         }
     }
 
-    void FeatureManager::updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness)
+    void FeatureManager::updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness, const MappingConfig &config)
     {
         std::vector<Eigen::Vector3d> clusterPoints;
         clusterPoints.reserve(clusters_[clusterId].size());
@@ -179,7 +179,8 @@ namespace mapping
         {
             clusterPoints.push_back(states.getKeyframeSubmaps().at(idxSubmap)->points_[idxPoint]);
         }
-        const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(clusterPoints);
+        const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(
+            clusterPoints, config.lidar_frontend.planarity_check.planarity, config.lidar_frontend.planarity_check.linearity);
         *clusterCenters_[clusterId] = clusterCenter;
         *clusterNormals_[clusterId] = planeNormal;
         // explicitly recalculate plane thickness when a point was added or removed

@@ -40,8 +40,8 @@ namespace mapping
     /// @ingroup helpers
     /// @brief Fit a plane to a set of 3D points using SVD
     /// @param points Input points to fit the plane to
-    /// @param planarityThreshold Maximum ratio σ₃/σ₂ for valid plane (default 0.3)
-    /// @param linearityThreshold Minimum ratio σ₂/σ₁ to reject collinear points (default 0.1)
+    /// @param planarityThreshold Maximum ratio σ₃/σ₂ for valid plane
+    /// @param linearityThreshold Minimum ratio σ₂/σ₁ to reject collinear points
     /// @return Tuple of (isValid, planeNormal, planeCenter, planePoints) where:
     ///         - isValid: true if plane passes planarity and non-linearity checks
     ///         - planeNormal: fitted plane normal vector

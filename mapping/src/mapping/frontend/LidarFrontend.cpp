@@ -99,7 +99,7 @@ namespace mapping
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
                 featureManager.clusterStates_[clusterId] = ClusterState::Idle;
-                featureManager.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
+                featureManager.updateClusterParameters(states, clusterId, false, config); // update cluster, keep thickness (no new KF association)
                 continue;
             }
             // collect KNN points and fit a plane
@@ -107,7 +107,10 @@ namespace mapping
             knnPoints.reserve(knnFound);
             for (int i = 0; i < knnFound; ++i)
                 knnPoints.push_back(keyframeSubmaps[idxKeyframe]->points_[knnIndices[i]]);
-            const auto [validPlaneTrack, planeTrackNormal, knnCenter, knnPointsMat, planeTrackThickness] = planeFitSVD(knnPoints);
+            const auto [validPlaneTrack, planeTrackNormal, knnCenter, knnPointsMat, planeTrackThickness] = planeFitSVD(
+                knnPoints,
+                config.lidar_frontend.planarity_check.planarity,
+                config.lidar_frontend.planarity_check.linearity);
             // --- tracking failed (KNN plane fit invalid): update cluster center & normal, keep thickness ---
             if (!validPlaneTrack || planeTrackThickness > config.lidar_frontend.clustering.max_plane_thickness)
             {
@@ -115,7 +118,7 @@ namespace mapping
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
                 featureManager.clusterStates_[clusterId] = ClusterState::Idle;
-                featureManager.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
+                featureManager.updateClusterParameters(states, clusterId, false, config); // update cluster, keep thickness (no new KF association)
                 continue;
             }
             static constexpr size_t IDX_KNN_POINT = 1; // use second-nearest neighbor for tracking to increase plane stability
@@ -131,7 +134,7 @@ namespace mapping
                 {
                     stats.rejGating++;
                     featureManager.clusterStates_[clusterId] = ClusterState::Idle;
-                    featureManager.updateClusterParameters(states, clusterId, false); // update cluster, keep thickness (no new KF association)
+                    featureManager.updateClusterParameters(states, clusterId, false, config); // update cluster, keep thickness (no new KF association)
                     continue;
                 }
             }
@@ -152,7 +155,10 @@ namespace mapping
                 const auto &[idxSubmap, idxPoint] = pointIdxPair;
                 clusterPoints.push_back(keyframeSubmaps[idxSubmap]->points_[idxPoint]);
             }
-            const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(clusterPoints);
+            const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(
+                clusterPoints,
+                config.lidar_frontend.planarity_check.planarity,
+                config.lidar_frontend.planarity_check.linearity);
             // --- new plane normal consistency check ---
             if (
                 clusterState == ClusterState::Premature // for premature clusters, update immediately
@@ -173,7 +179,7 @@ namespace mapping
                     continue;
                 featureManager.clusterStates_[clusterId] = ClusterState::Idle;    // idle - no valid track in newest KF
                 featureManager.removePointFromCluster(clusterId, idxKeyframe);    // remove latest association
-                featureManager.updateClusterParameters(states, clusterId, false); // update location, thickness shouldn't change (no new KF association)
+                featureManager.updateClusterParameters(states, clusterId, false, config); // update location, thickness shouldn't change (no new KF association)
                 continue;
             }
         }
