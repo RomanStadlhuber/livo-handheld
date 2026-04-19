@@ -1,7 +1,7 @@
 backend:
   sliding_window_size: 14 # [keyframes]
   init_time_window: 2.0 # [sec.]
-  solver_iterations: 2
+  solver_iterations: 4
   isam2_relinearize_threshold: 0.005 # frobenius norm for relinearization on state variables
 
 lidar_frontend:
@@ -10,10 +10,13 @@ lidar_frontend:
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
   normal_consistency_threshold: 0.8 # [0-1], accepting new points based updated normal consistency
+  planarity_check:
+    linearity: 0.3
+    planarity: 0.3
   clustering:
     min_points: 5
     max_points: 20
-    max_plane_thickness: 0.04 # [m]^2, NOTE: needs to be squared, residuals & thickness values are too
+    max_plane_thickness: 0.004 # [m]^2, NOTE: needs to be squared, residuals & thickness values are too
     sampling_voxel_size: 2.5 # [m], voxel size to use for cluster supplementation (0 = all)
     insert_lag: 0 # keyframe delay to use when inserting new clusters from keyframes
   keyframe:
