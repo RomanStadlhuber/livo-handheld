@@ -127,7 +127,7 @@ namespace mapping
         // as the residual is already whitened before applying the kernel!!
         // https://gtsam.org/doxygen/a04439.html
         /*gtsam::noiseModel::mEstimator::Huber::shared_ptr kernel_{
-            gtsam::noiseModel::mEstimator::Huber::shared_ptr(new gtsam::noiseModel::mEstimator::Huber())};*/
+            gtsam::noiseModel::mEstimator::Huber::shared_ptr(new gtsam::noiseModel::mEstimator::Huber())}; */
         /* gtsam::noiseModel::mEstimator::Null::shared_ptr kernel_{
             gtsam::noiseModel::mEstimator::Null::shared_ptr(new gtsam::noiseModel::mEstimator::Null())}; */
 
@@ -137,7 +137,7 @@ namespace mapping
         // Sensor + pose noise floor added to plane-fit variance.
         // Plane thickness alone only captures fit quality, not LiDAR ranging noise
         // or residual pose uncertainty at evaluation time.
-        static constexpr double SENSOR_VARIANCE = 1e-4; // [m^2] (variance!)
+        static constexpr double SENSOR_VARIANCE = 1.6e-7; // [m^4] (variance!)
 
 
         
