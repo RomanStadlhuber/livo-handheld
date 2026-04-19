@@ -126,7 +126,7 @@ namespace mapping
                 const double pointToPlaneDist = std::abs(
                     featureManager.clusterNormals_.at(clusterId)->dot(knnPoint - *featureManager.clusterCenters_.at(clusterId)));
                 // NOTE: see paper MSC-LIO, Eq. 19 -> they use this adaptive sigma formulation for the gating test.
-                const double adaptiveSigma = std::pow(0.5 * featureManager.clusterSigmas_.at(clusterId), 0.25);
+                const double adaptiveSigma = std::pow(featureManager.clusterSigmas_.at(clusterId), 0.25);
                 if (pointToPlaneDist >= 3.0 * adaptiveSigma)
                 {
                     stats.rejGating++;
