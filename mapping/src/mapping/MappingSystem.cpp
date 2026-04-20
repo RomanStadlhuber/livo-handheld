@@ -260,9 +260,11 @@ namespace mapping
          */
         smoother_.updateAndOptimizeGraph(idxKeyframe, states_, config_, imuFactor, featureFactors, factorsToRemove);
 
+#ifdef ENABLE_DBG_CMP
         featureManager_.summarizeFactors(smoother_.getFactors());
         // log sigma/thickness distribution to inspect noise-model dynamic range
         featureManager_.summarizeClusters();
+#endif
 
         std::cout << "Current bias: ";
         states_.getCurrentBias().print();

@@ -49,6 +49,7 @@ namespace mapping
         knnDists.reserve(config.lidar_frontend.knn_neighbors);
         std::size_t validTracks = 0, numValidClusters = 0;
 
+#ifdef ENABLE_DBG_CMP
         // per-keyframe counters for debugging cluster-tracking behavior
         struct TrackingStatistics
         {
@@ -63,6 +64,7 @@ namespace mapping
             std::size_t rejConsistency{0};
             std::size_t promotedTracked{0};
         } stats;
+#endif
         std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();
         // KD-Tree of the current submap, used for cluster tracking
         const open3d::geometry::KDTreeFlann kdTree{*keyframeSubmaps[idxKeyframe]};
@@ -74,6 +76,7 @@ namespace mapping
             // --- ignore pruned clusters ---
             if (clusterState == ClusterState::Pruned)
                 continue;
+#ifdef ENABLE_DBG_CMP
             stats.enteredTotal++;
             switch (clusterState)
             {
@@ -83,6 +86,7 @@ namespace mapping
             case ClusterState::Tracked:     stats.enteredTracked++;     break;
             default: break;
             }
+#endif
             // --- tracking: KNN search & SVD plane fit ---
             auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.rbegin(); // use newest cluster pt as KNN query
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps[idxClusterKF]->points_[idxSubmapPt];
@@ -95,7 +99,9 @@ namespace mapping
             // skip if not enough points within radius; still update cluster parameters from new poses
             if(knnFound < config.lidar_frontend.knn_neighbors)
             {
+#ifdef ENABLE_DBG_CMP
                 stats.rejKnnInsufficient++;
+#endif
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
                 featureManager.clusterStates_[clusterId] = ClusterState::Idle;
@@ -114,7 +120,9 @@ namespace mapping
             // --- tracking failed (KNN plane fit invalid): update cluster center & normal, keep thickness ---
             if (!validPlaneTrack || planeTrackThickness > config.lidar_frontend.clustering.max_plane_thickness)
             {
+#ifdef ENABLE_DBG_CMP
                 stats.rejPlaneFitInvalid++;
+#endif
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
                 featureManager.clusterStates_[clusterId] = ClusterState::Idle;
@@ -132,7 +140,9 @@ namespace mapping
                 const double adaptiveSigma = std::pow(featureManager.clusterSigmas_.at(clusterId), 0.25);
                 if (pointToPlaneDist >= 3.0 * adaptiveSigma)
                 {
+#ifdef ENABLE_DBG_CMP
                     stats.rejGating++;
+#endif
                     featureManager.clusterStates_[clusterId] = ClusterState::Idle;
                     featureManager.updateClusterParameters(states, clusterId, false, config); // update cluster, keep thickness (no new KF association)
                     continue;
@@ -169,11 +179,15 @@ namespace mapping
                 // Note: internally uses thickness history to update covariance
                 featureManager.updateClusterParameters(states, clusterId, planeNormal, clusterCenter);
                 numValidClusters++;
+#ifdef ENABLE_DBG_CMP
                 stats.promotedTracked++;
+#endif
             }
             else
             {
+#ifdef ENABLE_DBG_CMP
                 stats.rejConsistency++;
+#endif
                 // conistency check failed -> mark cluster Idle, remove added pt and recompute parameters from old old associations
                 if (clusterState == ClusterState::Premature) // must not go from premature to idle
                     continue;
@@ -187,6 +201,7 @@ namespace mapping
         {
             return false;
         }
+#ifdef ENABLE_DBG_CMP
         std::cout << "::: [INFO] keyframe " << idxKeyframe << " had " << validTracks << " tracks and " << numValidClusters << " valid clusters :::" << std::endl;
         std::cout << "::: [DEBUG] keyframe " << idxKeyframe << " tracking stats :::\n"
                   << "\tentered: " << stats.enteredTotal
@@ -200,6 +215,7 @@ namespace mapping
                   << " consistency=" << stats.rejConsistency << "\n"
                   << "\tpromoted to Tracked: " << stats.promotedTracked
                   << ", valid tracks: " << validTracks << std::endl;
+#endif
         return idxKeyframe < config.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
 }
