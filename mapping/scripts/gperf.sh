@@ -43,21 +43,18 @@ echo "Profile output: $PROF_OUTPUT"
 echo "Press CTRL+C to stop early and save profile."
 echo ""
 
-# Start mapper in its own session via setsid so that terminal SIGINT (CTRL+C)
-# does NOT reach the mapper directly. This way:
-# - The mapper's own SIGINT handler is not interfered with (no inherited SIG_IGN)
-# - CTRL+C only triggers our bash trap, which forwards SIGINT to the mapper
-#   so its handler can do a clean shutdown (and the atexit handler writes the profile).
-setsid $(pwd)/build/mapper "${MAPPER_ARGS[@]}" &
+# Run mapper in the background, inheriting the script's process group so that
+# terminal SIGINT reaches both the script and the mapper directly.
+$(pwd)/build/mapper "${MAPPER_ARGS[@]}" &
 MAPPER_PID=$!
 
 echo "Profiling started (PID: $MAPPER_PID)"
 
-# Cleanup: let the mapper shut down gracefully so the atexit handler writes the profile
+# Cleanup: mapper already received SIGINT from the terminal; just wait for its
+# graceful shutdown so the gperftools atexit handler can write the profile.
 cleanup() {
     echo ""
-    echo "Sending SIGINT to mapper..."
-    kill -INT "$MAPPER_PID" 2>/dev/null  # trigger the mapper's own SIGINT handler
+    echo "Waiting for mapper to shut down..."
     wait "$MAPPER_PID" 2>/dev/null
     echo "Profile saved to: $PROF_OUTPUT"
     exit 0
