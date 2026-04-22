@@ -113,7 +113,7 @@ namespace mapping
             knnPoints.reserve(knnFound);
             for (int i = 0; i < knnFound; ++i)
                 knnPoints.push_back(keyframeSubmaps[idxKeyframe]->points_[knnIndices[i]]);
-            const auto [validPlaneTrack, planeTrackNormal, knnCenter, knnPointsMat, planeTrackThickness] = planeFitSVD(
+            const auto [validPlaneTrack, planeTrackNormal, knnCenter, knnPointsMat, planeTrackThickness] = planeFitCovariance(
                 knnPoints,
                 config.lidar_frontend.planarity_check.planarity,
                 config.lidar_frontend.planarity_check.linearity);
@@ -165,7 +165,7 @@ namespace mapping
                 const auto &[idxSubmap, idxPoint] = pointIdxPair;
                 clusterPoints.push_back(keyframeSubmaps[idxSubmap]->points_[idxPoint]);
             }
-            const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(
+            const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitCovariance(
                 clusterPoints,
                 config.lidar_frontend.planarity_check.planarity,
                 config.lidar_frontend.planarity_check.linearity);

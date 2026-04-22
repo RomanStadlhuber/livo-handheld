@@ -98,6 +98,68 @@ namespace mapping
         return {isValid, planeNormal, planeCenter, planePoints, planeThickness};
     }
 
+    /// @brief Fit a plane to a set of 3D points using eigen-decomposition of the covariance matrix
+    /// @param points Input points to fit the plane to
+    /// @param planarityThreshold Maximum ratio σ₃/σ₂ for valid plane
+    /// @param linearityThreshold Minimum ratio σ₂/σ₁ to reject collinear points
+    /// @return Tuple of (isValid, planeNormal, planeCenter, planePoints, planeThickness) where:
+    ///         - isValid: true if plane passes planarity and non-linearity checks
+    ///         - planeNormal: fitted plane normal vector
+    ///         - planeCenter: centroid of input points
+    ///         - planePoints: Nx3 matrix of centered points (w_p - w_planeCenter)
+    ///         - planeThickness: mean squared point-to-plane distance (lower is better)
+    inline std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double> planeFitCovariance(
+        const std::vector<Eigen::Vector3d> &points,
+        double planarityThreshold = 0.1,
+        double linearityThreshold = 0.5)
+    {
+        const size_t n = points.size();
+
+        // Centroid
+        Eigen::Vector3d planeCenter = Eigen::Vector3d::Zero();
+        for (const auto &pt : points)
+            planeCenter += pt;
+        planeCenter /= static_cast<double>(n);
+
+        // Build 3x3 covariance matrix directly
+        Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+        Eigen::MatrixXd planePoints(n, 3);
+        for (size_t i = 0; i < n; ++i)
+        {
+            Eigen::Vector3d p = points[i] - planeCenter;
+            planePoints.row(i) = p.transpose();
+            cov += p * p.transpose();
+        }
+        cov /= static_cast<double>(n);
+
+        // Symmetric eigen-decomposition (sorted ascending by default)
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov);
+        // eigenvalues: e0 <= e1 <= e2  →  normal is eigenvector of smallest eigenvalue
+        Eigen::Vector3d planeNormal = eig.eigenvectors().col(0).normalized();
+
+        // Eigenvalues ≈ (σ_i / sqrt(n))²  — use sqrt for same ratio semantics
+        const double s1 = std::sqrt(std::max(0.0, eig.eigenvalues()(2)));
+        const double s2 = std::sqrt(std::max(0.0, eig.eigenvalues()(1)));
+        const double s3 = std::sqrt(std::max(0.0, eig.eigenvalues()(0)));
+
+        const bool isPlanar = (s2 > 1e-10) && (s3 / s2) <= planarityThreshold;
+        const bool notLinear = (s1 > 1e-10) && (s2 / s1) >= linearityThreshold;
+        const bool isValid = isPlanar && notLinear;
+
+        double planeThickness = 0.0;
+        if (isValid)
+        {
+            for (size_t i = 0; i < n; ++i)
+            {
+                double d = std::abs(planeNormal.dot(planePoints.row(i)));
+                planeThickness += d * d;
+            }
+            planeThickness /= static_cast<double>(n);
+        }
+
+        return {isValid, planeNormal, planeCenter, planePoints, planeThickness};
+    }
+
     /// @brief In-place modification to remove all points without color.
     /// @note Points where `colors_[i] == NO_COLOR` are removed, along with their position entry.
     /// If the pointcloud has no colors at all, all points are removed.

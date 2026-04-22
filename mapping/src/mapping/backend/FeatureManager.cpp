@@ -179,7 +179,7 @@ namespace mapping
         {
             clusterPoints.push_back(states.getKeyframeSubmaps().at(idxSubmap)->points_[idxPoint]);
         }
-        const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitSVD(
+        const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitCovariance(
             clusterPoints, config.lidar_frontend.planarity_check.planarity, config.lidar_frontend.planarity_check.linearity);
         *clusterCenters_[clusterId] = clusterCenter;
         *clusterNormals_[clusterId] = planeNormal;
