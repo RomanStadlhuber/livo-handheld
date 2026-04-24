@@ -3,6 +3,12 @@
     <node pkg="mapping" exec="mapper" name="mapper_node" output="screen">
         <param name="use_sim_time" value="true" />
         <param name="mapper_config" value="/ros2_ws/src/livo/mapping/config/mapping_mid360.yaml" />
+        <!-- defaults to Livox MID-360 setup -->
+        <param name="topic_imu" value="/livox/imu" />
+        <!-- NOTE: Livox IMUs report acceleration in [g] rather than [m/s^2] -->
+        <param name="scaling_imu" value="9.81" />
+        <param name="topic_lidar" value="/livox/lidar" />
+        <param name="lidar_msg_pc2" value="false" />
     </node>
     <!-- Visualization -->
     <node pkg="rviz2" exec="rviz2" name="rviz" output="screen">
