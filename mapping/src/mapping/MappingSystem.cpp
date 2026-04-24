@@ -206,7 +206,6 @@ namespace mapping
             positionDiff < config_.lidar_frontend.keyframe.thresh_distance && angleDiff < config_.lidar_frontend.keyframe.thresh_angle && scansSinceLastKeyframe < config_.lidar_frontend.keyframe.thresh_elapsed_scans)
             return;
 
-        std::cout << "::: [INFO] identified keyframe, creating new submap :::" << std::endl;
         std::cout << "::: [DEBUG] position diff: " << positionDiff
                   << " (thresh " << config_.lidar_frontend.keyframe.thresh_distance << "), angle diff: " << angleDiff
                   << " (thresh " << config_.lidar_frontend.keyframe.thresh_angle << "), scans elapsed: " << scansSinceLastKeyframe
@@ -222,7 +221,7 @@ namespace mapping
 
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe = states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
-
+        std::cout << "::: [INFO] identified keyframe, creating submap [" << idxKeyframe << "] :::" << std::endl;
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
          * so that the smoother update won't reference dissociated variables.
          * Modifies featureManager_ (creates marginalization factors, removes associations)
