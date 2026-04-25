@@ -2,9 +2,12 @@
 /// @ingroup backend_features
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/helpers.hpp> // planeFitSVD
+#include <mapping/logging.hpp>
 
 #include <algorithm> // std::sort, std::min
 #include <tuple>     // std::make_tuple
+
+SETUP_LOGS(DEBUG, "FeatureManager")
 
 namespace mapping
 {
@@ -34,7 +37,8 @@ namespace mapping
 
     void FeatureManager::createNewClusters(const States &states, const uint32_t &idxKeyframe, double voxelSize)
     {
-        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();
+        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps =
+            states.getKeyframeSubmaps();
         std::size_t numCreated = 0;
         if (voxelSize <= 0.01) // use all points for creating new clusters
         {
@@ -44,8 +48,11 @@ namespace mapping
                 auto const clusterId = clusterIdCounter_++;
                 clusters_.emplace(clusterId, newCluster);
                 clusterStates_.emplace(clusterId, ClusterState::Premature);
-                clusterCenters_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps.at(idxKeyframe)->points_[idxPoint]));
-                clusterNormals_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
+                clusterCenters_.emplace(
+                    clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps.at(idxKeyframe)->points_[idxPoint]));
+                clusterNormals_.emplace(clusterId,
+                                        std::make_shared<Eigen::Vector3d>(
+                                            Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
                 numCreated++;
             }
         }
@@ -53,10 +60,8 @@ namespace mapping
         {
             const std::shared_ptr<open3d::geometry::PointCloud> &submap = keyframeSubmaps.at(idxKeyframe);
             // according to source code: (output, cubic_id, original_indices)
-            auto const [_, __, voxelizedIndices] = submap->VoxelDownSampleAndTrace(
-                voxelSize,
-                submap->GetMinBound(),
-                submap->GetMaxBound());
+            auto const [_, __, voxelizedIndices] =
+                submap->VoxelDownSampleAndTrace(voxelSize, submap->GetMinBound(), submap->GetMaxBound());
 
             for (const auto &idxsVoxelPts : voxelizedIndices)
             {
@@ -65,12 +70,15 @@ namespace mapping
                 auto const clusterId = clusterIdCounter_++;
                 clusters_.emplace(clusterId, newCluster);
                 clusterStates_.emplace(clusterId, ClusterState::Premature);
-                clusterCenters_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps[idxKeyframe]->points_[idxPoint]));
-                clusterNormals_.emplace(clusterId, std::make_shared<Eigen::Vector3d>(Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
+                clusterCenters_.emplace(
+                    clusterId, std::make_shared<Eigen::Vector3d>(keyframeSubmaps[idxKeyframe]->points_[idxPoint]));
+                clusterNormals_.emplace(clusterId,
+                                        std::make_shared<Eigen::Vector3d>(
+                                            Eigen::Vector3d::Zero())); // safe guard, will yield zero-residuals
                 numCreated++;
             }
         }
-        std::cout << "::: [INFO] Created " << numCreated << " new clusters from keyframe " << idxKeyframe << " :::" << std::endl;
+        LOG(INFO, "Created " << numCreated << " new clusters from keyframe " << idxKeyframe);
     }
 
     void FeatureManager::pruneClusters(const uint32_t &idxKeyframe)
@@ -92,11 +100,11 @@ namespace mapping
             clusterPlaneThicknessHistory_.erase(clusterId);
             clusterFactors_.erase(clusterId);
         }
-        std::cout << "::: [INFO] Pruned " << clustersToErase.size() << " clusters, "
-                  << clusters_.size() << " clusters remain :::" << std::endl;
+        LOG(INFO, "Pruned " << clustersToErase.size() << " clusters, " << clusters_.size() << " clusters remain");
     }
 
-    void FeatureManager::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness)
+    void FeatureManager::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx,
+                                           const double &planeThickness)
     {
         auto const &[idxSubmap, idxPoint] = pointIdx; // destructure to make it clearer what's going on
         clusters_[clusterId][idxSubmap] = idxPoint;
@@ -129,13 +137,15 @@ namespace mapping
                     auto factor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactorIt->second);
                     if (factor)
                     {
-                        gtsam::LinearContainerFactor::shared_ptr marginalizationFactor = factor->createMarginalizationFactor(markovBlanket, X(idxKeyframe));
+                        gtsam::LinearContainerFactor::shared_ptr marginalizationFactor =
+                            factor->createMarginalizationFactor(markovBlanket, X(idxKeyframe));
                         newSmootherFactors_.add(marginalizationFactor);
                         numMarginalized++;
                     }
                 }
-                removePointFromCluster(clusterId, idxKeyframe, /*firstInHistory=*/true); // remove point and thickness history entry
-                if (clusterPoints.size() < 3)                                            // NOTE: 3 points as the minimum to fit a plane
+                removePointFromCluster(clusterId, idxKeyframe,
+                                       /*firstInHistory=*/true); // remove point and thickness history entry
+                if (clusterPoints.size() < 3)                    // NOTE: 3 points as the minimum to fit a plane
                 {
                     // NOTE: Do NOT call factor->remove() here, since the smoother won't re-key factors
                     clusterStates_[clusterId] = ClusterState::Pruned;
@@ -148,10 +158,11 @@ namespace mapping
                 }
             }
         }
-        std::cout << "::: [INFO] Created " << numMarginalized << " marginalization factors for keyframe " << idxKeyframe << " :::" << std::endl;
+        LOG(INFO, "Created " << numMarginalized << " marginalization factors for keyframe " << idxKeyframe);
     }
 
-    void FeatureManager::removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe, bool firstInHistory)
+    void FeatureManager::removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe,
+                                                bool firstInHistory)
     {
         { // remove keyframe point from cluster
             auto it = clusters_[clusterId].find(idxKeyframe);
@@ -171,7 +182,8 @@ namespace mapping
         }
     }
 
-    void FeatureManager::updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness, const MappingConfig &config)
+    void FeatureManager::updateClusterParameters(const States &states, const ClusterId &clusterId,
+                                                 bool recalcPlaneThickness, const MappingConfig &config)
     {
         std::vector<Eigen::Vector3d> clusterPoints;
         clusterPoints.reserve(clusters_[clusterId].size());
@@ -179,8 +191,9 @@ namespace mapping
         {
             clusterPoints.push_back(states.getKeyframeSubmaps().at(idxSubmap)->points_[idxPoint]);
         }
-        const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] = planeFitCovariance(
-            clusterPoints, config.lidar_frontend.planarity_check.planarity, config.lidar_frontend.planarity_check.linearity);
+        const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] =
+            planeFitCovariance(clusterPoints, config.lidar_frontend.planarity_check.planarity,
+                               config.lidar_frontend.planarity_check.linearity);
         *clusterCenters_[clusterId] = clusterCenter;
         *clusterNormals_[clusterId] = planeNormal;
         // explicitly recalculate plane thickness when a point was added or removed
@@ -196,11 +209,9 @@ namespace mapping
         }
     }
 
-    void FeatureManager::updateClusterParameters(
-        const States &states,
-        const ClusterId &clusterId,
-        const Eigen::Vector3d &planeNormal,
-        const Eigen::Vector3d &clusterCenter)
+    void FeatureManager::updateClusterParameters(const States &states, const ClusterId &clusterId,
+                                                 const Eigen::Vector3d &planeNormal,
+                                                 const Eigen::Vector3d &clusterCenter)
     {
         *clusterCenters_[clusterId] = clusterCenter;
         *clusterNormals_[clusterId] = planeNormal;
@@ -213,8 +224,8 @@ namespace mapping
         clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
     }
 
-    std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> FeatureManager::computeTemporalCalibrationTwists(
-        const States &states)
+    std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>>
+    FeatureManager::computeTemporalCalibrationTwists(const States &states)
     {
         const std::map<uint32_t, double> &keyframeTimestamps = states.getKeyframeTimestamps();
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &imuPoses = states.getKeyframeImuPoses();
@@ -228,7 +239,8 @@ namespace mapping
          */
 
         // twists between keyframes existing in the sliding window
-        for (auto itKf = imuPoses.begin(), itKfNext = std::next(imuPoses.begin()); itKfNext != imuPoses.end(); ++itKf, ++itKfNext)
+        for (auto itKf = imuPoses.begin(), itKfNext = std::next(imuPoses.begin()); itKfNext != imuPoses.end();
+             ++itKf, ++itKfNext)
         {
             const uint32_t idxKf = itKf->first, idxKfNext = itKfNext->first;
             const gtsam::Pose3 &poseCurr = *itKf->second;
@@ -245,10 +257,8 @@ namespace mapping
         // the twist between the last sliding window pose and the current predicted pose
         {
             const uint32_t &idxKfCurr = states.getLatestKeyframeIdx();
-            const gtsam::Pose3 &
-                w_T_i_last = *imuPoses.rbegin()->second,
-               w_T_i_pred = states.getCurrentState().pose(),
-               dT_pred = w_T_i_last.between(w_T_i_pred);
+            const gtsam::Pose3 &w_T_i_last = *imuPoses.rbegin()->second, w_T_i_pred = states.getCurrentState().pose(),
+                               dT_pred = w_T_i_last.between(w_T_i_pred);
             const gtsam::Vector6 dT_pred_vec = gtsam::Pose3::Logmap(dT_pred);
             // time delta between last KF in the window and the predicted state
             const double dt_pred = states.tLastScan_ - keyframeTimestamps.rbegin()->second + 1e-6;
@@ -259,13 +269,14 @@ namespace mapping
     }
 
     std::pair<gtsam::NonlinearFactorGraph, gtsam::FactorIndices>
-    FeatureManager::createAndUpdateFactors(
-        const States &states,
-        const gtsam::NonlinearFactorGraph &currentSmootherFactors)
+    FeatureManager::createAndUpdateFactors(const States &states,
+                                           const gtsam::NonlinearFactorGraph &currentSmootherFactors)
     {
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &keyframePoses = states.getKeyframePoses();
-        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps = states.getKeyframeSubmaps();
-        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists = computeTemporalCalibrationTwists(states);
+        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &keyframeSubmaps =
+            states.getKeyframeSubmaps();
+        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists =
+            computeTemporalCalibrationTwists(states);
         std::size_t numFactorsAdded{0}, numFactorsUpdated{0}, numFactorsRemoved{0};
 
         /* Build a clusterId -> smoother factor index map in a single pass.
@@ -315,21 +326,14 @@ namespace mapping
                         const gtsam::Key key = X(idxKeyframe);
                         keys.push_back(key);
                         // scan points are passed to factor in world frame
-                        lidar_points[key] = keyframePoses[idxKeyframe]->transformTo(keyframeSubmaps[idxKeyframe]->points_[idxPoint]);
+                        lidar_points[key] =
+                            keyframePoses[idxKeyframe]->transformTo(keyframeSubmaps[idxKeyframe]->points_[idxPoint]);
                     }
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto factor = boost::make_shared<PointToPlaneFactor>(
-                        keys,
-                        states.getImuToLidarExtrinsic(),
-                        lidar_points,
-                        clusterNormal,
-                        clusterCenter,
-                        robustNoise,
-                        clusterId,
-                        dtKey_,
-                        extrinsicKey_,
-                        keyframeTwists);
+                        keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
+                        clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                     newSmootherFactors_.add(factor);
                     // factor->print();
                     clusterFactors_[clusterId] = factor;
@@ -361,30 +365,22 @@ namespace mapping
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto newFactor = boost::make_shared<PointToPlaneFactor>(
-                        keys,
-                        states.getImuToLidarExtrinsic(),
-                        lidar_points,
-                        clusterNormal,
-                        clusterCenter,
-                        robustNoise,
-                        clusterId,
-                        dtKey_,
-                        extrinsicKey_,
-                        keyframeTwists);
+                        keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
+                        clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                     newSmootherFactors_.add(newFactor);
                     clusterFactors_[clusterId] = newFactor;
-                    // std::cout << "::: [DEBUG] replaced factor for cluster " << clusterId << " with " << keys.size() << " keys :::" << std::endl;
-                    // newFactor->print();
                     numFactorsUpdated++;
                 }
             }
             break;
-            case ClusterState::Idle: // key associations did not change but new state estimates cause updated plane parameters
+            case ClusterState::Idle: // key associations did not change but new state estimates cause updated plane
+                                     // parameters
             {
                 if (existingFactorIt != clusterFactors_.end())
                 {
                     boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
-                    // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P" in MSCKF)
+                    // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P"
+                    // in MSCKF)
                     const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
                     const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
@@ -392,17 +388,19 @@ namespace mapping
                 }
             }
             break;
-            case ClusterState::ShiftedIdle: // key associations changed but cluster is idle, so plane parameters are not updated
+            case ClusterState::ShiftedIdle: // key associations changed but cluster is idle, so plane parameters are not
+                                            // updated
             {
                 // TODO: is the same as "tracked" case, just no association to the latest keyframe?
                 if (existingFactorIt == clusterFactors_.end())
                 {
-                    std::cout << "::: [WARN] attempting to shift factor keys of idle cluster, but factor does not exist :::" << std::endl;
+                    LOG(WARN, "attempting to shift factor keys of idle cluster, but factor does not exist");
                     continue; // should not happen, but safe guard
                 }
                 const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
-                // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P" in MSCKF)
+                // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P" in
+                // MSCKF)
                 const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
                 // 1: Remove old factor from smoother (if still present)
                 auto it = smootherFactorByCluster.find(clusterId);
@@ -428,16 +426,8 @@ namespace mapping
                 const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
                 auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                 const auto newFactor = boost::make_shared<PointToPlaneFactor>(
-                    keys,
-                    states.getImuToLidarExtrinsic(),
-                    lidar_points,
-                    clusterNormal,
-                    clusterCenter,
-                    robustNoise,
-                    clusterId,
-                    dtKey_,
-                    extrinsicKey_,
-                    keyframeTwists);
+                    keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
+                    clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                 newSmootherFactors_.add(newFactor);
                 clusterFactors_[clusterId] = newFactor;
                 numFactorsUpdated++;
@@ -464,9 +454,8 @@ namespace mapping
                 continue;
             }
         }
-        std::cout << "::: [INFO] adding " << numFactorsAdded
-                  << " LiDAR factors, updating " << numFactorsUpdated
-                  << " removing " << numFactorsRemoved << " :::" << std::endl;
+        LOG(INFO, "adding " << numFactorsAdded << " LiDAR factors, updating " << numFactorsUpdated << " removing "
+                            << numFactorsRemoved);
 
         // return values of the fields while simultaneously clearing them.
         return {std::exchange(newSmootherFactors_, {}), std::exchange(factorsToRemove_, {})};
@@ -490,13 +479,13 @@ namespace mapping
             {
             case ClusterState::Tracked:
                 numTracked++;
-            break;
+                break;
             case ClusterState::Idle:
                 numIdle++;
-            break;
+                break;
             case ClusterState::ShiftedIdle:
                 numShifted++;
-            break;
+                break;
             }
         }
         // min / median / 95-percentile / max from an unsorted vector, sort happens in-place
@@ -509,10 +498,11 @@ namespace mapping
         };
         auto const [sMin, sMed, sP95, sMax] = stats(sigmas);
         auto const [tMin, tMed, tP95, tMax] = stats(clusterThicknessValues);
-        std::cout << "::: [DEBUG] cluster summary (valid=" << sigmas.size()
-                  << " tracked=" << numTracked << " idle=" << numIdle << " shifted=" << numShifted << ") :::\n"
-                  << "\tsigmas    [m^4]: min=" << sMin << " median=" << sMed << " p95=" << sP95 << " max=" << sMax << "\n"
-                  << "\tthickness [m^2]: min=" << tMin << " median=" << tMed << " p95=" << tP95 << " max=" << tMax << std::endl;
+        LOG_MULTI(DEBUG,
+                  STREAM("cluster summary (valid=" << sigmas.size() << " tracked=" << numTracked << " idle=" << numIdle
+                                                   << " shifted=" << numShifted << ")"),
+                  STREAM("sigmas    [m^4]: min=" << sMin << " median=" << sMed << " p95=" << sP95 << " max=" << sMax),
+                  STREAM("thickness [m^2]: min=" << tMin << " median=" << tMed << " p95=" << tP95 << " max=" << tMax));
     }
 
     void FeatureManager::summarizeFactors(const gtsam::NonlinearFactorGraph &factors) const
@@ -534,7 +524,7 @@ namespace mapping
                 continue;
             }
         }
-        std::cout << "::: [DEBUG] smoother has " << numImuFactors << " IMU factors, " << numLidarFactors << " LiDAR factors." << std::endl;
+        LOG(DEBUG, "smoother has " << numImuFactors << " IMU factors, " << numLidarFactors << " LiDAR factors");
     }
 
 } // namespace mapping

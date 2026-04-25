@@ -2,22 +2,19 @@
 /// @ingroup system
 #include <mapping/MappingSystem.hpp>
 #include <mapping/helpers.hpp>
+#include <mapping/logging.hpp>
 
 #include <csignal>
 #include <iostream>
 
+SETUP_LOGS(DEBUG, "MappingSystem");
+
 namespace mapping
 {
 
-    MappingSystem::MappingSystem()
-        : MappingSystem(MappingConfig())
-    {
-    }
+    MappingSystem::MappingSystem() : MappingSystem(MappingConfig()) {}
 
-    MappingSystem::MappingSystem(const MappingConfig &config)
-    {
-        setConfig(config);
-    }
+    MappingSystem::MappingSystem(const MappingConfig &config) { setConfig(config); }
 
     void MappingSystem::setConfig(const MappingConfig &config)
     {
@@ -28,21 +25,16 @@ namespace mapping
         states_.setTemporalOffset(config_.extrinsics.imu_t_lidar);
         smoother_.reset(config_);
         featureManager_.setCalibrationKeys(
-            config_.extrinsics.temporal_calibration_enabled
-                ? boost::optional<gtsam::Key>(T(0))
-                : boost::none,
-            config_.extrinsics.extrinsic_calibration_enabled
-                ? boost::optional<gtsam::Key>(E(0))
-                : boost::none);
-        cameraFrontend_.setColorSpace(
-            config_.camera_frontend.color_space == "RGB" ? CameraColorSpace::RGB : CameraColorSpace::BGR);
+            config_.extrinsics.temporal_calibration_enabled ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+            config_.extrinsics.extrinsic_calibration_enabled ? boost::optional<gtsam::Key>(E(0)) : boost::none);
+        cameraFrontend_.setColorSpace(config_.camera_frontend.color_space == "RGB" ? CameraColorSpace::RGB
+                                                                                   : CameraColorSpace::BGR);
         const auto &intr = config_.intrinsics.camera;
         cameraFrontend_.setCalibration(
-            intr.model == "PinholeRadTan" ? CameraCalibrationType::PinholeRadTan : CameraCalibrationType::PInholeEquidistant,
-            static_cast<float>(intr.pinhole_parameters.fx),
-            static_cast<float>(intr.pinhole_parameters.fy),
-            static_cast<float>(intr.pinhole_parameters.cx),
-            static_cast<float>(intr.pinhole_parameters.cy),
+            intr.model == "PinholeRadTan" ? CameraCalibrationType::PinholeRadTan
+                                          : CameraCalibrationType::PInholeEquidistant,
+            static_cast<float>(intr.pinhole_parameters.fx), static_cast<float>(intr.pinhole_parameters.fy),
+            static_cast<float>(intr.pinhole_parameters.cx), static_cast<float>(intr.pinhole_parameters.cy),
             std::vector<float>(intr.distortion_coefficients.begin(), intr.distortion_coefficients.end()));
     }
 
@@ -71,7 +63,7 @@ namespace mapping
             if (maxBufferTime >= config_.backend.init_time_window)
             {
                 initializeSystem();
-                std::cout << "Initialization complete. Switching to tracking state." << std::endl;
+                LOG(INFO, "Initialization complete. Switching to tracking state.");
                 states_.setLifecycleState(SystemState::Tracking);
             }
             break;
@@ -109,14 +101,14 @@ namespace mapping
         for (auto it = imuBuffer.begin(); it != imuBufferEndIt; ++it)
             accMean += it->second->acceleration;
         accMean /= numImuSamples;
-        std::cout << "Mean accelerometer measurement during initialization: " << std::endl
-                  << accMean.transpose() << std::endl;
+        LOG(DEBUG, "Mean accelerometer measurement during initialization: " << accMean.transpose());
 
         /* Build gravity-aligned global reference frame (only roll & pitch are observable).
          * The z-axis is aligned with gravity, x and y are obtained by orthogonal projection.
          */
         Eigen::Vector3d zAxis = accMean.normalized();
-        Eigen::Vector3d xAxis = ((Eigen::Matrix3d::Identity() - zAxis * zAxis.transpose()) * Eigen::Vector3d::UnitX()).normalized();
+        Eigen::Vector3d xAxis =
+            ((Eigen::Matrix3d::Identity() - zAxis * zAxis.transpose()) * Eigen::Vector3d::UnitX()).normalized();
         Eigen::Vector3d yAxis = zAxis.cross(xAxis);
 
         Eigen::Matrix3d w_R_i0;
@@ -132,12 +124,15 @@ namespace mapping
         open3d::geometry::PointCloud newSubmap;
         for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
         {
-            open3d::geometry::PointCloud pcdScan = Scan2PCD(it->second, config_.point_filter.min_distance, config_.point_filter.max_distance);
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(config_.lidar_frontend.voxel_size);
+            open3d::geometry::PointCloud pcdScan =
+                Scan2PCD(it->second, config_.point_filter.min_distance, config_.point_filter.max_distance);
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan =
+                pcdScan.VoxelDownSample(config_.lidar_frontend.voxel_size);
             ptrPcdScan->Transform(w_T_l0.matrix());
             newSubmap += *ptrPcdScan;
         }
-        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized = newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
+        std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
+            newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
 
         // modifies states_: stores keyframe submap, pose, timestamp, increments keyframe counter
         const uint32_t idxNewKF = states_.createKeyframeSubmap(w_T_i0, 0.0, ptrNewSubmapVoxelized);
@@ -202,14 +197,18 @@ namespace mapping
         imuFrontend_.undistortScans(states_, buffers_, config_);
 
         const std::size_t scansSinceLastKeyframe = buffers_.numScansSinceLastKeyframe();
-        if (
-            positionDiff < config_.lidar_frontend.keyframe.thresh_distance && angleDiff < config_.lidar_frontend.keyframe.thresh_angle && scansSinceLastKeyframe < config_.lidar_frontend.keyframe.thresh_elapsed_scans)
+        if (positionDiff < config_.lidar_frontend.keyframe.thresh_distance &&
+            angleDiff < config_.lidar_frontend.keyframe.thresh_angle &&
+            scansSinceLastKeyframe < config_.lidar_frontend.keyframe.thresh_elapsed_scans)
             return;
 
-        std::cout << "::: [DEBUG] position diff: " << positionDiff
-                  << " (thresh " << config_.lidar_frontend.keyframe.thresh_distance << "), angle diff: " << angleDiff
-                  << " (thresh " << config_.lidar_frontend.keyframe.thresh_angle << "), scans elapsed: " << scansSinceLastKeyframe
-                  << " (thresh " << config_.lidar_frontend.keyframe.thresh_elapsed_scans << ") :::" << std::endl;
+        LOG_MULTI_STAMPED(
+            DEBUG, states_.tLastScan_, "keyframe selection triggered",
+            STREAM("position diff: " << positionDiff << " (thresh " << config_.lidar_frontend.keyframe.thresh_distance
+                                     << ")"),
+            STREAM("angle diff: " << angleDiff << " (thresh " << config_.lidar_frontend.keyframe.thresh_angle << ")"),
+            STREAM("scans elapsed: " << scansSinceLastKeyframe << " (thresh "
+                                     << config_.lidar_frontend.keyframe.thresh_elapsed_scans << ")"));
         // merge all buffered scans into a voxelized submap (scan buffer is NOT cleared yet)
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
             lidarFrontend_.accumulateUndistortedScans(states_, buffers_, config_);
@@ -220,8 +219,9 @@ namespace mapping
         buffers_.getScanBuffer().clear();
 
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
-        const uint32_t idxKeyframe = states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
-        std::cout << "::: [INFO] identified keyframe, creating submap [" << idxKeyframe << "] :::" << std::endl;
+        const uint32_t idxKeyframe =
+            states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
+        LOG_STAMPED(INFO, states_.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe << "]");
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
          * so that the smoother update won't reference dissociated variables.
          * Modifies featureManager_ (creates marginalization factors, removes associations)
@@ -230,7 +230,8 @@ namespace mapping
         marginalizeKeyframesOutsideSlidingWindow(idxKeyframe);
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
-        const bool isTracking = lidarFrontend_.trackScanPointsToClusters(idxKeyframe, states_, featureManager_, config_);
+        const bool isTracking =
+            lidarFrontend_.trackScanPointsToClusters(idxKeyframe, states_, featureManager_, config_);
 
         // guard pruning to avoid premature removal before sliding window fills up
         if (idxKeyframe >= static_cast<uint32_t>(config_.backend.sliding_window_size))
@@ -239,7 +240,7 @@ namespace mapping
 
         if (!isTracking)
         {
-            std::cout << "::: [ERROR] lost tracking at keyframe " << idxKeyframe << " :::" << std::endl;
+            LOG_STAMPED(ERROR, states_.tLastScan_, "lost tracking at keyframe " << idxKeyframe);
             states_.setLifecycleState(SystemState::Recovery);
             return;
         }
@@ -249,7 +250,8 @@ namespace mapping
          * tracking factors. std::exchange is used internally to clear the factor buffers.
          */
         // modifies featureManager_: creates/updates/removes LiDAR factors, clears internal factor buffers
-        auto const &[featureFactors, factorsToRemove] = featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
+        auto const &[featureFactors, factorsToRemove] =
+            featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
 
         gtsam::CombinedImuFactor imuFactor = imuFrontend_.createPreintegrationFactor(idxKeyframe - 1, idxKeyframe);
 
@@ -265,8 +267,7 @@ namespace mapping
         featureManager_.summarizeClusters();
 #endif
 
-        std::cout << "Current bias: ";
-        states_.getCurrentBias().print();
+        LOG_STAMPED(DEBUG, states_.tLastScan_, "current IMU bias:" << states_.getCurrentBias().vector().transpose());
 
         // modifies imuFrontend_: resets preintegrator with updated bias from smoother estimate
         imuFrontend_.resetPreintegrator(states_);
@@ -274,10 +275,8 @@ namespace mapping
         // insert new clusters from a keyframe htat has been optimized in multiple passes,
         // as the feature positions from those are usually more mature than using e.g. the most recent KF
         if (idxKeyframe > config_.lidar_frontend.clustering.insert_lag)
-            featureManager_.createNewClusters(
-                states_,
-                idxKeyframe - config_.lidar_frontend.clustering.insert_lag,
-                config_.lidar_frontend.clustering.sampling_voxel_size);
+            featureManager_.createNewClusters(states_, idxKeyframe - config_.lidar_frontend.clustering.insert_lag,
+                                              config_.lidar_frontend.clustering.sampling_voxel_size);
     }
 
     void MappingSystem::recoverState()
@@ -290,20 +289,15 @@ namespace mapping
         // reset all components
         featureManager_.reset();
         featureManager_.setCalibrationKeys(
-            config_.extrinsics.temporal_calibration_enabled
-                ? boost::optional<gtsam::Key>(T(0))
-                : boost::none,
-            config_.extrinsics.extrinsic_calibration_enabled
-                ? boost::optional<gtsam::Key>(E(0))
-                : boost::none);
+            config_.extrinsics.temporal_calibration_enabled ? boost::optional<gtsam::Key>(T(0)) : boost::none,
+            config_.extrinsics.extrinsic_calibration_enabled ? boost::optional<gtsam::Key>(E(0)) : boost::none);
         states_.reset(w_X_recovery);
         buffers_.reset();
 
         // rebuild smoother with new graph anchored at recovery keyframe
         smoother_.reset(config_);
         gtsam::imuBias::ConstantBias bPrior = states_.getCurrentBias();
-        gtsam::NonlinearFactorGraph priors = constructSystemPriors(
-            idxKfRecovery, w_X_recovery, bPrior);
+        gtsam::NonlinearFactorGraph priors = constructSystemPriors(idxKfRecovery, w_X_recovery, bPrior);
         smoother_.setPriors(idxKfRecovery, priors, w_X_recovery, bPrior);
         smoother_.setCalibrationPriors(config_, states_.getImuToLidarExtrinsic());
 
@@ -327,8 +321,10 @@ namespace mapping
             if (states_.getKeyframeSubmaps().find(idxMarginalize) != states_.getKeyframeSubmaps().end())
             {
                 gtsam::Values markovBlanket = states_.getMarkovBlanketForKeyframe(idxMarginalize, idxKeyframe);
-                std::cout << "::: [INFO] marginalizing keyframe " << idxMarginalize << ", outside of sliding window :::" << std::endl;
-                // modifies featureManager_: creates marginalization factors, removes point associations, updates cluster states
+                LOG_STAMPED(INFO, states_.tLastScan_,
+                            "marginalizing keyframe " << idxMarginalize << ", outside of sliding window");
+                // modifies featureManager_: creates marginalization factors, removes point associations, updates
+                // cluster states
                 featureManager_.removeKeyframeFromClusters(idxMarginalize, markovBlanket);
                 // modifies states_: removes keyframe data, optionally archives submap
                 states_.removeKeyframe(idxMarginalize);
@@ -337,10 +333,9 @@ namespace mapping
         }
     }
 
-    gtsam::NonlinearFactorGraph MappingSystem::constructSystemPriors(
-        const uint32_t &idxKeyframe,
-        const gtsam::NavState &xPrior,
-        const gtsam::imuBias::ConstantBias &bPrior) const
+    gtsam::NonlinearFactorGraph MappingSystem::constructSystemPriors(const uint32_t &idxKeyframe,
+                                                                     const gtsam::NavState &xPrior,
+                                                                     const gtsam::imuBias::ConstantBias &bPrior) const
     {
         gtsam::NonlinearFactorGraph priors;
         gtsam::Vector6 priorPoseSigma;
@@ -361,22 +356,23 @@ namespace mapping
         const gtsam::Values &smootherEstimate = states_.getSmootherEstimate();
         if (smootherEstimate.empty())
             return states;
-        std::cout << ":::" << std::endl;
+        LOG_STAMPED(INFO, states_.tLastScan_, "retrieving states for all keyframes");
         for (const auto &[idxKf, _] : states_.getKeyframeSubmaps())
         {
             try
             {
                 const gtsam::Pose3 kfPose = smootherEstimate.at(X(idxKf)).cast<gtsam::Pose3>();
                 const gtsam::Vector3 kfVel = smootherEstimate.at(V(idxKf)).cast<gtsam::Vector3>();
-                states[idxKf] = NavStateStamped{gtsam::NavState{kfPose, kfVel}, states_.getKeyframeTimestamps().at(idxKf)};
+                states[idxKf] =
+                    NavStateStamped{gtsam::NavState{kfPose, kfVel}, states_.getKeyframeTimestamps().at(idxKf)};
             }
             catch (const gtsam::ValuesKeyDoesNotExist &e)
             {
-                std::cerr << "::: [WARNING] keyframe " << idxKf << " not found in smoother estimate :::" << std::endl;
+                LOG_STAMPED(WARN, states_.tLastScan_, "keyframe " << idxKf << " not found in smoother estimate");
             }
             catch (const std::out_of_range &e)
             {
-                std::cerr << "::: [WARNING] could not retrieve state for keyframe " << idxKf << " :::" << std::endl;
+                LOG_STAMPED(WARN, states_.tLastScan_, "could not retrieve state for keyframe " << idxKf);
             }
         }
         return states;
@@ -387,7 +383,7 @@ namespace mapping
         const std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &submaps = states_.getKeyframeSubmaps();
         if (submaps.empty())
         {
-            std::cerr << "::: [WARNING] no keyframe submaps available :::" << std::endl;
+            LOG_STAMPED(WARN, states_.tLastScan_, "no keyframe submaps available");
             return nullptr;
         }
         return submaps.rbegin()->second;
@@ -400,18 +396,14 @@ namespace mapping
         {
             if (!featureManager_.isClusterValid(clusterId))
                 continue;
-            PointCluster clusterRepresentation{
-                featureManager_.clusterCenters_.at(clusterId),
-                featureManager_.clusterNormals_.at(clusterId)};
+            PointCluster clusterRepresentation{featureManager_.clusterCenters_.at(clusterId),
+                                               featureManager_.clusterNormals_.at(clusterId)};
             currentClusters.emplace(clusterId, clusterRepresentation);
         }
         return currentClusters;
     }
 
-    uint32_t MappingSystem::getKeyframeCount() const
-    {
-        return states_.getKeyframeCount();
-    }
+    uint32_t MappingSystem::getKeyframeCount() const { return states_.getKeyframeCount(); }
 
     std::vector<std::shared_ptr<open3d::geometry::PointCloud>> MappingSystem::getMarginalizedSubmaps()
     {
@@ -422,9 +414,6 @@ namespace mapping
         return submaps;
     }
 
-    void MappingSystem::setCollectMarginalizedSubmaps(bool enable)
-    {
-        states_.setCollectMarginalizedSubmaps(enable);
-    }
+    void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }
 
 } // namespace mapping

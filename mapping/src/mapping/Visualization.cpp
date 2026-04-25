@@ -1,6 +1,9 @@
 /// @file
 /// @ingroup system
 #include <Visualization.hpp>
+#include <mapping/logging.hpp>
+
+SETUP_LOGS(INFO, "Visualization")
 
 namespace mapping
 {
@@ -22,10 +25,8 @@ namespace mapping
         refreshWindow();
     }
 
-    void Visualization::addSubmap(
-        const uint32_t keyframeId,
-        const Eigen::Matrix4d &pose,
-        const std::shared_ptr<open3d::geometry::PointCloud> &pcdSubmap)
+    void Visualization::addSubmap(const uint32_t keyframeId, const Eigen::Matrix4d &pose,
+                                  const std::shared_ptr<open3d::geometry::PointCloud> &pcdSubmap)
     {
         submapPCDs[keyframeId] = pcdSubmap;
 
@@ -39,9 +40,7 @@ namespace mapping
         refreshWindow();
     }
 
-    void Visualization::updateSubmap(
-        const uint32_t keyframeId,
-        const Eigen::Matrix4d &pose)
+    void Visualization::updateSubmap(const uint32_t keyframeId, const Eigen::Matrix4d &pose)
     {
         // Update the pose frame
         if (submapPoseFrames.find(keyframeId) != submapPoseFrames.end())
@@ -53,8 +52,7 @@ namespace mapping
         refreshWindow();
     }
 
-    void Visualization::removeSubmap(
-        const uint32_t keyframeId)
+    void Visualization::removeSubmap(const uint32_t keyframeId)
     {
         // Remove point cloud
         if (submapPCDs.find(keyframeId) != submapPCDs.end())
@@ -90,14 +88,14 @@ namespace mapping
         bool spacePressed = false;
 
         // Register key callback for spacebar (key code 32)
-        o3dVisualizer.RegisterKeyCallback(
-            SPACEBAR,
-            [&spacePressed](open3d::visualization::Visualizer *vis) -> bool
-            {
-            spacePressed = true;
-            return true; });
+        o3dVisualizer.RegisterKeyCallback(SPACEBAR,
+                                          [&spacePressed](open3d::visualization::Visualizer *vis) -> bool
+                                          {
+                                              spacePressed = true;
+                                              return true;
+                                          });
 
-        std::cout << "::: [INFO] processing halted by visualization, press [SPACE] to continue :::" << std::endl;
+        LOG(INFO, "processing halted by visualization, press [SPACE] to continue");
 
         // Block and refresh until spacebar is pressed
         while (!spacePressed && windowRunning)
@@ -109,4 +107,4 @@ namespace mapping
         // Unregister the callback
         o3dVisualizer.RegisterKeyCallback(SPACEBAR, nullptr);
     }
-}
+} // namespace mapping
