@@ -11,6 +11,9 @@ SHELL ["/bin/bash", "-c"]
 # https://www.theimpossiblecode.com/blog/intel-tbb-on-raspberry-pi/
 RUN apt-get update && apt-get install -y -q build-essential libc++1 git \
     software-properties-common libboost-all-dev libtbb-dev wget curl gdb
+RUN apt-get update && apt-get install -y --no-install-recommends gnupg neovim byobu mesa-utils \
+    ipython3
+RUN pip install pre-commit
 # install GTSAM pre-built
 # see also: https://gtsam.org/get_started/
 RUN add-apt-repository ppa:borglab/gtsam-release-4.2
