@@ -19,6 +19,47 @@ ERROR, WARN, INFO, DEBUG - configurable **per module**
 - wrapping of messages in "::: [LEVEL] {msg} :::" (tabs & bullet points for associated multi-lines)
 - optional (MappingSystem-based) timestamping for logs (i.e. the timestamps associated with the current LiDAR / IMU data)
 
+### Color Scheme
+
+- ERROR: red
+- WARN: orange
+- INFO: no color (= default color)
+- DEBUG: blue
+
+### Examples
+
+```
+::: [INFO]: this is a single line message without timestamp :::
+::: [DEBUG] (123.4567): this is a single line message with timestamp :::
+::: [WARNING]: this is a multi-line message (the first line is the header) :::
+    this is another line of the multi line message, it is automatically indented
+    it is possible to add as many lines as you want here
+    they are built from stringstreams (e.g. for adding numbers like 1234)
+```
+
+### Interface
+
+```
+LOG(INFO, "this is a single line message without timestamp")
+// NOTE: when fed to stdout, timestamps are fixed-point with 4 digits after comma
+LOG_STAMPED(INFO, 123.456789 ,"this is a single line message with timestamp")
+LOG_MULTI(
+    WARNING,
+    "this is a multi-line message (the first line is the header)",
+    "this is another line of the multi-line message, it is automatically indented",
+    "it is possible to add as many lines as you want here",
+    "they are built from stringstreams (e.g. for adding numbers like " << 1234 << ")"
+    // the funtion has string-stream ... args so the user can put as much as they want here
+)
+// there is also a timestamps version of multi-line logs
+LOG_MULTI_STAMPED(
+    ERROR,
+    123.45678, // timestamp
+    "example" << " title" // messages go here
+    // ...
+)
+```
+
 ### Module Logging Ideas
 
 #### ImuFrontend
@@ -74,6 +115,13 @@ As there factor class also has a member `PointToPlaneFactor::clusterId_` for thi
 
 As an additional fallback, the `createAndUpdateFactors` class can do an ad-hoc search whenever the std::map for the cluster index mapping
 does not contain an idx map for the current cluster id and fill that in on its own.
+
+### Factor / Cluster Removal
+
+**Important:** How to handle when
+
+- a cluster factor is removed from the smoother by marginalization
+- the cluster itself is removed due to pruning
 
 
 ## Scan-To-Map Registration
