@@ -181,9 +181,11 @@ namespace mapping
         gtsam::NavState w_X_propagated = imuFrontend_.preintegrateIMU(states_, buffers_);
 
         // check if motion since last keyframe exceeds thresholds
-        const gtsam::Pose3 &lastKfPose = states_.lastKeyframePose();
-        const double positionDiff = (w_X_propagated.pose().translation() - lastKfPose.translation()).norm();
-        const double angleDiff = (lastKfPose.rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
+        // use IMU poses on both sides so the extrinsic rotation does not bias the angle diff
+        const gtsam::Pose3 &lastKfImuPose = *states_.getKeyframeImuPoses().rbegin()->second;
+        const double positionDiff = (w_X_propagated.pose().translation() - lastKfImuPose.translation()).norm();
+        const double angleDiff =
+            (lastKfImuPose.rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
         states_.setCurrentState(w_X_propagated);
 
         // temporal synchronization between LiDAR scans and camera images
