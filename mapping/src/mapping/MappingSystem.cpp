@@ -261,7 +261,8 @@ namespace mapping
          * Modifies states_: smootherEstimate, currentState, currentBias,
          * preintegrationRefState, and all keyframe submap pointclouds.
          */
-        smoother_.updateAndOptimizeGraph(idxKeyframe, states_, config_, imuFactor, featureFactors, factorsToRemove);
+        smoother_.updateAndOptimizeGraph(idxKeyframe, states_, featureManager_, config_, imuFactor, featureFactors,
+                                         factorsToRemove);
 
 #ifdef ENABLE_DBG_CMP
         featureManager_.summarizeFactors(smoother_.getFactors());
