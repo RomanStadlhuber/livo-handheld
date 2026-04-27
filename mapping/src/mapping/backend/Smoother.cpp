@@ -16,7 +16,7 @@ namespace mapping
         // https://github.com/MIT-SPARK/Kimera-VIO/blob/master/include/kimera-vio/backend/VioBackendParams.h
         smootherParams.relinearizeThreshold = config.backend.isam2_relinearize_threshold;
         smootherParams.relinearizeSkip = 1;           // only (check) relinearize after that many update calls
-        smootherParams.findUnusedFactorSlots = false; // should be enabled when using smoother
+        smootherParams.findUnusedFactorSlots = false; // disable to speed up factor insertion
         LOG(INFO, "initializing smoother with fixed lag of " << config.backend.sliding_window_size);
         smoother_ =
             gtsam::IncrementalFixedLagSmoother(static_cast<double>(config.backend.sliding_window_size), smootherParams);
