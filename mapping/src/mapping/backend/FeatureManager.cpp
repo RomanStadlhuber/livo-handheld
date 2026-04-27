@@ -30,7 +30,6 @@ namespace mapping
         clusterStates_.clear();
         clusterCenters_.clear();
         clusterNormals_.clear();
-        clusterFactors_.clear();
         clusterFactorIdxMap_.clear();
         clusterIdCounter_ = 0;
         newSmootherFactors_ = gtsam::NonlinearFactorGraph();
@@ -108,7 +107,6 @@ namespace mapping
             clusterPlaneThickness_.erase(clusterId);
             clusterSigmas_.erase(clusterId);
             clusterPlaneThicknessHistory_.erase(clusterId);
-            clusterFactors_.erase(clusterId);
             clusterFactorIdxMap_.erase(clusterId);
         }
         LOG(INFO, "Pruned " << clustersToErase.size() << " clusters, " << clusters_.size() << " clusters remain");
@@ -133,7 +131,8 @@ namespace mapping
         return associatedClusters;
     }
 
-    void FeatureManager::removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket)
+    void FeatureManager::removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket,
+                                                    const gtsam::NonlinearFactorGraph &currentSmootherFactors)
     {
         std::size_t numMarginalized = 0;
         for (auto const &[clusterId, clusterPoints] : clusters_)
@@ -142,16 +141,19 @@ namespace mapping
             if (itPoint != clusterPoints.end())
             {
                 // --- marginalization ---
-                auto existingFactorIt = clusterFactors_.find(clusterId);
-                if (existingFactorIt != clusterFactors_.end())
+                if (hasClusterFactorIdx(clusterId))
                 {
-                    auto factor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingFactorIt->second);
-                    if (factor)
+                    const auto &factorPtr = currentSmootherFactors[clusterFactorIdxMap_.at(clusterId)];
+                    if (factorPtr)
                     {
-                        gtsam::LinearContainerFactor::shared_ptr marginalizationFactor =
-                            factor->createMarginalizationFactor(markovBlanket, X(idxKeyframe));
-                        newSmootherFactors_.add(marginalizationFactor);
-                        numMarginalized++;
+                        const auto factor = boost::dynamic_pointer_cast<PointToPlaneFactor>(factorPtr);
+                        if (factor && factor->clusterId_ == clusterId)
+                        {
+                            gtsam::LinearContainerFactor::shared_ptr marginalizationFactor =
+                                factor->createMarginalizationFactor(markovBlanket, X(idxKeyframe));
+                            newSmootherFactors_.add(marginalizationFactor);
+                            numMarginalized++;
+                        }
                     }
                 }
                 removePointFromCluster(clusterId, idxKeyframe,
@@ -296,7 +298,6 @@ namespace mapping
             // skip premature clusters, but pruned clusters need to be handled explicitly
             if (clusterState == ClusterState::Premature)
                 continue;
-            auto existingFactorIt = clusterFactors_.find(clusterId);
             // decide what to do based on the cluster state
             switch (clusterState)
             {
@@ -308,13 +309,23 @@ namespace mapping
                 // add sensor-noise floor to the plane-fit variance for the factor noise model.
                 // kept out of clusterSigmas_ so the front-end gating test remains unaffected.
                 const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
-                if (existingFactorIt == clusterFactors_.end()) // factor does not exist, create
+                // retrieve the live factor iff it is still present and confirmed to be our cluster's factor
+                // (slot reuse via findUnusedFactorSlots=true can put a different factor at a stale index)
+                boost::shared_ptr<PointToPlaneFactor> livePtpFactor;
+                if (hasClusterFactorIdx(clusterId))
                 {
-
-                    // 2: Build sorted keys vector and mapping from keyframe ID to index in keys vector
+                    const auto &ptr = currentSmootherFactors[clusterFactorIdxMap_.at(clusterId)];
+                    if (ptr)
+                    {
+                        auto f = boost::dynamic_pointer_cast<PointToPlaneFactor>(ptr);
+                        if (f && f->clusterId_ == clusterId)
+                            livePtpFactor = f;
+                    }
+                }
+                if (!livePtpFactor) // no confirmed live factor — create fresh
+                {
                     gtsam::KeyVector keys;
                     keys.reserve(clusterPoints.size());
-                    // 3: Build scanPointsPerKey using indices into keys vector (not keyframe IDs)
                     std::map<gtsam::Key, Eigen::Vector3d> lidar_points;
                     for (auto const &[idxKeyframe, idxPoint] : clusterPoints)
                     {
@@ -330,22 +341,15 @@ namespace mapping
                         keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
                         clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                     newSmootherFactors_.add(factor);
-                    // factor->print();
-                    clusterFactors_[clusterId] = factor;
                     numFactorsAdded++;
                 }
-                else // cluster factor exists, remove old and readd with updated keys
+                else // confirmed live factor — remove old and re-add with updated keys
                 {
-                    // 1: Remove old factor from smoother (if still present)
-                    if (hasClusterFactorIdx(clusterId))
-                    {
-                        const size_t factorKey = clusterFactorIdxMap_.at(clusterId);
-                        const auto existingPtpFactor =
-                            boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
-                        existingPtpFactor->markInvalid();
-                        factorsToRemove_.push_back(factorKey);
-                        numFactorsRemoved++;
-                    }
+                    // 1: Remove old factor from smoother
+                    const gtsam::FactorIndex factorKey = clusterFactorIdxMap_.at(clusterId);
+                    livePtpFactor->markInvalid();
+                    factorsToRemove_.push_back(factorKey);
+                    numFactorsRemoved++;
                     // 2: Create new factor from ALL current clusterPoints
                     gtsam::KeyVector keys;
                     keys.reserve(clusterPoints.size());
@@ -362,49 +366,47 @@ namespace mapping
                         keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
                         clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                     newSmootherFactors_.add(newFactor);
-                    clusterFactors_[clusterId] = newFactor;
                     numFactorsUpdated++;
                 }
             }
             break;
-            case ClusterState::Idle: // key associations did not change but new state estimates cause updated plane
-                                     // parameters
+            case ClusterState::Idle: // key associations and plane parameters are stable — no factor change needed
             {
-                if (existingFactorIt != clusterFactors_.end())
-                {
-                    boost::shared_ptr<PointToPlaneFactor> factor = existingFactorIt->second;
-                    // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P"
-                    // in MSCKF)
-                    const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
-                    const gtsam::SharedNoiseModel noiseModel = gtsam::noiseModel::Isotropic::Variance(1, adaptiveSigma);
-                    auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
-                    factor->updatePlaneParameters(clusterNormals_[clusterId], clusterCenters_[clusterId], robustNoise);
-                }
+                /**
+                 * NOTE: updatePlaneParameters must NOT be called on the live iSAM2 factor here.
+                 * Mutating factor parameters in-place without going through smoother.update() leaves
+                 * iSAM2's cached Bayes-tree linearization inconsistent with the new measurement model,
+                 * which destabilizes the solver. Parameter updates reach the optimizer only when the
+                 * cluster transitions back to Tracked and the factor is properly removed and re-added.
+                 */
             }
             break;
             case ClusterState::ShiftedIdle: // key associations changed but cluster is idle, so plane parameters are not
                                             // updated
             {
                 // TODO: is the same as "tracked" case, just no association to the latest keyframe?
-                if (existingFactorIt == clusterFactors_.end())
+                if (!hasClusterFactorIdx(clusterId))
                 {
-                    LOG(WARN, "attempting to shift factor keys of idle cluster, but factor does not exist");
+                    LOG(WARN, "attempting to shift factor keys of idle cluster, but no factor index found");
                     continue; // should not happen, but safe guard
                 }
                 const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
-                // NOTE: when (re-) creating the factor, sensor noise must be re added (equivalent to "J S Jt + P" in
-                // MSCKF)
+                // NOTE: when (re-) creating the factor, sensor noise must be re added
+                // (equivalent to "J S Jt + P" in MSCKF)
                 const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
-                // 1: Remove old factor from smoother (if still present)
-                if (hasClusterFactorIdx(clusterId))
+                // 1: Remove old factor from smoother (if still present and confirmed ours)
+                const gtsam::FactorIndex factorKey = clusterFactorIdxMap_.at(clusterId);
+                const auto &existingPtr = currentSmootherFactors[factorKey];
+                if (existingPtr)
                 {
-                    const size_t factorKey = clusterFactorIdxMap_.at(clusterId);
-                    const auto existingPtpFactor =
-                        boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
-                    existingPtpFactor->markInvalid();
-                    factorsToRemove_.push_back(factorKey);
-                    numFactorsRemoved++;
+                    const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingPtr);
+                    if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                    {
+                        existingPtpFactor->markInvalid();
+                        factorsToRemove_.push_back(factorKey);
+                        numFactorsRemoved++;
+                    }
                 }
                 // 2: Create new factor from ALL current clusterPoints
                 gtsam::KeyVector keys;
@@ -422,7 +424,6 @@ namespace mapping
                     keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
                     clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                 newSmootherFactors_.add(newFactor);
-                clusterFactors_[clusterId] = newFactor;
                 numFactorsUpdated++;
                 clusterStates_[clusterId] = ClusterState::Idle; // after shifting, cluster goes back to idle state
             }
@@ -431,13 +432,18 @@ namespace mapping
             {
                 if (hasClusterFactorIdx(clusterId))
                 {
-                    const size_t factorKey = clusterFactorIdxMap_.at(clusterId);
-                    const auto existingPtpFactor =
-                        boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
-                    existingPtpFactor->markInvalid(); // mark factor as invalid to avoid further optimization
-                    // mark existing factor for removal
-                    factorsToRemove_.push_back(factorKey);
-                    numFactorsRemoved++;
+                    const gtsam::FactorIndex factorKey = clusterFactorIdxMap_.at(clusterId);
+                    const auto &existingPtr = currentSmootherFactors[factorKey];
+                    if (existingPtr)
+                    {
+                        const auto existingPtpFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(existingPtr);
+                        if (existingPtpFactor && existingPtpFactor->clusterId_ == clusterId)
+                        {
+                            existingPtpFactor->markInvalid();
+                            factorsToRemove_.push_back(factorKey);
+                            numFactorsRemoved++;
+                        }
+                    }
                 }
             }
             break;
@@ -500,7 +506,7 @@ namespace mapping
     void FeatureManager::summarizeFactors(const gtsam::NonlinearFactorGraph &factors) const
     {
         size_t numImuFactors{0}, numLidarFactors{0};
-        for (size_t factorKey = 0; factorKey < factors.size(); ++factorKey)
+        for (gtsam::FactorIndex factorKey = 0; factorKey < factors.size(); ++factorKey)
         {
             const gtsam::NonlinearFactor::shared_ptr factor = factors[factorKey];
             const auto imuFactor = boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(factor);

@@ -51,7 +51,8 @@ namespace mapping
         ///
         /// NOTE: will also create a set of factors to use for marginalization.
         /// @param idxKeyframe Index of the keyframe to be marginalized.
-        void removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket);
+        void removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket,
+                                        const gtsam::NonlinearFactorGraph &currentSmootherFactors);
         /// @brief Add a new point to a cluster when it is successfully tracked against it.
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx,
                                const double &planeThickness);
@@ -120,7 +121,6 @@ namespace mapping
         /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing
         /// constraints.
         std::map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
-        std::map<ClusterId, boost::shared_ptr<PointToPlaneFactor>> clusterFactors_;
         /// @brief Counter for assigning unique IDs to clusters.
         ClusterId clusterIdCounter_{0};
         // factor management for what's passed to the smoother

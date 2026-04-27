@@ -328,7 +328,7 @@ namespace mapping
                             "marginalizing keyframe " << idxMarginalize << ", outside of sliding window");
                 // modifies featureManager_: creates marginalization factors, removes point associations, updates
                 // cluster states
-                featureManager_.removeKeyframeFromClusters(idxMarginalize, markovBlanket);
+                featureManager_.removeKeyframeFromClusters(idxMarginalize, markovBlanket, smoother_.getFactors());
                 // modifies states_: removes keyframe data, optionally archives submap
                 states_.removeKeyframe(idxMarginalize);
             }
