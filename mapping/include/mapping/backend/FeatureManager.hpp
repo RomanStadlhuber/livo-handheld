@@ -15,6 +15,7 @@
 #include <mapping/Config.hpp>
 #include <mapping/factors/PointToPlaneFactor.hpp>
 
+#include <unordered_map> // cluster->factorIdx mapping with O(1) access
 #include <iostream>
 #include <utility>
 #include <list>
@@ -28,7 +29,7 @@ namespace mapping
     class FeatureManager
     {
     public:
-        FeatureManager() = default;
+        FeatureManager();
         ~FeatureManager() = default;
 
         /// @brief Create new clusters from points in a keyframe.
@@ -45,23 +46,29 @@ namespace mapping
         /// @return A list of cluster IDs that are associated with the given keyframe.
         std::list<ClusterId> findClustersAssociatedWithKeyframe(const uint32_t &idxKeyframe) const;
         /// @brief Remove a keyframe association from all clusters, and update cluster states accordingly.
-        /// Will internally call `removePointFromCluster` for each cluster that contains a point from the marginalized keyframe,
+        /// Will internally call `removePointFromCluster` for each cluster that contains a point from the marginalized
+        /// keyframe,
         ///
         /// NOTE: will also create a set of factors to use for marginalization.
         /// @param idxKeyframe Index of the keyframe to be marginalized.
         void removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket);
         /// @brief Add a new point to a cluster when it is successfully tracked against it.
-        void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx, const double &planeThickness);
+        void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx,
+                               const double &planeThickness);
         /// @brief Remove a point when 6-sigma test fails.
-        /// Note that after this, "updateClusterParameters" still needs to be called explicitly (with recalcPlaneThickness=true).
+        /// Note that after this, "updateClusterParameters" still needs to be called explicitly (with
+        /// recalcPlaneThickness=true).
         /// @param firstInHistory Set this to true if you are marginalizing the oldest keyframe from the cluster.
-        void removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe, bool firstInHistory = false);
+        void removePointFromCluster(const ClusterId &clusterId, const uint32_t &idxKeyframe,
+                                    bool firstInHistory = false);
         /// @brief Update cluster parameters from scratch
         /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
-        void updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness, const MappingConfig &config);
+        void updateClusterParameters(const States &states, const ClusterId &clusterId, bool recalcPlaneThickness,
+                                     const MappingConfig &config);
         /// @brief Set new cluster parameters including thickness (i.e. valid tracking and point was added)
         /// @details **Important:** assumes that the plane thickness history was updated accordingly beforehand!
-        void updateClusterParameters(const States &states, const ClusterId &clusterId, const Eigen::Vector3d &newNormal, const Eigen::Vector3d &newCenter);
+        void updateClusterParameters(const States &states, const ClusterId &clusterId, const Eigen::Vector3d &newNormal,
+                                     const Eigen::Vector3d &newCenter);
         /// @brief Create new factors for previously unttracked clusters and update existing factors.
         /// **Warning:** re-keying (i.e. modifying factor-key associations in-place) is not tracked by
         /// GTSAM, i.e. the factor graph is treated as static after initialization for the solver.
@@ -73,9 +80,7 @@ namespace mapping
         /// @param currentSmootherFactors The current factor graph of the smoother obtain with `smoother.getFactors()`.
         /// @return New factors to add and list of factors to remove with `smoother.update(...)`
         [[nodiscard]] std::pair<gtsam::NonlinearFactorGraph, gtsam::FactorIndices>
-        createAndUpdateFactors(
-            const States &states,
-            const gtsam::NonlinearFactorGraph &currentSmootherFactors);
+        createAndUpdateFactors(const States &states, const gtsam::NonlinearFactorGraph &currentSmootherFactors);
 
         /// @brief Clear all clusters and factor bookkeeping.
         void reset();
@@ -83,7 +88,8 @@ namespace mapping
         /// @brief Shorthand check for whether a cluster is valid (= tracking or idle).
         bool isClusterValid(const ClusterId &clusterId) const
         {
-            return !(clusterStates_.at(clusterId) == ClusterState::Premature || clusterStates_.at(clusterId) == ClusterState::Pruned);
+            return !(clusterStates_.at(clusterId) == ClusterState::Premature ||
+                     clusterStates_.at(clusterId) == ClusterState::Pruned);
         };
         /// @brief Summarize current clusters for debugging purposes.
         void summarizeClusters() const;
@@ -96,8 +102,8 @@ namespace mapping
         /// @param states The current states used to obtain the IMU frame body poses and timestamps.
         /// @return Mapping of `gtsam::Key` to `(angVel, linVel)` twists between all states in the sliding window,
         /// `k-w, k-w+1, ..., k`, where `twist[k]` is used to extrapolate the pose of `k`.
-        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> computeTemporalCalibrationTwists(
-            const States &states);
+        std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>>
+        computeTemporalCalibrationTwists(const States &states);
 
     public: // attributes
         /**
@@ -111,7 +117,8 @@ namespace mapping
         std::map<ClusterId, double> clusterPlaneThickness_;
         std::map<ClusterId, double> clusterSigmas_;
         std::map<ClusterId, ClusterState> clusterStates_;
-        /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing constraints.
+        /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing
+        /// constraints.
         std::map<ClusterId, std::shared_ptr<Eigen::Vector3d>> clusterCenters_, clusterNormals_;
         std::map<ClusterId, boost::shared_ptr<PointToPlaneFactor>> clusterFactors_;
         /// @brief Counter for assigning unique IDs to clusters.
@@ -122,7 +129,8 @@ namespace mapping
         /// @brief Robust kernel for point-to-plane factors
         /// see also: https://gtsam.org/doxygen/a03860.html
         gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_{
-            gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(new gtsam::noiseModel::mEstimator::GemanMcClure(0.5))};
+            gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(
+                new gtsam::noiseModel::mEstimator::GemanMcClure(0.5))};
         // NOTE: for Huber loss, default k = 1.345 which is in standard-deviations,
         // as the residual is already whitened before applying the kernel!!
         // https://gtsam.org/doxygen/a04439.html
@@ -138,12 +146,25 @@ namespace mapping
         // Plane thickness alone only captures fit quality, not LiDAR ranging noise
         // or residual pose uncertainty at evaluation time.
         static constexpr double SENSOR_VARIANCE = 1.6e-7; // [m^4] (variance!)
+        /// @brief Add or update the factor index mapping for a given cluster id.
+        /// @param clusterId Id of the cluster.
+        /// @param factorIdx Index of the factor in the `NonlinearFactorGraph` as returned by
+        /// `gtsam::IncrementalFixedLagSmoother::getISAM2Result().newFactorsIndices`.
+        void setClusterFactorIdxMapping(const ClusterId clusterId, gtsam::FactorIndex factorIdx)
+        {
+            clusterFactorIdxMap_[clusterId] = factorIdx;
+        };
 
+        bool hasClusterFactorIdx(const ClusterId clusterId)
+        {
+            return clusterFactorIdxMap_.find(clusterId) != clusterFactorIdxMap_.end();
+        };
 
-        
     private:
         boost::optional<gtsam::Key> dtKey_;
         boost::optional<gtsam::Key> extrinsicKey_;
+        /// @brief Mapping from Cluster ID to associated factor in the graph
+        std::unordered_map<ClusterId, gtsam::FactorIndex> clusterFactorIdxMap_;
     };
 } // namespace mapping
 

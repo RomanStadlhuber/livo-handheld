@@ -12,6 +12,15 @@ SETUP_LOGS(DEBUG, "FeatureManager")
 namespace mapping
 {
 
+    FeatureManager::FeatureManager()
+    {
+        /**
+         * NOTE: heuristic upper bound for the number of cluster factors during active operation.
+         *
+         */
+        clusterFactorIdxMap_.reserve(5000);
+    }
+
     void FeatureManager::reset()
     {
         clusters_.clear();
@@ -22,6 +31,7 @@ namespace mapping
         clusterCenters_.clear();
         clusterNormals_.clear();
         clusterFactors_.clear();
+        clusterFactorIdxMap_.clear();
         clusterIdCounter_ = 0;
         newSmootherFactors_ = gtsam::NonlinearFactorGraph();
         factorsToRemove_.clear();
@@ -99,6 +109,7 @@ namespace mapping
             clusterSigmas_.erase(clusterId);
             clusterPlaneThicknessHistory_.erase(clusterId);
             clusterFactors_.erase(clusterId);
+            clusterFactorIdxMap_.erase(clusterId);
         }
         LOG(INFO, "Pruned " << clustersToErase.size() << " clusters, " << clusters_.size() << " clusters remain");
     }
@@ -279,22 +290,6 @@ namespace mapping
             computeTemporalCalibrationTwists(states);
         std::size_t numFactorsAdded{0}, numFactorsUpdated{0}, numFactorsRemoved{0};
 
-        /* Build a clusterId -> smoother factor index map in a single pass.
-         * Used in the branches below to find the previously-submitted factor
-         * for a cluster so it can be invalidated and queued for removal.
-         *
-         * NOTE: previous impl did a full linear scan of the factor graph per cluster
-         * with a dynamic_pointer_cast at every step — O(N_clusters * M_factors) per
-         * keyframe. Pre-indexing collapses this to O(M_factors + N_clusters).
-         */
-        std::map<uint32_t, size_t> smootherFactorByCluster;
-        for (size_t i = 0; i < currentSmootherFactors.size(); ++i)
-        {
-            const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[i]);
-            if (ptp)
-                smootherFactorByCluster.emplace(ptp->clusterId_, i);
-        }
-
         for (auto const &[clusterId, clusterPoints] : clusters_)
         {
             const ClusterState clusterState = clusterStates_.at(clusterId);
@@ -342,10 +337,9 @@ namespace mapping
                 else // cluster factor exists, remove old and readd with updated keys
                 {
                     // 1: Remove old factor from smoother (if still present)
-                    auto it = smootherFactorByCluster.find(clusterId);
-                    if (it != smootherFactorByCluster.end())
+                    if (hasClusterFactorIdx(clusterId))
                     {
-                        const size_t factorKey = it->second;
+                        const size_t factorKey = clusterFactorIdxMap_.at(clusterId);
                         const auto existingPtpFactor =
                             boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
                         existingPtpFactor->markInvalid();
@@ -403,10 +397,9 @@ namespace mapping
                 // MSCKF)
                 const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
                 // 1: Remove old factor from smoother (if still present)
-                auto it = smootherFactorByCluster.find(clusterId);
-                if (it != smootherFactorByCluster.end())
+                if (hasClusterFactorIdx(clusterId))
                 {
-                    const size_t factorKey = it->second;
+                    const size_t factorKey = clusterFactorIdxMap_.at(clusterId);
                     const auto existingPtpFactor =
                         boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
                     existingPtpFactor->markInvalid();
@@ -436,10 +429,9 @@ namespace mapping
             break;
             case ClusterState::Pruned: // factor must be removed from the smoother
             {
-                auto it = smootherFactorByCluster.find(clusterId);
-                if (it != smootherFactorByCluster.end())
+                if (hasClusterFactorIdx(clusterId))
                 {
-                    const size_t factorKey = it->second;
+                    const size_t factorKey = clusterFactorIdxMap_.at(clusterId);
                     const auto existingPtpFactor =
                         boost::dynamic_pointer_cast<PointToPlaneFactor>(currentSmootherFactors[factorKey]);
                     existingPtpFactor->markInvalid(); // mark factor as invalid to avoid further optimization
