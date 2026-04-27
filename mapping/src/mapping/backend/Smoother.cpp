@@ -67,7 +67,8 @@ namespace mapping
         }
     }
 
-    void Smoother::updateAndOptimizeGraph(const uint32_t &idxKeyframe, States &states, const MappingConfig &config,
+    void Smoother::updateAndOptimizeGraph(const uint32_t &idxKeyframe, States &states, FeatureManager &featureManager,
+                                          const MappingConfig &config,
                                           const gtsam::CombinedImuFactor &preintegrationFactor,
                                           gtsam::NonlinearFactorGraph newAndUpdatedFactors,
                                           const gtsam::FactorIndices &factorsToRemove)
@@ -115,6 +116,21 @@ namespace mapping
         const gtsam::Pose3 E_before = extrinsicCalibrationEnabled_ ? states.getImuToLidarExtrinsic() : gtsam::Pose3();
         // update estimator
         smoother_.update(newAndUpdatedFactors, newValues, newSmootherIndices, factorsToRemove);
+        const gtsam::FactorIndices &newFactorIndices = smoother_.getISAM2Result().newFactorsIndices;
+        /**
+         * feed the indices of the newly added (or updated) factors back to the FeatureManager
+         * NOTE: the dynamic cast will ignore any other factor types (e.g. IMU preintegration)
+         */
+        for (std::size_t i = 0; i < newFactorIndices.size(); i++)
+        {
+            const gtsam::FactorIndex &newIdx = newFactorIndices.at(i);
+            const gtsam::NonlinearFactor::shared_ptr &newFactor = smoother_.getFactors().at(newIdx);
+            if (auto p2pFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(newFactor))
+            {
+                const ClusterId clusterId = p2pFactor->clusterId_;
+                featureManager.setClusterFactorIdxMapping(clusterId, newIdx);
+            }
+        }
         /**
          * NOTE: iSAM2 update performs only one GN step,
          * multiple updates to assure convergence, see also
