@@ -138,25 +138,11 @@ namespace mapping
             return prefix;
         }
 
-        /// writes a single formatted line to stdout and, if open, to the log file
-        inline void writeLine(const std::string &line)
-        {
-            std::cout << line << "\n";
-            if (logFile.is_open())
-            {
-                logFile << line << "\n";
-                logFile.flush();
-            }
-        }
-
         /// core output function — formats and emits a log entry with an optional timestamp.
         /// The first element of lines is the header; subsequent elements are continuation lines
-        /// indented by four spaces. Color applies only to the prefix on the header line.
-        inline void logImpl(
-            LogLevel level,
-            const char *module,
-            std::optional<double> ts,
-            std::initializer_list<std::string> lines)
+        /// indented by four spaces. Color applies to the full text of every line.
+        inline void logImpl(LogLevel level, const char *module, std::optional<double> ts,
+                            std::initializer_list<std::string> lines)
         {
             const std::string prefix = buildPrefix(module, level, ts);
             const bool useColor = colorEnabled();
@@ -164,11 +150,11 @@ namespace mapping
 
             auto it = lines.begin();
 
-            // header line — colored prefix followed by the message and closing :::
+            // header line — full line colored, including message and closing :::
             {
                 const std::string &msg = *it;
                 if (useColor)
-                    std::cout << color << prefix << RESET << " " << msg << " :::\n";
+                    std::cout << color << prefix << " " << msg << " :::" << RESET << "\n";
                 else
                     std::cout << prefix << " " << msg << " :::\n";
 
@@ -180,9 +166,20 @@ namespace mapping
                 ++it;
             }
 
-            // continuation lines — indented, no prefix, no color
+            // continuation lines — indented, no prefix, colored to match header
             for (; it != lines.end(); ++it)
-                writeLine("    " + *it);
+            {
+                if (useColor)
+                    std::cout << color << "    " << *it << RESET << "\n";
+                else
+                    std::cout << "    " << *it << "\n";
+
+                if (logFile.is_open())
+                {
+                    logFile << "    " << *it << "\n";
+                    logFile.flush();
+                }
+            }
         }
 
         /// generates the timestamped log file path: /tmp/livo_YYYY_MM_DD_HH_mm_ss.log
@@ -202,10 +199,7 @@ namespace mapping
     /// @brief Set the global minimum log level threshold.
     /// Messages below this level are suppressed across all modules.
     /// Call once from MappingSystem based on the loaded configuration.
-    inline void setLogLevel(LogLevel level)
-    {
-        detail::logLevel = level;
-    }
+    inline void setLogLevel(LogLevel level) { detail::logLevel = level; }
 
 } // namespace mapping
 
@@ -215,100 +209,94 @@ namespace mapping
 /// Place once at file scope in the .cpp file, before any logging calls.
 /// @param level  Default log level for this module (DEBUG, INFO, WARN, ERROR, NONE).
 /// @param name   Module name string shown in every log line from this file.
-#define SETUP_LOGS(level, name)                     \
-    static constexpr const char *_logModule = name; \
+#define SETUP_LOGS(level, name)                                                                                        \
+    static constexpr const char *_logModule = name;                                                                    \
     static constexpr mapping::LogLevel _logModuleLevel = mapping::LogLevel::level;
 
 // --- file logging lifecycle ---
 
 /// @brief Open a timestamped log file at /tmp/livo_YYYY_MM_DD_HH_mm_ss.log.
 /// All modules write to this single shared file. Call once at startup.
-#define ENABLE_FILE_LOGGING()                                                  \
-    do                                                                         \
-    {                                                                          \
-        mapping::detail::logFilePath = mapping::detail::generateLogFilePath(); \
-        mapping::detail::logFile.open(                                         \
-            mapping::detail::logFilePath, std::ios::app);                      \
+#define ENABLE_FILE_LOGGING()                                                                                          \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        mapping::detail::logFilePath = mapping::detail::generateLogFilePath();                                         \
+        mapping::detail::logFile.open(mapping::detail::logFilePath, std::ios::app);                                    \
     } while (0)
 
 /// @brief Flush and close the log file, then print its path to the console.
 /// Call on shutdown or SIGINT.
-#define CLOSE_LOGS()                                                             \
-    do                                                                           \
-    {                                                                            \
-        if (mapping::detail::logFile.is_open())                                  \
-        {                                                                        \
-            mapping::detail::logFile.flush();                                    \
-            mapping::detail::logFile.close();                                    \
-        }                                                                        \
-        std::cout << "log written to: " << mapping::detail::logFilePath << "\n"; \
+#define CLOSE_LOGS()                                                                                                   \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (mapping::detail::logFile.is_open())                                                                        \
+        {                                                                                                              \
+            mapping::detail::logFile.flush();                                                                          \
+            mapping::detail::logFile.close();                                                                          \
+        }                                                                                                              \
+        std::cout << "log written to: " << mapping::detail::logFilePath << "\n";                                       \
     } while (0)
 
 // --- logging macros ---
 
 /// @brief Emit a single-line log message.
 /// msg may be a plain string or a stream expression: "value: " << x
-#define LOG(level, msg)                                     \
-    do                                                      \
-    {                                                       \
-        if (mapping::detail::shouldLog(                     \
-                mapping::LogLevel::level, _logModuleLevel)) \
-        {                                                   \
-            std::stringstream sstr;                         \
-            sstr << msg;                                    \
-            mapping::detail::logImpl(                       \
-                mapping::LogLevel::level, _logModule,       \
-                std::nullopt, {sstr.str()});                \
-        }                                                   \
+#define LOG(level, msg)                                                                                                \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (mapping::detail::shouldLog(mapping::LogLevel::level, _logModuleLevel))                                     \
+        {                                                                                                              \
+            std::stringstream sstr;                                                                                    \
+            sstr << msg;                                                                                               \
+            mapping::detail::logImpl(mapping::LogLevel::level, _logModule, std::nullopt, {sstr.str()});                \
+        }                                                                                                              \
     } while (0)
 
 /// @brief Emit a single-line log message with a timestamp.
 /// ts is a double in seconds; formatted as fixed-point with 4 decimal places.
-#define LOG_STAMPED(level, ts, msg)                         \
-    do                                                      \
-    {                                                       \
-        if (mapping::detail::shouldLog(                     \
-                mapping::LogLevel::level, _logModuleLevel)) \
-        {                                                   \
-            std::stringstream sstr;                         \
-            sstr << msg;                                    \
-            mapping::detail::logImpl(                       \
-                mapping::LogLevel::level, _logModule,       \
-                (ts), {sstr.str()});                        \
-        }                                                   \
+#define LOG_STAMPED(level, ts, msg)                                                                                    \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (mapping::detail::shouldLog(mapping::LogLevel::level, _logModuleLevel))                                     \
+        {                                                                                                              \
+            std::stringstream sstr;                                                                                    \
+            sstr << msg;                                                                                               \
+            mapping::detail::logImpl(mapping::LogLevel::level, _logModule, (ts), {sstr.str()});                        \
+        }                                                                                                              \
     } while (0)
 
 /// @brief Emit a multi-line log message.
 /// The first argument after level is the header line; subsequent arguments are
 /// continuation lines indented by four spaces. Plain string literals and STREAM()
 /// expressions may be mixed freely.
-#define LOG_MULTI(level, ...)                               \
-    do                                                      \
-    {                                                       \
-        if (mapping::detail::shouldLog(                     \
-                mapping::LogLevel::level, _logModuleLevel)) \
-        {                                                   \
-            mapping::detail::logImpl(                       \
-                mapping::LogLevel::level, _logModule,       \
-                std::nullopt, {__VA_ARGS__});               \
-        }                                                   \
+#define LOG_MULTI(level, ...)                                                                                          \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (mapping::detail::shouldLog(mapping::LogLevel::level, _logModuleLevel))                                     \
+        {                                                                                                              \
+            mapping::detail::logImpl(mapping::LogLevel::level, _logModule, std::nullopt, {__VA_ARGS__});               \
+        }                                                                                                              \
     } while (0)
 
 /// @brief Emit a multi-line log message with a timestamp.
-#define LOG_MULTI_STAMPED(level, ts, ...)                   \
-    do                                                      \
-    {                                                       \
-        if (mapping::detail::shouldLog(                     \
-                mapping::LogLevel::level, _logModuleLevel)) \
-        {                                                   \
-            mapping::detail::logImpl(                       \
-                mapping::LogLevel::level, _logModule,       \
-                (ts), {__VA_ARGS__});                       \
-        }                                                   \
+#define LOG_MULTI_STAMPED(level, ts, ...)                                                                              \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (mapping::detail::shouldLog(mapping::LogLevel::level, _logModuleLevel))                                     \
+        {                                                                                                              \
+            mapping::detail::logImpl(mapping::LogLevel::level, _logModule, (ts), {__VA_ARGS__});                       \
+        }                                                                                                              \
     } while (0)
 
 /// @brief Wrap a stream expression as a std::string for use as a LOG_MULTI argument.
 /// Use when an argument contains non-string values: STREAM("pose: " << p.translation())
-#define STREAM(msg) ([&]() { std::stringstream _s; _s << msg; return _s.str(); }())
+#define STREAM(msg)                                                                                                    \
+    (                                                                                                                  \
+        [&]()                                                                                                          \
+        {                                                                                                              \
+            std::stringstream _s;                                                                                      \
+            _s << msg;                                                                                                 \
+            return _s.str();                                                                                           \
+        }())
 
 #endif // MAPPING_LOGGING_HPP_
