@@ -214,7 +214,9 @@ apt update && apt install -yq google-perftools libgoogle-perftools-dev graphviz
 Build using `RelWithDebInfo`
 
 ```bash
-colcon build --symlink-install --packages-select mapping --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+mkdir build
+cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
 ```
 
 Run the node in bag reader mode with the profiler
