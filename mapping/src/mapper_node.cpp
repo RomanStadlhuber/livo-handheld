@@ -3,6 +3,8 @@
 // ROS
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <rosbag2_cpp/reader.hpp>
 #include <rosbag2_cpp/readers/sequential_reader.hpp>
@@ -61,9 +63,21 @@ public:
 
         RCLCPP_INFO(this->get_logger(), "MapperNode has been initialized.");
         this->declare_parameter<std::string>("mapper_config", "");
+        this->declare_parameter<std::string>("topic_imu", "/livox/imu");
+        this->declare_parameter<double>("scaling_imu", 9.81);
+        this->declare_parameter<std::string>("topic_lidar", "/livox/lidar");
+        this->declare_parameter<bool>("lidar_msg_pc2", false);
+
         std::string configPath = this->get_parameter("mapper_config").as_string();
+        const std::string topicImu = this->get_parameter("topic_imu").as_string();
+        scalingImu_ = this->get_parameter("scaling_imu").as_double();
+        const std::string topicLidar = this->get_parameter("topic_lidar").as_string();
+        const bool lidarMsgPc2 = this->get_parameter("lidar_msg_pc2").as_bool();
         RCLCPP_INFO(this->get_logger(), "Using mapper config file: %s",
                     configPath.c_str());
+        RCLCPP_INFO(this->get_logger(), "IMU topic: %s (scale %.4f)", topicImu.c_str(), scalingImu_);
+        RCLCPP_INFO(this->get_logger(), "LiDAR topic: %s (%s)", topicLidar.c_str(),
+                    lidarMsgPc2 ? "sensor_msgs/PointCloud2" : "livox_ros_driver2/CustomMsg");
         mapping::MappingConfig config = loadConfig(configPath);
         slam_.setConfig(config);
         // enable collecting marginalized submaps to accumulate the global map
@@ -85,10 +99,19 @@ public:
         // --- subscribers ---
         subImu_ = this->create_subscription<sensor_msgs::msg::Imu>(
             // 2 seconds assuming 500 [Hz] IMU
-            "/livox/imu", 1000, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1), imuSubOpt);
-        subLidar_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-            // 2 seconds assuming 10 [Hz] LiDAR
-            "livox/lidar", 20, std::bind(&MapperNode::lidarCallback, this, std::placeholders::_1), lidarSubOpt);
+            topicImu, 1000, std::bind(&MapperNode::imuCallback, this, std::placeholders::_1), imuSubOpt);
+        if (lidarMsgPc2)
+        {
+            subLidarPc2_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+                // 2 seconds assuming 10 [Hz] LiDAR
+                topicLidar, 20, std::bind(&MapperNode::lidarPc2Callback, this, std::placeholders::_1), lidarSubOpt);
+        }
+        else
+        {
+            subLidar_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(
+                // 2 seconds assuming 10 [Hz] LiDAR
+                topicLidar, 20, std::bind(&MapperNode::lidarCallback, this, std::placeholders::_1), lidarSubOpt);
+        }
         subCamera_ = this->create_subscription<sensor_msgs::msg::Image>(
             // 2 seconds assuming 20 FPS
             "/camera/image_raw", 40, std::bind(&MapperNode::cameraCallback, this, std::placeholders::_1), cameraSubOpt);
@@ -124,7 +147,7 @@ private:
                                      msg->linear_acceleration.x,
                                      msg->linear_acceleration.y,
                                      msg->linear_acceleration.z) *
-                                 kLivoxImuScale;
+                                 scalingImu_;
         imu_data->angular_velocity = Eigen::Vector3d(
             msg->angular_velocity.x,
             msg->angular_velocity.y,
@@ -158,6 +181,38 @@ private:
             rclcpp::Time point_offset_time(static_cast<uint64_t>(point.offset_time));
             lidar_data->offset_times.push_back(point_offset_time.seconds());
         }
+        slam_.feedLidar(lidar_data, timestamp);
+        slam_.update();
+        publishStates();
+    }
+
+    void lidarPc2Callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+    {
+        if (!hasStartTime_)
+        {
+            startTime_ = rclcpp::Time(msg->header.stamp);
+            hasStartTime_ = true;
+        }
+        double timestamp = (rclcpp::Time(msg->header.stamp) - startTime_).seconds();
+
+        auto lidar_data = std::make_shared<mapping::LidarData>();
+        const size_t point_num = static_cast<size_t>(msg->width) * static_cast<size_t>(msg->height);
+        lidar_data->points.reserve(point_num);
+        // per-point offset times are not extracted from generic PointCloud2 inputs;
+        // undistortion effectively becomes a no-op for these scans
+        lidar_data->offset_times.assign(point_num, 0.0);
+
+        sensor_msgs::PointCloud2ConstIterator<float> iterX(*msg, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> iterY(*msg, "y");
+        sensor_msgs::PointCloud2ConstIterator<float> iterZ(*msg, "z");
+        for (size_t i = 0; i < point_num; ++i, ++iterX, ++iterY, ++iterZ)
+        {
+            lidar_data->points.emplace_back(
+                static_cast<double>(*iterX),
+                static_cast<double>(*iterY),
+                static_cast<double>(*iterZ));
+        }
+
         slam_.feedLidar(lidar_data, timestamp);
         slam_.update();
         publishStates();
@@ -341,6 +396,7 @@ private:
         callbackGroupCamera_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subImu_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLidar_;
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subLidarPc2_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr subCamera_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubSlidingWindowPath_, pubHistoricalPosesPath_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubKeyframeSubmap_, pubGlobalMap_;
@@ -355,8 +411,8 @@ private:
     // accessed from both IMU and LiDAR callback threads without a lock
     // TODO: in the future, use a mutex for values like this
     std::atomic<bool> hasStartTime_ = false;
-    /// @brief Scaling constant required to transform Livox IMU-data from `[g]` to `[m/s^2]`
-    static constexpr double kLivoxImuScale = 9.81;
+    /// @brief Scaling applied to raw accelerometer readings (Livox reports in `[g]`, so default is 9.81).
+    double scalingImu_ = 9.81;
 
     mapping::MappingSystem slam_;
     uint32_t lastPublishedKeyframeCount_ = 0;

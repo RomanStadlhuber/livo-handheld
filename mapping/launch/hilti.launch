@@ -1,0 +1,17 @@
+<launch>
+    <!-- SLAM -->
+    <node pkg="mapping" exec="mapper" name="mapper_node" output="screen">
+        <param name="use_sim_time" value="true" />
+        <param name="mapper_config" value="/ros2_ws/src/livo/mapping/config/mapping_hilti.yaml" />
+        <!-- configuration for HILTI SLAM challenge 2023 dataset format -->
+        <param name="topic_imu" value="/alphasense/imu" />
+        <param name="scaling_imu" value="1.0" />
+        <param name="topic_lidar" value="/hesai/pandar" />
+        <param name="lidar_msg_pc2" value="true" />
+    </node>
+    <!-- Visualization -->
+    <node pkg="rviz2" exec="rviz2" name="rviz" output="screen">
+        <param name="use_sim_time" value="true" />
+        <param name="rviz_config" value="/ros2_ws/src/livo/mapping/config/mapping.rviz" />
+    </node>
+</launch>

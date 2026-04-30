@@ -182,6 +182,27 @@ Doxygen 1.13+ and CMake are on `PATH`:
   also works in modern Doxygen but `\f$` is preferred for consistency.
 - **`docs/output/` is gitignored** — only source files under `docs/` are tracked.
 
+## Debugging Instrumentation `ENABLE_DBG_CMP`
+
+To enable logic that computes instrumentation as part of the control flow,
+add the following variable when building.
+
+```bash
+colcon build --symlink-install --packages-select mapping \
+    --cmake-args -DENABLE_DBG_CMP=ON
+```
+
+Or, in `CMakeLists.txt`, flip the default of the existing option from `OFF` to `ON`:
+
+```cmake
+option(ENABLE_DBG_CMP "enable debug computations (summaries, tracking statistics)" ON)
+```
+
+
+Rebuild without the flag (or with `-DENABLE_DBG_CMP=OFF`) to disable instrumentation.
+When adding new diagnostic-only logic, wrap it in
+`#ifdef ENABLE_DBG_CMP` so it is excluded from release-style builds.
+
 ## Profiling with `gperftools`
 
 Inside the docker container install
@@ -193,7 +214,9 @@ apt update && apt install -yq google-perftools libgoogle-perftools-dev graphviz
 Build using `RelWithDebInfo`
 
 ```bash
-colcon build --symlink-install --packages-select mapping --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+mkdir build
+cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
 ```
 
 Run the node in bag reader mode with the profiler

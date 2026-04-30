@@ -9,6 +9,13 @@ endif()
 # (should be disabled for the ROS node)
 add_definitions(-DDISABLEVIZ)
 
+# optional debug instrumentation (cluster/factor summaries, tracking counters)
+# enable via: colcon build --cmake-args -DENABLE_DBG_CMP=ON
+option(ENABLE_DBG_CMP "enable debug computations (summaries, tracking statistics)" OFF)
+if(ENABLE_DBG_CMP)
+  add_compile_definitions(ENABLE_DBG_CMP)
+endif()
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -48,7 +55,6 @@ if(BUILD_TESTING)
 endif()
 
 add_library(mapping
-  # src/mapping/factors/PlanarClusterFactor.cpp
   src/mapping/factors/PointToPlaneFactor.cpp
   src/mapping/Visualization.cpp
   src/mapping/MappingSystem.cpp

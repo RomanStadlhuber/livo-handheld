@@ -1,6 +1,9 @@
 /// @file
 /// @ingroup backend_smoother
 #include <mapping/backend/Smoother.hpp>
+#include <mapping/logging.hpp>
+
+SETUP_LOGS(INFO, "Smoother")
 
 namespace mapping
 {
@@ -12,10 +15,11 @@ namespace mapping
         // for some guidance, see:
         // https://github.com/MIT-SPARK/Kimera-VIO/blob/master/include/kimera-vio/backend/VioBackendParams.h
         smootherParams.relinearizeThreshold = config.backend.isam2_relinearize_threshold;
-        smootherParams.relinearizeSkip = 1;          // only (check) relinearize after that many update calls
-        smootherParams.findUnusedFactorSlots = true; // should be enabled when using smoother
-        std::cout << "Initializing smoother with fixed lag of " << config.backend.sliding_window_size << std::endl;
-        smoother_ = gtsam::IncrementalFixedLagSmoother(static_cast<double>(config.backend.sliding_window_size), smootherParams);
+        smootherParams.relinearizeSkip = 1;           // only (check) relinearize after that many update calls
+        smootherParams.findUnusedFactorSlots = false; // disable to speed up factor insertion
+        LOG(INFO, "initializing smoother with fixed lag of " << config.backend.sliding_window_size);
+        smoother_ =
+            gtsam::IncrementalFixedLagSmoother(static_cast<double>(config.backend.sliding_window_size), smootherParams);
         // clear any priors that may be left
         initialPriors_.resize(0);
         initialValues_.clear();
@@ -25,15 +29,13 @@ namespace mapping
         extrinsicCalibrationEnabled_ = config.extrinsics.extrinsic_calibration_enabled;
     }
 
-    void Smoother::setPriors(
-        const uint32_t &idxKeyframe,
-        const gtsam::NonlinearFactorGraph &priors,
-        const gtsam::NavState &x0,
-        const gtsam::imuBias::ConstantBias &b0)
+    void Smoother::setPriors(const uint32_t &idxKeyframe, const gtsam::NonlinearFactorGraph &priors,
+                             const gtsam::NavState &x0, const gtsam::imuBias::ConstantBias &b0)
     {
         if (bootstrapped_)
         {
-            std::cerr << "::: [WARNING] Attempting to set priors after the smoother has been bootstrapped. This will not have any effect. :::" << std::endl;
+            LOG(WARN,
+                "Attempting to set priors after the smoother has been bootstrapped. This will not have any effect.");
             return;
         }
         initialPriors_ = priors;
@@ -53,8 +55,7 @@ namespace mapping
             dt0 << config.extrinsics.imu_t_lidar;
             initialValues_.insert(T(0), dt0);
             initialSmootherIndices_[T(0)] = 0.0;
-            initialPriors_.addPrior(T(0), dt0,
-                gtsam::noiseModel::Isotropic::Sigma(1, 0.01)); // 10ms sigma
+            initialPriors_.addPrior(T(0), dt0, gtsam::noiseModel::Isotropic::Sigma(1, 0.01)); // 10ms sigma
         }
         if (config.extrinsics.extrinsic_calibration_enabled)
         {
@@ -62,18 +63,15 @@ namespace mapping
             initialSmootherIndices_[E(0)] = 0.0;
             gtsam::Vector6 sigma;
             sigma << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01; // rad, m
-            initialPriors_.addPrior(E(0), initialExtrinsic,
-                gtsam::noiseModel::Diagonal::Sigmas(sigma));
+            initialPriors_.addPrior(E(0), initialExtrinsic, gtsam::noiseModel::Diagonal::Sigmas(sigma));
         }
     }
 
-    void Smoother::updateAndOptimizeGraph(
-        const uint32_t &idxKeyframe,
-        States &states,
-        const MappingConfig &config,
-        const gtsam::CombinedImuFactor &preintegrationFactor,
-        gtsam::NonlinearFactorGraph newAndUpdatedFactors,
-        const gtsam::FactorIndices &factorsToRemove)
+    void Smoother::updateAndOptimizeGraph(const uint32_t &idxKeyframe, States &states, FeatureManager &featureManager,
+                                          const MappingConfig &config,
+                                          const gtsam::CombinedImuFactor &preintegrationFactor,
+                                          gtsam::NonlinearFactorGraph newAndUpdatedFactors,
+                                          const gtsam::FactorIndices &factorsToRemove)
     {
         // need to manually add preintegraion factor
         newAndUpdatedFactors.add(preintegrationFactor);
@@ -85,8 +83,7 @@ namespace mapping
         newValues.insert(B(idxKeyframe), states.getCurrentBias());
         // new KF indices "timestamps" to let the smoother know where the sliding window lies
         gtsam::FixedLagSmootherKeyTimestampMap newSmootherIndices;
-        const double
-            tSmootherLast{static_cast<double>(idxKeyframe - 1)},
+        const double tSmootherLast{static_cast<double>(idxKeyframe - 1)},
             tSmootherCurr{static_cast<double>(idxKeyframe)};
         newSmootherIndices[X(idxKeyframe - 1)] = tSmootherLast;
         newSmootherIndices[V(idxKeyframe - 1)] = tSmootherLast;
@@ -107,17 +104,33 @@ namespace mapping
                 newSmootherIndices[key] = timestamp;
             newValues.insert(initialValues_);
             bootstrapped_ = true;
-            std::cout << "::: [INFO] Graph is now bootstrapped with priors :::" << std::endl;
+            LOG(INFO, "graph is now bootstrapped with priors");
         }
         if (!bootstrapped_) // abort if smoother is not bootstrapped
         {
-            throw std::runtime_error("::: [ERROR] Attempting to update smoother without bootstrapping, this should not happen :::");
+            throw std::runtime_error(
+                "::: [ERROR] Attempting to update smoother without bootstrapping, this should not happen :::");
         }
         // capture calibration values before update for delta logging
         const double dt_before = temporalCalibrationEnabled_ ? states.getTemporalOffset() : 0.0;
         const gtsam::Pose3 E_before = extrinsicCalibrationEnabled_ ? states.getImuToLidarExtrinsic() : gtsam::Pose3();
         // update estimator
         smoother_.update(newAndUpdatedFactors, newValues, newSmootherIndices, factorsToRemove);
+        const gtsam::FactorIndices &newFactorIndices = smoother_.getISAM2Result().newFactorsIndices;
+        /**
+         * feed the indices of the newly added (or updated) factors back to the FeatureManager
+         * NOTE: the dynamic cast will ignore any other factor types (e.g. IMU preintegration)
+         */
+        for (std::size_t i = 0; i < newFactorIndices.size(); i++)
+        {
+            const gtsam::FactorIndex &newIdx = newFactorIndices.at(i);
+            const gtsam::NonlinearFactor::shared_ptr &newFactor = smoother_.getFactors().at(newIdx);
+            if (auto p2pFactor = boost::dynamic_pointer_cast<PointToPlaneFactor>(newFactor))
+            {
+                const ClusterId clusterId = p2pFactor->clusterId_;
+                featureManager.setClusterFactorIdxMapping(clusterId, newIdx);
+            }
+        }
         /**
          * NOTE: iSAM2 update performs only one GN step,
          * multiple updates to assure convergence, see also
@@ -129,30 +142,25 @@ namespace mapping
         // calculate the estimate and update the shared state container
         // currently this is just matching legacy behavior
         states.setSmootherEstimate(smoother_.calculateEstimate());
-        states.setCurrentState(gtsam::NavState(
-            states.getSmootherEstimate().at(X(idxKeyframe)).cast<gtsam::Pose3>(),
-            states.getSmootherEstimate().at(V(idxKeyframe)).cast<gtsam::Vector3>()));
+        states.setCurrentState(gtsam::NavState(states.getSmootherEstimate().at(X(idxKeyframe)).cast<gtsam::Pose3>(),
+                                               states.getSmootherEstimate().at(V(idxKeyframe)).cast<gtsam::Vector3>()));
         states.setCurrentBias(states.getSmootherEstimate().at(B(idxKeyframe)).cast<gtsam::imuBias::ConstantBias>());
         states.setPreintegrationRefState(states.getCurrentState());
         // read back calibration estimates and log updates
         if (extrinsicCalibrationEnabled_)
         {
-            states.setImuToLidarExtrinsic(
-                states.getSmootherEstimate().at(E(0)).cast<gtsam::Pose3>());
+            states.setImuToLidarExtrinsic(states.getSmootherEstimate().at(E(0)).cast<gtsam::Pose3>());
             const gtsam::Pose3 &E_after = states.getImuToLidarExtrinsic();
             const gtsam::Vector6 delta = gtsam::Pose3::Logmap(E_before.between(E_after));
-            std::cout << "::: [INFO] delta i_T_l [rot | trans]: ["
-                      << delta.transpose() << "]" << std::endl;
-            std::cout << "::: [INFO] i_T_l : rotation rpy ["
-                      << E_after.rotation().rpy().transpose() << "] translation ["
-                      << E_after.translation().transpose() << "]" << std::endl;
+            LOG(INFO, "delta i_T_l [rot | trans]: [" << delta.transpose() << "]");
+            LOG(INFO, "i_T_l : rotation rpy [" << E_after.rotation().rpy().transpose() << "] translation ["
+                                               << E_after.translation().transpose() << "]");
         }
         if (temporalCalibrationEnabled_)
         {
             const double dt_after = states.getSmootherEstimate().at(T(0)).cast<gtsam::Vector1>()(0);
             states.setTemporalOffset(dt_after);
-            std::cout << "::: [INFO] l_t_i: " << (dt_after - dt_before)
-                      << " [sec.], current value: " << dt_after << " [sec.]" << std::endl;
+            LOG(INFO, "l_t_i: " << (dt_after - dt_before) << " [sec.], current value: " << dt_after << " [sec.]");
         }
         // update the poses of all keyframe submaps
         for (auto const &[idxKf, _] : states.getKeyframePoses())
@@ -161,4 +169,4 @@ namespace mapping
             states.updateKeyframeSubmapPose(idxKf, world_T_imu);
         }
     }
-}
+} // namespace mapping

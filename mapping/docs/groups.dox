@@ -54,5 +54,9 @@
 /// @ingroup core
 /// @brief Utility functions for point cloud conversion and plane fitting.
 
+/// @defgroup logging Logging
+/// @ingroup core
+/// @brief Configurable per-module logging with console colorization and file output.
+
 /// @defgroup system System
 /// @brief Top-level orchestration and ROS visualization.

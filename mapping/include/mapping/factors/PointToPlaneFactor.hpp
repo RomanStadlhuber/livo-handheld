@@ -64,6 +64,21 @@ namespace mapping
             const gtsam::Values &values,
             boost::optional<std::vector<gtsam::Matrix> &> H = boost::none) const override;
 
+
+        /// @brief Linearize the point-to-plane residual into a JacobianFactor.
+        ///
+        /// This override is required because the residual `r` is already a mean squared
+        /// point-to-plane distance (m²). If returned via `unwhitenedError`, GTSAM would
+        /// square it again internally when forming the cost, yielding a quartic objective.
+        /// Instead, we directly construct the whitened linear system:
+        /// ```
+        /// A = (1/sigma) * J,   b = -(1/sigma) * r
+        /// ```
+        /// and hand it to GTSAM as a JacobianFactor. GTSAM then solves the normal
+        /// equations `A^T A dx = A^T b`, which is equivalent to Mahalanobis-norm
+        /// minimization of `(1/2) * r^T * Sigma^{-1} * r` without any further squaring.
+        /// @param x Current state estimate at which the factor is linearized.
+        /// @return Whitened JacobianFactor representing the linearized system.
         boost::shared_ptr<gtsam::GaussianFactor> linearize(const gtsam::Values &x) const override;
 
         /// @brief Clone method required for GTSAM factor copying

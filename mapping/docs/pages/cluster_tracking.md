@@ -132,6 +132,16 @@ averaging smooths out frame-to-frame noise while preserving the trend: a
 cluster on a rough surface accumulates consistently large \f$ t_k \f$ values,
 while a cluster on a clean wall stays small.
 
+Note that \f$ \Gamma_{j} \f$ is computed as the mean-square of \f$ \Gamma_{k} \f$,
+which is itself a mean-squared value alread, yielding a cluster thickness variance
+in \f$ \mathrm{[m]}^{4} \f$.
+Though this may seem contrary at first, do remember that the point-to-plane cluster
+residual \f$ r_{j} \f$ is mean-squared to \f$ \mathrm{[m]}^{4} \f$ itself.
+So when whitening the residual with \f$ {\Gamma_{j}}^{\frac{1}{2}} \cdot r_{j} \f$,
+we get \f$ \frac{1}{sqrt{\mathrm{[m]}^{4}}} \cdot \mathrm{[m]}^{2} \f$, properly
+cancelling out all units and leaving the whitened residuals expressed in
+multiples of the variance.
+
 When a keyframe is marginalized, the oldest history entry is removed
 (`pop_front`), so the thickness estimate always reflects only the active
 sliding window.

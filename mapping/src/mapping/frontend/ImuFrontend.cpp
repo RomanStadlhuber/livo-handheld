@@ -128,21 +128,20 @@ namespace mapping
             const gtsam::Vector3
                 scanAngVel = gtsam::Rot3::Logmap(lastScan_T_currScan.rotation()) / dtScanToLastScan,
                 scanLinVel = lastScan_T_currScan.translation() / dtScanToLastScan;
-            // Undistort current scan
-            for (std::size_t i = 0; i < scan->points.size(); ++i)
-            {
-                const Eigen::Vector3d pt = scan->points[i];
-                const double dt = scan->offset_times[i];
-
-                // Presumed rotation and translation that the point should have undergone during scan time
-                gtsam::Rot3 scan_R_pt = gtsam::Rot3::Expmap(scanAngVel * dt);
-                gtsam::Point3 scan_P_pt = scanLinVel * dt;
-                gtsam::Pose3 scan_T_pt{scan_R_pt, scan_P_pt};
-
-                // Undistort point with inverse to correct motion distortion
-                const Eigen::Vector3d ptUndistorted = scan_T_pt.transformFrom(pt);
-                scan->points[i] = ptUndistorted;
-            }
+            // undistort scan, if enabled
+            if(config.lidar_frontend.undistort)
+                for (std::size_t i = 0; i < scan->points.size(); ++i)
+                {
+                    const Eigen::Vector3d pt = scan->points[i];
+                    const double dt = scan->offset_times[i];
+                    // Presumed rotation and translation that the point should have undergone during scan time
+                    gtsam::Rot3 scan_R_pt = gtsam::Rot3::Expmap(scanAngVel * dt);
+                    gtsam::Point3 scan_P_pt = scanLinVel * dt;
+                    gtsam::Pose3 scan_T_pt{scan_R_pt, scan_P_pt};
+                    // Undistort point with inverse to correct motion distortion
+                    const Eigen::Vector3d ptUndistorted = scan_T_pt.transformFrom(pt);
+                    scan->points[i] = ptUndistorted;
+                }
             /**
              * Convert scan to pointcloud, voxelize and buffer with relative pose to last keyframe
              * NOTE: the undistorted scan pointcloud is not yet transformed as this

@@ -13,6 +13,9 @@
 #include <mapping/States.hpp>
 #include <mapping/types.hpp>
 
+// NOTE: FeatureManager is used by updateAndOptimizeGraph to set the cluster->factorIdx mapping
+#include <mapping/backend/FeatureManager.hpp>
+
 #include <iostream>
 
 namespace mapping
@@ -27,19 +30,15 @@ namespace mapping
         /// @brief Initialize/reset the GTSAM fixed lag smoother with update config variables.
         void reset(const MappingConfig &config);
 
-
         /// @brief Set the inital, world-frame fixing state and priors to bootstrap the optimization.
         /// Do this with the values from SLAM initialization.
         /// @param idxKeyframe The index variables associated with the first keyframe (assumed 0 by default).
-        /// @param priors Prior factors must constrain the full SLAM state Pose `X(0)`, Velocity `V(0)`, and Bias `B(0)`.
+        /// @param priors Prior factors must constrain the full SLAM state Pose `X(0)`, Velocity `V(0)`, and Bias
+        /// `B(0)`.
         /// @param x0 Initial pose and velocity estimate (NavState) for the first keyframe.
         /// @param b0 Initial bias estimate for the first keyframe.
-        void setPriors(
-            const uint32_t &idxKeyframe,
-            const gtsam::NonlinearFactorGraph & priors,
-            const gtsam::NavState &x0,
-            const gtsam::imuBias::ConstantBias &b0
-        );
+        void setPriors(const uint32_t &idxKeyframe, const gtsam::NonlinearFactorGraph &priors,
+                       const gtsam::NavState &x0, const gtsam::imuBias::ConstantBias &b0);
 
         /// @brief Basically just a wrapper around multiple iSAM2 update steps.
         /// After using this, call ImuFrontend::resetPreintegrator() to reset the preintegrator.
@@ -50,20 +49,21 @@ namespace mapping
         /// @param config The system config, used for update parameters.
         /// @param preintegrationFactor The preintegration factor to add to the graph for the current keyframe.
         /// @param newAndUpdatedFactors Feature factors to add to the graph or replace exsting ones.
-        /// @param factorsToRemove The indices of the factors to remove from the graph, originating from the FeatureManager.
+        /// @param factorsToRemove The indices of the factors to remove from the graph, originating from the
+        /// FeatureManager.
         void updateAndOptimizeGraph(
             const uint32_t &idxKeyframe,
-            States &states, // will be modified in-place
+            States &states,                 // will be modified in-place
+            FeatureManager &featureManager, // will be modified in-place
             const MappingConfig &config,
             // NOTE: make it a separate variable to make sure optimize is always called from with IMU constraints.
             const gtsam::CombinedImuFactor &preintegrationFactor,
             // NOTE: will be modified in-place
-            gtsam::NonlinearFactorGraph newAndUpdatedFactors,
-            const gtsam::FactorIndices &factorsToRemove);
+            gtsam::NonlinearFactorGraph newAndUpdatedFactors, const gtsam::FactorIndices &factorsToRemove);
 
         /// @brief A relay to `IncrementalFixedLagSmoother::getFactors()`,
         /// which is needed by the FeatureManager for factor removal, replacements & marginalization.
-        const gtsam::NonlinearFactorGraph &getFactors() const {return smoother_.getFactors();};
+        const gtsam::NonlinearFactorGraph &getFactors() const { return smoother_.getFactors(); };
 
         /// @brief Insert initial calibration values, timestamps, and priors into the smoother buffers.
         void setCalibrationPriors(const MappingConfig &config, const gtsam::Pose3 &initialExtrinsic);
