@@ -101,8 +101,8 @@ namespace mapping
             // --- tracking: KNN search & SVD plane fit ---
             auto const &[idxClusterKF, idxSubmapPt] = *clusterPointIdxs.rbegin(); // use newest cluster pt as KNN query
             const Eigen::Vector3d &world_clusterPt = keyframeSubmaps[idxClusterKF]->points_[idxSubmapPt];
-            const int knnFound = kdTree.SearchHybrid(world_clusterPt, config.lidar_frontend.knn_radius,
-                                                     config.lidar_frontend.knn_neighbors, knnIndices, knnDists);
+            const int knnFound =
+                kdTree.SearchKNN(world_clusterPt, config.lidar_frontend.knn_neighbors, knnIndices, knnDists);
             // skip if not enough points within radius; still update cluster parameters from new poses
             if (knnFound < config.lidar_frontend.knn_neighbors)
             {
