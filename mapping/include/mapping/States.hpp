@@ -31,10 +31,8 @@ namespace mapping
         /// @param keyframeTimestamp Timestamp of the keyframe
         /// @param ptrKeyframeSubmap Pointcloud of the keyframe submap
         /// @return Index of the newly created keyframe
-        uint32_t createKeyframeSubmap(
-            const gtsam::Pose3 &world_T_imu,
-            double keyframeTimestamp,
-            std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap);
+        uint32_t createKeyframeSubmap(const gtsam::Pose3 &world_T_imu, double keyframeTimestamp,
+                                      std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap);
 
         /// @brief Update a keyframe's submap to a new optimised IMU pose.
         /// @details Derives the LiDAR pose internally via the current extrinsic calibration,
@@ -85,19 +83,23 @@ namespace mapping
         gtsam::Pose3 &lastKeyframePose() const { return *keyframePoses_.rbegin()->second; };
         const double &lastKeyframeTimestamp() const { return keyframeTimestamps_.rbegin()->second; };
 
-        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &getKeyframeSubmaps() const { return keyframeSubmaps_; };
+        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> &getKeyframeSubmaps() const
+        {
+            return keyframeSubmaps_;
+        };
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &getKeyframePoses() const { return keyframePoses_; };
         /// @brief IMU frame poses (w_T_imu) for each keyframe in the sliding window.
         /// Updated at keyframe creation (propagated estimate) and after each smoother update (optimised estimate).
-        /// Use these for twist computation in temporal calibration instead of inverting the extrinsic from the LiDAR poses.
+        /// Use these for twist computation in temporal calibration instead of inverting the extrinsic from the LiDAR
+        /// poses.
         std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> &getKeyframeImuPoses() const { return keyframeImuPoses_; };
 
         const gtsam::Values &getSmootherEstimate() const { return smootherEstimate_; };
         void setSmootherEstimate(const gtsam::Values &newEstimate) { smootherEstimate_ = newEstimate; };
 
-        /// @brief Get the Markov blanket (MB) of a keyframe, i.e. all variables that are directly connected to it via a factor.
-        /// WARNING: this is NOT exact because at the time of marginalization, we don't know if a new constraint will be added,
-        /// but it will be very noisy anyway so it should be reasonably safe to ignore it.
+        /// @brief Get the Markov blanket (MB) of a keyframe, i.e. all variables that are directly connected to it via a
+        /// factor. WARNING: this is NOT exact because at the time of marginalization, we don't know if a new constraint
+        /// will be added, but it will be very noisy anyway so it should be reasonably safe to ignore it.
         /// @param idxMarginalize Index of the keyframe to be marginalized, lower bound for MB.
         /// @param idxKeyframe Index of the current keyframe, upper bound for MB.
         gtsam::Values getMarkovBlanketForKeyframe(const uint32_t idxMarginalize, const uint32_t &idxKeyframe) const;
@@ -109,14 +111,12 @@ namespace mapping
 
         /// @brief Enable or disable collection of marginalized submaps.
         /// Disabled by default to avoid unbounded memory growth in headless mode.
-        void setCollectMarginalizedSubmaps(bool enable)
-        {
-            collectMarginalizedSubmaps_ = enable;
-        };
+        void setCollectMarginalizedSubmaps(bool enable) { collectMarginalizedSubmaps_ = enable; };
 
-        /// @brief Return submaps that were marginalized since the last call and clear the buffer internally.
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> getMarginalizedSubmaps();
-
+        /// @brief Drain and return submaps that were marginalized since the last call.
+        /// Maps keyframe index to {world_T_lidar pose, pointcloud}.
+        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
+        getMarginalizedSubmaps();
 
     private:
         /// @brief SYsetm lifecycle state
@@ -130,14 +130,15 @@ namespace mapping
         mutable std::map<uint32_t, double> keyframeTimestamps_;
         /// @brief whether to keep marginalized submap PCDs for visualization interfaces.
         bool collectMarginalizedSubmaps_ = false;
-        /// @brief marginalized submap PCDs, cleared on each call to getMarginalizedSubmaps()
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> marginalizedSubmaps_;
+        /// @brief marginalized submap data, keyed by keyframe index, cleared on each call to getMarginalizedSubmaps()
+        std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> marginalizedSubmapClouds_;
+        std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> marginalizedSubmapPoses_;
         // estimator lifecycle values
         mutable gtsam::NavState w_X_curr_, w_X_preint_;
         gtsam::imuBias::ConstantBias currBias_;
-        mutable gtsam::Pose3 imu_T_lidar_;   // imu-lidar extrinsic calibration.
-        mutable gtsam::Pose3 imu_T_camera_;  // imu-camera extrinsic calibration.
-        double temporalOffset_{0.0};      // temporal offset [s]
+        mutable gtsam::Pose3 imu_T_lidar_;  // imu-lidar extrinsic calibration.
+        mutable gtsam::Pose3 imu_T_camera_; // imu-camera extrinsic calibration.
+        double temporalOffset_{0.0};        // temporal offset [s]
         /// @brief Latest estimate of the smoother after updates are completed.
         gtsam::Values smootherEstimate_;
     };

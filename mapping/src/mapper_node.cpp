@@ -48,17 +48,14 @@ mapping::MappingConfig loadConfig(const std::string &config_path)
     std::cout << "Loading config from: " << config_path << std::endl;
     mapping::MappingConfig config = config::fromYamlFile<mapping::MappingConfig>(config_path);
     config::checkValid(config);
-    std::cout << "Loaded config:\n"
-              << config::toString(config) << std::endl;
+    std::cout << "Loaded config:\n" << config::toString(config) << std::endl;
     return config;
 }
 
 class MapperNode : public rclcpp::Node
 {
 public:
-    explicit MapperNode()
-        : Node("mapper_node"),
-          slam_()
+    explicit MapperNode() : Node("mapper_node"), slam_()
     {
 
         RCLCPP_INFO(this->get_logger(), "MapperNode has been initialized.");
@@ -73,8 +70,7 @@ public:
         scalingImu_ = this->get_parameter("scaling_imu").as_double();
         const std::string topicLidar = this->get_parameter("topic_lidar").as_string();
         const bool lidarMsgPc2 = this->get_parameter("lidar_msg_pc2").as_bool();
-        RCLCPP_INFO(this->get_logger(), "Using mapper config file: %s",
-                    configPath.c_str());
+        RCLCPP_INFO(this->get_logger(), "Using mapper config file: %s", configPath.c_str());
         RCLCPP_INFO(this->get_logger(), "IMU topic: %s (scale %.4f)", topicImu.c_str(), scalingImu_);
         RCLCPP_INFO(this->get_logger(), "LiDAR topic: %s (%s)", topicLidar.c_str(),
                     lidarMsgPc2 ? "sensor_msgs/PointCloud2" : "livox_ros_driver2/CustomMsg");
@@ -88,10 +84,9 @@ public:
         callbackGroupLidar_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
         callbackGroupCamera_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
-        rclcpp::SubscriptionOptions
-            imuSubOpt = rclcpp::SubscriptionOptions(),
-            lidarSubOpt = rclcpp::SubscriptionOptions(),
-            cameraSubOpt = rclcpp::SubscriptionOptions();
+        rclcpp::SubscriptionOptions imuSubOpt = rclcpp::SubscriptionOptions(),
+                                    lidarSubOpt = rclcpp::SubscriptionOptions(),
+                                    cameraSubOpt = rclcpp::SubscriptionOptions();
         imuSubOpt.callback_group = callbackGroupImu_;
         lidarSubOpt.callback_group = callbackGroupLidar_;
         cameraSubOpt.callback_group = callbackGroupCamera_;
@@ -116,17 +111,12 @@ public:
             // 2 seconds assuming 20 FPS
             "/camera/image_raw", 40, std::bind(&MapperNode::cameraCallback, this, std::placeholders::_1), cameraSubOpt);
         // --- publishers ----
-        pubSlidingWindowPath_ = this->create_publisher<nav_msgs::msg::Path>(
-            "mapping/window", 10);
-        pubHistoricalPosesPath_ = this->create_publisher<nav_msgs::msg::Path>(
-            "mapping/trajectory", 10);
-        pubKeyframeSubmap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-            "mapping/keyframe_submap", 10);
-        pubGlobalMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-            "mapping/map", 10);
+        pubSlidingWindowPath_ = this->create_publisher<nav_msgs::msg::Path>("mapping/window", 10);
+        pubHistoricalPosesPath_ = this->create_publisher<nav_msgs::msg::Path>("mapping/trajectory", 10);
+        pubKeyframeSubmap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("mapping/keyframe_submap", 10);
+        pubGlobalMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("mapping/map", 10);
         globalMap_ = std::make_shared<open3d::geometry::PointCloud>();
-        pubClusters_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-            "mapping/clusters", 10);
+        pubClusters_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("mapping/clusters", 10);
 
         tfBroadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
@@ -143,15 +133,11 @@ private:
 
         // Build imu data container from msg
         auto imu_data = std::make_shared<mapping::ImuData>();
-        imu_data->acceleration = Eigen::Vector3d(
-                                     msg->linear_acceleration.x,
-                                     msg->linear_acceleration.y,
-                                     msg->linear_acceleration.z) *
-                                 scalingImu_;
-        imu_data->angular_velocity = Eigen::Vector3d(
-            msg->angular_velocity.x,
-            msg->angular_velocity.y,
-            msg->angular_velocity.z);
+        imu_data->acceleration =
+            Eigen::Vector3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z) *
+            scalingImu_;
+        imu_data->angular_velocity =
+            Eigen::Vector3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
         slam_.feedImu(imu_data, timestamp);
     }
 
@@ -172,10 +158,8 @@ private:
         for (size_t i = 0; i < point_num; ++i)
         {
             const auto &point = msg->points[i];
-            Eigen::Vector3d pt(
-                static_cast<double>(point.x),
-                static_cast<double>(point.y),
-                static_cast<double>(point.z));
+            Eigen::Vector3d pt(static_cast<double>(point.x), static_cast<double>(point.y),
+                               static_cast<double>(point.z));
             lidar_data->points.push_back(pt);
             // Point offset time is given in nanoseconds
             rclcpp::Time point_offset_time(static_cast<uint64_t>(point.offset_time));
@@ -207,10 +191,8 @@ private:
         sensor_msgs::PointCloud2ConstIterator<float> iterZ(*msg, "z");
         for (size_t i = 0; i < point_num; ++i, ++iterX, ++iterY, ++iterZ)
         {
-            lidar_data->points.emplace_back(
-                static_cast<double>(*iterX),
-                static_cast<double>(*iterY),
-                static_cast<double>(*iterZ));
+            lidar_data->points.emplace_back(static_cast<double>(*iterX), static_cast<double>(*iterY),
+                                            static_cast<double>(*iterZ));
         }
 
         slam_.feedLidar(lidar_data, timestamp);
@@ -291,8 +273,8 @@ private:
         auto marginalizedSubmaps = slam_.getMarginalizedSubmaps();
         if (!marginalizedSubmaps.empty())
         {
-            for (const auto &submap : marginalizedSubmaps)
-                *globalMap_ += *submap;
+            for (const auto &[idx, poseAndCloud] : marginalizedSubmaps)
+                *globalMap_ += *poseAndCloud.second;
             globalMap_ = globalMap_->VoxelDownSample(0.05);
             sensor_msgs::msg::PointCloud2 globalMapMsg;
             open3d_conversions::open3dToRos(*globalMap_, globalMapMsg, "map");
@@ -390,10 +372,7 @@ private:
     /// @brief asynchronous, mutually exclusive, ROS2 callback-groups for the different sensors
     /// this allows to process high-rate incoming data without halting the system.
     /// @note Some of the data might be discarded due to the async nature of the process!
-    rclcpp::CallbackGroup::SharedPtr
-        callbackGroupImu_,
-        callbackGroupLidar_,
-        callbackGroupCamera_;
+    rclcpp::CallbackGroup::SharedPtr callbackGroupImu_, callbackGroupLidar_, callbackGroupCamera_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subImu_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLidar_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subLidarPc2_;
@@ -460,15 +439,11 @@ void runFromBag(const std::string &bag_path, const mapping::MappingConfig &confi
 
             double timestamp = (rclcpp::Time(msg->header.stamp) - start_time).seconds();
             auto imu_data = std::make_shared<mapping::ImuData>();
-            imu_data->acceleration = Eigen::Vector3d(
-                                         msg->linear_acceleration.x,
-                                         msg->linear_acceleration.y,
-                                         msg->linear_acceleration.z) *
-                                     livox_imu_scale;
-            imu_data->angular_velocity = Eigen::Vector3d(
-                msg->angular_velocity.x,
-                msg->angular_velocity.y,
-                msg->angular_velocity.z);
+            imu_data->acceleration =
+                Eigen::Vector3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z) *
+                livox_imu_scale;
+            imu_data->angular_velocity =
+                Eigen::Vector3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
 
             slam.feedImu(imu_data, timestamp);
         }
@@ -494,10 +469,8 @@ void runFromBag(const std::string &bag_path, const mapping::MappingConfig &confi
             for (size_t i = 0; i < point_num; ++i)
             {
                 const auto &point = msg->points[i];
-                Eigen::Vector3d pt(
-                    static_cast<double>(point.x),
-                    static_cast<double>(point.y),
-                    static_cast<double>(point.z));
+                Eigen::Vector3d pt(static_cast<double>(point.x), static_cast<double>(point.y),
+                                   static_cast<double>(point.z));
                 lidar_data->points.push_back(pt);
                 rclcpp::Time point_offset_time(static_cast<uint64_t>(point.offset_time));
                 lidar_data->offset_times.push_back(point_offset_time.seconds());

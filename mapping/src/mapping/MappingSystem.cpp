@@ -408,12 +408,13 @@ namespace mapping
 
     uint32_t MappingSystem::getKeyframeCount() const { return states_.getKeyframeCount(); }
 
-    std::vector<std::shared_ptr<open3d::geometry::PointCloud>> MappingSystem::getMarginalizedSubmaps()
+    std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
+    MappingSystem::getMarginalizedSubmaps()
     {
         auto submaps = states_.getMarginalizedSubmaps();
         if (config_.camera_frontend.colorize_scans)
-            for (auto &pcd : submaps)
-                removeUncoloredPoints(pcd);
+            for (auto &[idx, poseAndCloud] : submaps)
+                removeUncoloredPoints(poseAndCloud.second);
         return submaps;
     }
 

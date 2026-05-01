@@ -70,7 +70,9 @@ namespace mapping
         uint32_t getKeyframeCount() const;
 
         /// @brief Drain and return submaps that were marginalized since the last call.
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> getMarginalizedSubmaps();
+        /// Maps keyframe index to {world_T_lidar pose, pointcloud}.
+        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
+        getMarginalizedSubmaps();
 
         /// @brief Enable or disable collection of marginalized submaps.
         /// Disabled by default to avoid unbounded memory growth in headless mode.
@@ -111,16 +113,15 @@ namespace mapping
         /// NOTE: in the case of system recovery, it still makes sense to use the last available bias estimate,
         /// while the pose and velocity will be recovered by the `RelocalizationFrontend`.
         ///
-        /// USAGE: Use the returned `gtsam::NonlinearFactorGraph priors` with `smoother_.setPriors(idxKeyframe, priors, xPrior, bPrior);`.
+        /// USAGE: Use the returned `gtsam::NonlinearFactorGraph priors` with `smoother_.setPriors(idxKeyframe, priors,
+        /// xPrior, bPrior);`.
         /// @param idxKeyframe Index of the initialization keyframe.
         /// @param xPrior Initial navigation state prior, obtained from static initialization or recovery.
         /// @param bPrior Initial bias estimate, obtained from initialization or,
         /// in case cf recovery, from the last available estimate.
         /// @return Factor graph that fixes the state prior.
-        gtsam::NonlinearFactorGraph constructSystemPriors(
-            const uint32_t &idxKeyframe,
-            const gtsam::NavState &xPrior,
-            const gtsam::imuBias::ConstantBias &bPrior) const;
+        gtsam::NonlinearFactorGraph constructSystemPriors(const uint32_t &idxKeyframe, const gtsam::NavState &xPrior,
+                                                          const gtsam::imuBias::ConstantBias &bPrior) const;
 
         // subsystem instances
         Buffers buffers_;
