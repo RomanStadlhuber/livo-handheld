@@ -212,8 +212,7 @@ namespace mapping
         {
             // eigen quaternion uses (w, x, y, z) constructor order
             Eigen::Quaterniond quat(rotation(3), rotation(0), rotation(1), rotation(2));
-            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()),
-                                gtsam::Point3(translation));
+            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()), gtsam::Point3(translation));
         }
     };
 
@@ -245,8 +244,7 @@ namespace mapping
         gtsam::Pose3 toPose3() const
         {
             Eigen::Quaterniond quat(rotation(3), rotation(0), rotation(1), rotation(2));
-            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()),
-                                gtsam::Point3(translation));
+            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()), gtsam::Point3(translation));
         }
     };
 
@@ -333,6 +331,29 @@ namespace mapping
         field(config.camera, "camera");
     }
 
+    /// @brief Global map optimization parameters for segment accumulation and refinement
+    struct GlobalMapOptimizationConfig
+    {
+        double segment_length = 10.0;                 // [m], distance threshold for sealing segments
+        double icp_max_correspondence_distance = 0.5; // [m], for pairwise ICP alignment
+        int icp_iterations = 50;                      // max iterations for ICP convergence
+        double refinement_voxel_size = 0.2;           // [m], voxel size for segment cloud merging
+    };
+
+    inline void declare_config(GlobalMapOptimizationConfig &config)
+    {
+        using namespace config;
+        name("GlobalMapOptimizationConfig");
+        field(config.segment_length, "segment_length", "m");
+        field(config.icp_max_correspondence_distance, "icp_max_correspondence_distance", "m");
+        field(config.icp_iterations, "icp_iterations");
+        field(config.refinement_voxel_size, "refinement_voxel_size", "m");
+        check(config.segment_length, GT, 0.0, "segment_length");
+        check(config.icp_max_correspondence_distance, GT, 0.0, "icp_max_correspondence_distance");
+        check(config.icp_iterations, GT, 0, "icp_iterations");
+        check(config.refinement_voxel_size, GT, 0.0, "refinement_voxel_size");
+    }
+
     /// @brief Main mapping system configuration
     struct MappingConfig
     {
@@ -343,6 +364,7 @@ namespace mapping
         ExtrinsicsConfig extrinsics;
         RecoveryConfig recovery;
         IntrinsicsConfig intrinsics;
+        GlobalMapOptimizationConfig global_map_optimization;
     };
 
     inline void declare_config(MappingConfig &config)
@@ -356,6 +378,7 @@ namespace mapping
         field(config.extrinsics, "extrinsics");
         field(config.recovery, "recovery");
         field(config.intrinsics, "intrinsics");
+        field(config.global_map_optimization, "global_map_optimization");
     }
 
 } // namespace mapping
