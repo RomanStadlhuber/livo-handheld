@@ -10,6 +10,9 @@
 #include <tuple>
 #include <memory>
 #include <utility>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/NavState.h>
@@ -63,8 +66,7 @@ namespace mapping
         std::shared_ptr<CameraData> syncedCameraData;
     };
 
-    template <typename T>
-    using InputBuffer = std::map<double, std::shared_ptr<T>>;
+    template <typename T> using InputBuffer = std::map<double, std::shared_ptr<T>>;
 
     /// @ingroup types
     /// @brief Buffered scan data for keyframe creation
@@ -151,5 +153,104 @@ namespace mapping
 
     /// @brief The "default color", inidcating that a point was not colorized from the camera image.
     const Eigen::Vector3d NO_COLOR{Eigen::Vector3d::Zero()};
+
+    /// @ingroup types
+    /// @brief Thread-safe blocking queue for inter-thread communication
+    template <typename T> class BlockingQueue
+    {
+    public:
+        /// @brief Non-blocking push to the queue with notification
+        void push_back(T item)
+        {
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                queue_.push_back(item);
+            }
+            cond_var_.notify_one();
+        }
+
+        /// @brief Non-blocking pop attempt
+        /// @return false if queue is empty, true and populates item if successful
+        bool try_pop(T &item)
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (queue_.empty())
+            {
+                return false;
+            }
+            item = queue_.front();
+            queue_.pop_front();
+            return true;
+        }
+
+        /// @brief Blocking pop that waits for an item to be available
+        /// @return The next item in the queue (blocks until available or shutdown)
+        T wait_and_pop()
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            cond_var_.wait(lock, [this] { return !queue_.empty() || shutdown_; });
+            if (queue_.empty())
+            {
+                return T();
+            }
+            T item = queue_.front();
+            queue_.pop_front();
+            return item;
+        }
+
+        /// @brief Signal queue shutdown
+        void shutdown()
+        {
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                shutdown_ = true;
+            }
+            cond_var_.notify_all();
+        }
+
+        /// @brief Get the current size of the queue
+        std::size_t size() const
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return queue_.size();
+        }
+
+    private:
+        std::deque<T> queue_;
+        mutable std::mutex mutex_;
+        std::condition_variable cond_var_;
+        bool shutdown_{false};
+    };
+
+    /// @ingroup types
+    /// @brief State of a global map segment
+    enum class SegmentState
+    {
+        /// @brief Segment is accumulating submaps
+        Accumulating,
+        /// @brief Segment is waiting for refinement
+        WaitingForRefinement,
+        /// @brief Segment is waiting for alignment
+        WaitingForAlignment,
+        /// @brief Segment has been aligned
+        Aligned,
+    };
+
+    /// @ingroup types
+    /// @brief A segment of the global map containing multiple submaps
+    struct GlobalMapSegment
+    {
+        /// @brief Unique identifier for this segment
+        uint32_t id;
+        /// @brief Keyframe index of the first submap in this segment
+        uint32_t startIdx;
+        /// @brief Map of submaps: keyframe index -> (Pose3, PointCloud)
+        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
+            submaps;
+        /// @brief Current state of this segment
+        SegmentState state;
+        /// @brief Merged point cloud of all submaps in this segment (nullptr until merged)
+        std::shared_ptr<open3d::geometry::PointCloud> pcdMerged{nullptr};
+    };
 } // namespace mapping
 #endif // MAPPING_TYPES_HPP_
