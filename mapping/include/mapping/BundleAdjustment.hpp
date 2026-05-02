@@ -18,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <semaphore.h>
 
 namespace mapping
 {
@@ -112,9 +113,11 @@ namespace mapping
 
         // Work queues
         /// @brief Queue of segments waiting for intra-segment refinement
-        BlockingQueue<GlobalMapSegment> refinementQueue_;
+        SafeQueue<GlobalMapSegment> refinementQueue_;
         /// @brief Queue of segments waiting for inter-segment alignment
-        BlockingQueue<GlobalMapSegment> alignmentQueue_;
+        SafeQueue<GlobalMapSegment> alignmentQueue_;
+        /// @brief Semaphore signaled when work is pushed to refinementQueue_
+        sem_t workSemaphore_;
 
         // Map state
         /// @brief All optimized segments from history

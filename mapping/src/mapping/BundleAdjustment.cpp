@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 #include <pthread.h>
-#include <chrono>
+#include <semaphore.h>
 
 SETUP_LOGS(DEBUG, "BundleAdjustment");
 
@@ -17,11 +17,12 @@ namespace mapping
 
     BundleAdjustment::BundleAdjustment(const MappingConfig &config) : config_(config), nextSegmentId_{1}
     {
-        // Initialize active segment with id=0, startIdx=0, state=Accumulating
         activeSegment_.id = 0;
         activeSegment_.startIdx = 0;
         activeSegment_.state = SegmentState::Accumulating;
         activeSegment_.pcdMerged = nullptr;
+
+        sem_init(&workSemaphore_, 0, 0);
 
         LOG(INFO, "BundleAdjustment initialized with config");
     }
@@ -32,6 +33,7 @@ namespace mapping
         {
             stopOptimizationWorker();
         }
+        sem_destroy(&workSemaphore_);
     }
 
     void BundleAdjustment::startOptimizationWorker()
@@ -57,12 +59,8 @@ namespace mapping
     {
         LOG(INFO, "Stopping optimization worker thread");
 
-        // Set shutdown flag
         shutdown_ = true;
-
-        // Shutdown queues to unblock wait operations
-        refinementQueue_.shutdown();
-        alignmentQueue_.shutdown();
+        sem_post(&workSemaphore_);
 
         // Wait for worker thread to finish
         if (optimizationThread_.joinable())
@@ -101,8 +99,8 @@ namespace mapping
                 // Set state to WaitingForRefinement
                 activeSegment_.state = SegmentState::WaitingForRefinement;
 
-                // Push to refinement queue
-                refinementQueue_.push_back(activeSegment_);
+                refinementQueue_.push(activeSegment_);
+                sem_post(&workSemaphore_);
 
                 // Create new active segment
                 GlobalMapSegment newSegment;
@@ -144,7 +142,7 @@ namespace mapping
                 self->refineSegment(segment);
 
                 segment.state = SegmentState::WaitingForAlignment;
-                self->alignmentQueue_.push_back(std::move(segment));
+                self->alignmentQueue_.push(std::move(segment));
 
                 LOG(DEBUG, "Segment " << segment.id << " moved to alignment queue");
             }
@@ -175,9 +173,8 @@ namespace mapping
                 self->buildFrozenSnapshot();
             }
 
-            // 4. Wait for work or check shutdown
-            // Sleep 100ms to avoid busy-waiting
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // 4. Wait for new work
+            sem_wait(&self->workSemaphore_);
         }
 
         LOG(INFO, "Optimization worker thread shutting down");

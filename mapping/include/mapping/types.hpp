@@ -10,9 +10,8 @@
 #include <tuple>
 #include <memory>
 #include <utility>
-#include <deque>
+#include <queue>
 #include <mutex>
-#include <condition_variable>
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/NavState.h>
@@ -155,18 +154,14 @@ namespace mapping
     const Eigen::Vector3d NO_COLOR{Eigen::Vector3d::Zero()};
 
     /// @ingroup types
-    /// @brief Thread-safe blocking queue for inter-thread communication
-    template <typename T> class BlockingQueue
+    /// @brief Thread-safe queue for inter-thread communication
+    template <typename T> class SafeQueue
     {
     public:
-        /// @brief Non-blocking push to the queue with notification
-        void push_back(T item)
+        void push(T item)
         {
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                queue_.push_back(item);
-            }
-            cond_var_.notify_one();
+            std::lock_guard<std::mutex> lock(mutex_);
+            queue_.push(std::move(item));
         }
 
         /// @brief Non-blocking pop attempt
@@ -175,51 +170,15 @@ namespace mapping
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (queue_.empty())
-            {
                 return false;
-            }
-            item = queue_.front();
-            queue_.pop_front();
+            item = std::move(queue_.front());
+            queue_.pop();
             return true;
         }
 
-        /// @brief Blocking pop that waits for an item to be available
-        /// @return The next item in the queue (blocks until available or shutdown)
-        T wait_and_pop()
-        {
-            std::unique_lock<std::mutex> lock(mutex_);
-            cond_var_.wait(lock, [this] { return !queue_.empty() || shutdown_; });
-            if (queue_.empty())
-            {
-                return T();
-            }
-            T item = queue_.front();
-            queue_.pop_front();
-            return item;
-        }
-
-        /// @brief Signal queue shutdown
-        void shutdown()
-        {
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                shutdown_ = true;
-            }
-            cond_var_.notify_all();
-        }
-
-        /// @brief Get the current size of the queue
-        std::size_t size() const
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            return queue_.size();
-        }
-
     private:
-        std::deque<T> queue_;
+        std::queue<T> queue_;
         mutable std::mutex mutex_;
-        std::condition_variable cond_var_;
-        bool shutdown_{false};
     };
 
     /// @ingroup types
