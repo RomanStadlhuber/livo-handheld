@@ -69,6 +69,7 @@ add_library(mapping
   # backend
   src/mapping/backend/FeatureManager.cpp
   src/mapping/backend/Smoother.cpp
+  src/mapping/BundleAdjustment.cpp
 )
 
 target_include_directories(mapping PUBLIC include)
