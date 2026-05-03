@@ -90,8 +90,8 @@ namespace mapping
 
             LOG(DEBUG, "Segment " << activeSegment_.id << " accumulated distance: " << distance << "m");
 
-            // Check if segment has reached threshold (hardcoded 10.0 for now)
-            if (distance >= 10.0)
+            // Check if segment has reached threshold
+            if (distance >= config_.global_map_optimization.segment_length)
             {
                 LOG(INFO,
                     "Segment " << activeSegment_.id << " reached distance threshold. Moving to refinement queue.");
@@ -182,33 +182,146 @@ namespace mapping
 
     void BundleAdjustment::refineSegment(GlobalMapSegment &segment)
     {
-        LOG(INFO, "Refining segment " << segment.id << " with " << segment.submaps.size() << " submaps");
+        const std::size_t N = segment.submaps.size();
+        LOG(INFO, "Refining segment " << segment.id << " with " << N << " submaps");
 
-        // For now: stub implementation that logs and merges point clouds
-        // Actual ICP/pose graph optimization will be added in subsequent phases
+        segment.pcdMerged = std::make_shared<open3d::geometry::PointCloud>();
 
-        // Create merged point cloud by concatenating all submaps
-        if (!segment.submaps.empty())
+        if (N < 2)
         {
-            segment.pcdMerged = std::make_shared<open3d::geometry::PointCloud>();
+            for (auto &[kfIdx, poseAndCloud] : segment.submaps)
+                *segment.pcdMerged += *poseAndCloud.second;
+            return;
+        }
 
-            for (const auto &kv : segment.submaps)
+        // ordered submap entries for random access in the loop closure pass
+        struct SubmapEntry
+        {
+            open3d::geometry::PointCloud *cloud;
+            gtsam::Pose3 odomPose;
+        };
+        std::vector<SubmapEntry> ordered;
+        ordered.reserve(N);
+
+        // transform all submaps to their local LiDAR frame and estimate normals for point-to-plane ICP
+        for (auto &[kfIdx, poseAndCloud] : segment.submaps)
+        {
+            auto &[pose, cloud] = poseAndCloud;
+            cloud->Transform(pose->inverse().matrix());
+            cloud->EstimateNormals();
+            ordered.push_back({cloud.get(), *pose});
+        }
+
+        open3d::pipelines::registration::PoseGraph poseGraph;
+        poseGraph.nodes_.reserve(N);
+        poseGraph.edges_.reserve(N - 1);
+
+        // updated world poses chained from ICP results, used to init loop closure ICP
+        std::vector<gtsam::Pose3> updatedPoses;
+        updatedPoses.reserve(N);
+
+        // first node is the anchor — fixed at its odometry pose
+        poseGraph.nodes_.emplace_back(ordered[0].odomPose.matrix());
+        updatedPoses.push_back(ordered[0].odomPose);
+
+        // --- pass 1: sequential odometry edges ---
+        for (std::size_t i = 0; i < N - 1; ++i)
+        {
+            const std::size_t j = i + 1;
+            const gtsam::Pose3 odomDelta = ordered[i].odomPose.between(ordered[j].odomPose);
+
+            /* NOTE: skip ICP for odometry edges: drift over short segment lengths will be negligible
+             * given well-initialized LiDAR-inertial odometry, so the odometry delta is used directly.
+             * The information matrix is still estimated from the geometry at the odometry alignment.
+            const auto icpResult = open3d::pipelines::registration::RegistrationICP(
+                *ordered[j].cloud, *ordered[i].cloud,
+                config_.global_map_optimization.icp_max_correspondence_distance, odomDelta.matrix(),
+                open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
+            */
+
+            const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
+                *ordered[j].cloud, *ordered[i].cloud, config_.global_map_optimization.icp_max_correspondence_distance,
+                odomDelta.matrix());
+
+            // chain updated world pose: world_T_j = world_T_i * i_T_j_odom
+            updatedPoses.push_back(updatedPoses[i].compose(odomDelta));
+            poseGraph.nodes_.emplace_back(updatedPoses[j].matrix());
+
+            // edge: source=j, target=i, transformation=i_T_j (target_T_source convention)
+            poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), odomDelta.matrix(), infoMatrix,
+                                          /*uncertain=*/false);
+
+            LOG(DEBUG, "odometry edge " << i << "->" << j);
+        }
+
+        // --- pass 2: loop closure edges between nearby non-consecutive nodes ---
+        const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
+            1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
+        const double loopClosureMaxDist = config_.global_map_optimization.loop_closure_max_distance,
+                     loopClosureMaxAngle = config_.global_map_optimization.loop_closure_max_angle,
+                     loopClosureMinFitness = config_.global_map_optimization.loop_closure_min_fitness;
+
+        // build the full pose graph with "loop closure" criteria between non-adjacent edges
+        for (std::size_t i = 0; i < N; ++i)
+        {
+            for (std::size_t j = i + 2; j < N; ++j)
             {
-                const auto &submap = kv.second.second;
-                if (submap && submap->HasPoints())
-                {
-                    *segment.pcdMerged += *submap;
-                }
-            }
+                const double dist = (updatedPoses[i].translation() - updatedPoses[j].translation()).norm();
+                if (dist > loopClosureMaxDist)
+                    continue;
 
-            // Voxel downsample the merged cloud
-            if (segment.pcdMerged->HasPoints())
-            {
-                segment.pcdMerged = segment.pcdMerged->VoxelDownSample(config_.lidar_frontend.voxel_size);
+                const double angle = updatedPoses[i].rotation().between(updatedPoses[j].rotation()).axisAngle().second;
+                if (angle > loopClosureMaxAngle)
+                    continue;
 
-                LOG(DEBUG, "Segment " << segment.id << " merged: " << segment.pcdMerged->points_.size() << " points");
+                const gtsam::Pose3 i_T_j_init = updatedPoses[i].between(updatedPoses[j]);
+
+                const auto icpResult = open3d::pipelines::registration::RegistrationICP(
+                    *ordered[j].cloud, *ordered[i].cloud,
+                    config_.global_map_optimization.icp_max_correspondence_distance, i_T_j_init.matrix(),
+                    open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
+
+                if (icpResult.fitness_ < loopClosureMinFitness)
+                    continue;
+
+                const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
+                    *ordered[j].cloud, *ordered[i].cloud,
+                    config_.global_map_optimization.icp_max_correspondence_distance, icpResult.transformation_);
+
+                poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), icpResult.transformation_,
+                                              infoMatrix, /*uncertain=*/true);
+
+                LOG(DEBUG,
+                    "loop closure edge " << i << "<->" << j << " dist=" << dist << " fitness=" << icpResult.fitness_);
             }
         }
+
+        LOG(INFO, "Segment " << segment.id << " pose graph: " << poseGraph.nodes_.size() << " nodes, "
+                             << poseGraph.edges_.size() << " edges");
+
+        // --- pass 3: global pose graph optimization ---
+        open3d::pipelines::registration::GlobalOptimization(
+            poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
+            open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(),
+            open3d::pipelines::registration::GlobalOptimizationOption(
+                config_.global_map_optimization.icp_max_correspondence_distance,
+                // TODO: do these need to be configurable?
+                /*edge_prune_threshold=*/0.25,
+                /*preference_loop_closure=*/1.0,
+                /*reference_node=*/0));
+
+        // --- pass 4: apply optimized poses and merge into pcdMerged ---
+        // submaps are still in their local LiDAR frames (transformed in the prep loop above)
+        // transform each to world frame using the optimized node pose and accumulate
+        for (std::size_t k = 0; k < N; ++k)
+        {
+            ordered[k].cloud->Transform(poseGraph.nodes_[k].pose_);
+            *segment.pcdMerged += *ordered[k].cloud;
+        }
+
+        // TODO: improve PCD quality with outlier removal?
+        segment.pcdMerged = segment.pcdMerged->VoxelDownSample(config_.global_map_optimization.refinement_voxel_size);
+        LOG(INFO, "Segment " << segment.id << " refined: " << segment.pcdMerged->points_.size() << " points");
     }
 
     void BundleAdjustment::alignAllSegments(const std::vector<GlobalMapSegment> &segments)

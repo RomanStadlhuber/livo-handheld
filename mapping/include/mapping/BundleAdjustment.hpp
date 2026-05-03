@@ -11,6 +11,8 @@
 
 #include <gtsam/geometry/Pose3.h>
 #include <open3d/geometry/PointCloud.h>
+#include <open3d/pipelines/registration/Registration.h>
+#include <open3d/pipelines/registration/GlobalOptimization.h>
 #include <open3d/t/geometry/PointCloud.h>
 
 #include <thread>
