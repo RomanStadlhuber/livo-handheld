@@ -68,7 +68,11 @@ intrinsics:
 
 global_map_optimization:
   segment_length: 10.0          # [m]
-  icp_max_correspondence_distance: 0.5  # [m]
+  # IMPORTANT: should be larger than frontend voxel size!!
+  icp_max_correspondence_distance: 1.5  # [m]
   icp_iterations: 50
   refinement_voxel_size: 0.2    # [m]
+  loop_closure_max_distance: 3.0   # [m]
+  loop_closure_max_angle: 1.047    # [rad] ~60 deg
+  loop_closure_min_fitness: 0.3
 
