@@ -341,6 +341,8 @@ namespace mapping
         double loop_closure_max_distance = 3.0;       // [m], max translation between nodes for loop closure attempt
         double loop_closure_max_angle = 1.047;        // [rad], max rotation between nodes (~60 deg)
         double loop_closure_min_fitness = 0.3;        // min ICP inlier ratio to accept a loop closure edge
+        double segment_loop_closure_max_distance =
+            15.0; // [m], max centroid distance between non-consecutive segments for loop closure
     };
 
     inline void declare_config(GlobalMapOptimizationConfig &config)
@@ -354,6 +356,7 @@ namespace mapping
         field(config.loop_closure_max_distance, "loop_closure_max_distance", "m");
         field(config.loop_closure_max_angle, "loop_closure_max_angle", "rad");
         field(config.loop_closure_min_fitness, "loop_closure_min_fitness");
+        field(config.segment_loop_closure_max_distance, "segment_loop_closure_max_distance", "m");
         check(config.segment_length, GT, 0.0, "segment_length");
         check(config.icp_max_correspondence_distance, GT, 0.0, "icp_max_correspondence_distance");
         check(config.icp_iterations, GT, 0, "icp_iterations");
@@ -361,6 +364,7 @@ namespace mapping
         check(config.loop_closure_max_distance, GT, 0.0, "loop_closure_max_distance");
         check(config.loop_closure_max_angle, GT, 0.0, "loop_closure_max_angle");
         check(config.loop_closure_min_fitness, GT, 0.0, "loop_closure_min_fitness");
+        check(config.segment_loop_closure_max_distance, GT, 0.0, "segment_loop_closure_max_distance");
     }
 
     /// @brief Main mapping system configuration
