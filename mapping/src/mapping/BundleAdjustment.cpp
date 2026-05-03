@@ -324,13 +324,118 @@ namespace mapping
         LOG(INFO, "Segment " << segment.id << " refined: " << segment.pcdMerged->points_.size() << " points");
     }
 
-    void BundleAdjustment::alignAllSegments(const std::vector<GlobalMapSegment> &segments)
+    void BundleAdjustment::alignAllSegments(std::vector<GlobalMapSegment> &segments)
     {
-        LOG(INFO, "Aligning " << segments.size() << " segments");
+        const std::size_t M = segments.size();
+        LOG(INFO, "Aligning " << M << " new segments against " << allSegments_.size() << " existing segments");
 
-        // For now: stub implementation that logs alignment
-        // Actual global pose graph optimization will be added in subsequent phases
-        // Currently, no pose updates are performed; segment poses remain unchanged
+        // pcdMerged of each segment carries world-frame normals inherited from refineSegment,
+        // so no EstimateNormals() calls are needed in either sub-pass below
+
+        // --- sub-pass 1: anchor each new segment to the existing global map ---
+        // skipped on the first batch when allSegments_ is still empty
+        if (!allSegments_.empty())
+        {
+            open3d::geometry::PointCloud globalMap;
+            for (const auto &seg : allSegments_)
+            {
+                if (seg.pcdMerged && seg.pcdMerged->HasPoints())
+                    globalMap += *seg.pcdMerged;
+            }
+
+            const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
+                1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
+
+            for (auto &seg : segments)
+            {
+                // both clouds are already in world frame, so init = Identity
+                const auto icpResult = open3d::pipelines::registration::RegistrationICP(
+                    *seg.pcdMerged, globalMap, config_.global_map_optimization.icp_max_correspondence_distance,
+                    Eigen::Matrix4d::Identity(),
+                    open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
+
+                if (icpResult.fitness_ >= config_.global_map_optimization.loop_closure_min_fitness)
+                {
+                    seg.pcdMerged->Transform(icpResult.transformation_);
+                    LOG(DEBUG, "segment " << seg.id << " anchored to global map, fitness=" << icpResult.fitness_);
+                }
+                else
+                {
+                    LOG(WARN, "segment " << seg.id << " failed global map registration (fitness=" << icpResult.fitness_
+                                         << "), keeping odometry pose");
+                }
+            }
+        }
+
+        if (M < 2)
+            return;
+
+        // --- sub-pass 2: inter-new-segment PGO ---
+        // compute centroids for proximity checks — clouds are in world frame
+        std::vector<Eigen::Vector3d> centroids;
+        centroids.reserve(M);
+        for (const auto &seg : segments)
+            centroids.push_back(seg.pcdMerged->GetCenter());
+
+        open3d::pipelines::registration::PoseGraph poseGraph;
+        poseGraph.nodes_.reserve(M);
+        poseGraph.edges_.reserve(M - 1);
+
+        // node poses are Identity: clouds are in world frame, PGO finds small corrections
+        for (std::size_t k = 0; k < M; ++k)
+            poseGraph.nodes_.emplace_back(Eigen::Matrix4d::Identity());
+
+        const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
+            1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
+        // a larger correspondence distance than submap-level ICP
+        const double segIcpMaxDist = config_.global_map_optimization.refinement_voxel_size * 2.0;
+
+        for (std::size_t i = 0; i < M; ++i)
+        {
+            for (std::size_t j = i + 1; j < M; ++j)
+            {
+                const bool isSequential = (j == i + 1);
+                const double dist = (centroids[i] - centroids[j]).norm();
+
+                // non-consecutive pairs are only attempted within proximity
+                if (!isSequential && dist > config_.global_map_optimization.segment_loop_closure_max_distance)
+                    continue;
+
+                const auto icpResult = open3d::pipelines::registration::RegistrationICP(
+                    *segments[j].pcdMerged, *segments[i].pcdMerged, segIcpMaxDist, Eigen::Matrix4d::Identity(),
+                    open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
+
+                // sequential edges are always added; non-consecutive require fitness gate
+                if (!isSequential && icpResult.fitness_ < config_.global_map_optimization.loop_closure_min_fitness)
+                    continue;
+
+                const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
+                    *segments[j].pcdMerged, *segments[i].pcdMerged, segIcpMaxDist, icpResult.transformation_);
+
+                poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), icpResult.transformation_,
+                                              infoMatrix, /*uncertain=*/!isSequential);
+
+                LOG(DEBUG, (isSequential ? "sequential" : "loop closure")
+                               << " edge " << i << "->" << j << " dist=" << dist << " fitness=" << icpResult.fitness_);
+            }
+        }
+
+        LOG(INFO, "inter-segment pose graph: " << M << " nodes, " << poseGraph.edges_.size() << " edges");
+
+        open3d::pipelines::registration::GlobalOptimization(
+            poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
+            open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(),
+            open3d::pipelines::registration::GlobalOptimizationOption(segIcpMaxDist,
+                                                                      /*edge_prune_threshold=*/0.25,
+                                                                      /*preference_loop_closure=*/1.0,
+                                                                      /*reference_node=*/0));
+
+        // apply pose corrections from PGO to each segment's merged cloud
+        for (std::size_t k = 0; k < M; ++k)
+        {
+            segments[k].pcdMerged->Transform(poseGraph.nodes_[k].pose_);
+            LOG(DEBUG, "segment " << segments[k].id << " pose correction applied");
+        }
     }
 
     void BundleAdjustment::buildFrozenSnapshot()

@@ -89,7 +89,7 @@ namespace mapping
         /// @details Optimizes the relative poses between all segments in the global map
         /// to ensure consistency across segment boundaries.
         /// @param segments All segments to align
-        void alignAllSegments(const std::vector<GlobalMapSegment> &segments);
+        void alignAllSegments(std::vector<GlobalMapSegment> &segments);
 
         /// @brief Build and publish the frozen map snapshot.
         /// @details Merges all aligned segments into a single frozen map snapshot in
