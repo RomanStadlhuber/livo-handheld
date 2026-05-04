@@ -9,12 +9,15 @@
 #include <mapping/Config.hpp>
 #include <mapping/Buffers.hpp>
 #include <mapping/States.hpp>
+#include <mapping/BundleAdjustment.hpp>
 #include <mapping/frontend/ImuFrontend.hpp>
 #include <mapping/frontend/LidarFrontend.hpp>
 #include <mapping/frontend/CameraFrontend.hpp>
 #include <mapping/frontend/RecoveryFrontend.hpp>
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/backend/Smoother.hpp>
+
+#include <memory>
 
 #include <gtsam/geometry/Pose3.h>
 
@@ -78,6 +81,9 @@ namespace mapping
         /// Disabled by default to avoid unbounded memory growth in headless mode.
         void setCollectMarginalizedSubmaps(bool enable);
 
+        /// @brief Return all frozen segments from the global map optimizer.
+        std::vector<std::shared_ptr<const FrozenSegment>> getAllFrozenSegments() const;
+
         /// @brief Get the current (possibly optimized) IMU-to-LiDAR extrinsic calibration.
         gtsam::Pose3 getImuToLidarExtrinsic() const { return states_.getImuToLidarExtrinsic(); }
         /// @brief Get the current (possibly optimized) temporal offset [s].
@@ -131,10 +137,15 @@ namespace mapping
         CameraFrontend cameraFrontend_;
         FeatureManager featureManager_;
         Smoother smoother_;
+        std::unique_ptr<BundleAdjustment> bundleAdjustment_;
 
         // configuration and cached extrinsic
         MappingConfig config_;
         gtsam::Pose3 imu_T_lidar_;
+
+        // marginalized submaps buffered for the viz path; drained by getMarginalizedSubmaps()
+        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
+            pendingVizSubmaps_;
     };
 
 } // namespace mapping

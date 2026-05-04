@@ -19,6 +19,9 @@ namespace mapping
     void MappingSystem::setConfig(const MappingConfig &config)
     {
         config_ = config;
+        bundleAdjustment_ = std::make_unique<BundleAdjustment>(config_);
+        bundleAdjustment_->startOptimizationWorker();
+        states_.setCollectMarginalizedSubmaps(true);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
@@ -231,6 +234,14 @@ namespace mapping
          */
         marginalizeKeyframesOutsideSlidingWindow(idxKeyframe);
 
+        // drain newly marginalized submaps: tee to BA pipeline and buffer for viz
+        auto newlyMarginalized = states_.getMarginalizedSubmaps();
+        for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
+        {
+            bundleAdjustment_->accumulateSubmapToSegment(kfIdx, poseAndCloud.first, poseAndCloud.second);
+            pendingVizSubmaps_[kfIdx] = poseAndCloud;
+        }
+
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
         const bool isTracking =
             lidarFrontend_.trackScanPointsToClusters(idxKeyframe, states_, featureManager_, config_);
@@ -411,11 +422,16 @@ namespace mapping
     std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
     MappingSystem::getMarginalizedSubmaps()
     {
-        auto submaps = states_.getMarginalizedSubmaps();
+        auto submaps = std::exchange(pendingVizSubmaps_, {});
         if (config_.camera_frontend.colorize_scans)
             for (auto &[idx, poseAndCloud] : submaps)
                 removeUncoloredPoints(poseAndCloud.second);
         return submaps;
+    }
+
+    std::vector<std::shared_ptr<const FrozenSegment>> MappingSystem::getAllFrozenSegments() const
+    {
+        return bundleAdjustment_->getAllFrozenSegments();
     }
 
     void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }
