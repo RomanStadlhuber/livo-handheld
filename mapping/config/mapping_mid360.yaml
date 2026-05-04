@@ -74,7 +74,7 @@ global_map_optimization:
   refinement_voxel_size: 0.2    # [m]
   loop_closure_max_distance: 3.0   # [m]
   loop_closure_max_angle: 1.047    # [rad] ~60 deg
-  loop_closure_min_fitness: 0.9
+  loop_closure_min_fitness: 0.6
   segment_loop_closure_max_distance: 15.0  # [m]
   convergence_pose_delta_translation: 0.05 # [m]
   convergence_pose_delta_rotation: 0.01    # [rad]

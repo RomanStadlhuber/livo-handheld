@@ -290,7 +290,7 @@ namespace mapping
 
         open3d::pipelines::registration::PoseGraph poseGraph;
         poseGraph.nodes_.reserve(N);
-        poseGraph.edges_.reserve(N - 1);
+        poseGraph.edges_.reserve(N * N);
 
         std::vector<gtsam::Pose3> updatedPoses;
         updatedPoses.reserve(N);
@@ -440,6 +440,7 @@ namespace mapping
         // (clouds are in world frame, so any optimization correction emerges as the node pose itself)
         open3d::pipelines::registration::PoseGraph poseGraph;
         poseGraph.nodes_.reserve(M + R);
+        poseGraph.edges_.reserve((M + R) * (M + R));
         for (std::size_t i = 0; i < M + R; ++i)
             poseGraph.nodes_.emplace_back(Eigen::Matrix4d::Identity());
 
@@ -491,7 +492,25 @@ namespace mapping
             }
         }
 
-        // free <-> reference edges: ICP between each free segment and its k-nearest frozen refs
+        // free <-> reference edges: ICP between each free segment and its k-nearest frozen refs.
+        // edges are buffered per ref node so we can promote the best-fitness candidate to
+        // uncertain=false. open3d GlobalOptimization requires every node to be reachable through
+        // certain edges; marking all free->ref edges as uncertain leaves each ref node isolated
+        // in the certain-edge subgraph and the optimizer misbehaves. promoting the strongest
+        // free->ref edge per ref node ensures the full graph (free nodes + ref nodes) is one
+        // connected component in the certain-edge subgraph.
+        struct FreeRefCandidate
+        {
+            int freeNode;
+            int refNode;
+            Eigen::Matrix4d transformation;
+            Eigen::Matrix6d infoMatrix;
+            double fitness;
+        };
+        std::vector<std::vector<FreeRefCandidate>> candidatesByRef(R);
+        for (auto &v : candidatesByRef)
+            v.reserve(M);
+
         for (std::size_t n = 0; n < M; ++n)
         {
             for (std::size_t refIdx : perFreeRefs[n])
@@ -502,17 +521,37 @@ namespace mapping
                     open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
 
                 if (icpResult.fitness_ < minFitness)
+                {
+                    LOG(WARN,
+                        "free->ref loop closure failed (fitness " << icpResult.fitness_ << " < " << minFitness << ")");
                     continue;
+                }
 
                 const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
                     *workingSet[n].pcdMerged, *refSeg.legacyCloud, segIcpMaxDist, icpResult.transformation_);
 
                 const std::size_t refNode = frozenIdxToNode[refIdx];
-                poseGraph.edges_.emplace_back(static_cast<int>(n), static_cast<int>(refNode), icpResult.transformation_,
-                                              infoMatrix, /*uncertain=*/true);
+                candidatesByRef[refNode - M].push_back({static_cast<int>(n), static_cast<int>(refNode),
+                                                        icpResult.transformation_, infoMatrix, icpResult.fitness_});
 
                 LOG(DEBUG, "free->ref edge " << n << "->" << refNode << " (frozen id=" << refSeg.id
                                              << ") fitness=" << icpResult.fitness_);
+            }
+        }
+
+        for (std::size_t r = 0; r < R; ++r)
+        {
+            auto &candidates = candidatesByRef[r];
+            if (candidates.empty())
+                continue;
+            const auto bestIt = std::max_element(candidates.begin(), candidates.end(),
+                                                 [](const FreeRefCandidate &a, const FreeRefCandidate &b)
+                                                 { return a.fitness < b.fitness; });
+            for (const auto &c : candidates)
+            {
+                const bool isBest = (&c == &*bestIt);
+                poseGraph.edges_.emplace_back(c.freeNode, c.refNode, c.transformation, c.infoMatrix,
+                                              /*uncertain=*/!isBest);
             }
         }
 
