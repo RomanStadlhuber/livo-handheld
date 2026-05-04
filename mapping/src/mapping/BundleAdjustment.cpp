@@ -205,14 +205,29 @@ namespace mapping
 
         while (!self->shutdown_)
         {
-            // 1. drain refinement queue: each segment is intra-refined and pushed to alignment queue
+            // 1. drain refinement queue: the very first refined segment becomes the frozen anchor
+            //    immediately; all subsequent ones are queued for inter-segment alignment
             GlobalMapSegment segment;
             while (self->refinementQueue_.try_pop(segment))
             {
                 LOG(DEBUG, "Refining segment " << segment.id);
                 self->refineSegment(segment);
-                segment.state = SegmentState::WaitingForAlignment;
-                self->alignmentQueue_.push(std::move(segment));
+
+                bool hasFrozen;
+                {
+                    std::lock_guard<std::mutex> lock(self->mapMutex_);
+                    hasFrozen = !self->frozenSegments_.empty();
+                }
+                if (!hasFrozen)
+                {
+                    LOG(INFO, "Bootstrap: freezing segment " << segment.id << " as global-map anchor");
+                    self->freezeSegment(segment);
+                }
+                else
+                {
+                    segment.state = SegmentState::WaitingForAlignment;
+                    self->alignmentQueue_.push(std::move(segment));
+                }
             }
 
             // 2. drain alignment queue into a fresh batch
@@ -584,20 +599,6 @@ namespace mapping
                                       << ", dR=" << seg.lastDeltaRotation << "), returning to pending pool");
                 nextPending.push_back(std::move(seg));
             }
-        }
-
-        // bootstrap: with no frozen segments yet, every segment is floating. force-freeze the
-        // oldest pending segment at its current pose so future batches have an anchor to align to.
-        bool frozenEmpty;
-        {
-            std::lock_guard<std::mutex> lock(mapMutex_);
-            frozenEmpty = frozenSegments_.empty();
-        }
-        if (frozenEmpty && !nextPending.empty())
-        {
-            LOG(INFO, "Bootstrap: force-freezing segment " << nextPending.front().id << " as the global-map anchor");
-            freezeSegment(nextPending.front());
-            nextPending.erase(nextPending.begin());
         }
 
         pendingSegments_ = std::move(nextPending);
