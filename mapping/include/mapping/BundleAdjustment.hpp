@@ -13,6 +13,7 @@
 #include <open3d/geometry/PointCloud.h>
 #include <open3d/pipelines/registration/Registration.h>
 #include <open3d/pipelines/registration/GlobalOptimization.h>
+#include <open3d/pipelines/registration/PoseGraph.h>
 #include <open3d/t/geometry/PointCloud.h>
 
 #include <thread>
@@ -27,20 +28,11 @@ namespace mapping
     /// @ingroup global_map
     /// @brief Bundle adjustment module for managing global map optimization.
     /// @details Handles inter-segment and intra-segment pose graph optimization,
-    /// accumulation of submaps into segments, and publishing of the optimized global map
-    /// to the tracking thread via lock-free atomic snapshot reads.
+    /// accumulation of submaps into segments, and exposes a per-segment frozen map
+    /// view via `getGlobalMap()` for the tracking thread.
     class BundleAdjustment
     {
     public:
-        /// @brief Frozen snapshot of the global map for lock-free reads from tracking thread.
-        struct FrozenMapSnapshot
-        {
-            /// @brief Point cloud in Open3D tensor format for efficient processing
-            open3d::t::geometry::PointCloud cloud;
-            /// @brief Number of aligned segments in this frozen map
-            uint32_t alignedSegmentCount;
-        };
-
         /// @brief Constructor initializing the bundle adjustment module with configuration.
         /// @param config Mapping system configuration
         explicit BundleAdjustment(const MappingConfig &config);
@@ -49,91 +41,74 @@ namespace mapping
         ~BundleAdjustment();
 
         /// @brief Spawns the background optimization worker thread.
-        /// @details The worker thread processes segments from the refinement and alignment
-        /// queues, optimizes them, and updates the frozen global map snapshot.
         void startOptimizationWorker();
 
         /// @brief Gracefully stops and joins the optimization worker thread.
-        /// @details Sets the shutdown flag and waits for the worker thread to complete.
         void stopOptimizationWorker();
 
         /// @brief Accumulate a submap into the currently active segment.
-        /// @details Called from the tracking thread to add keyframe submaps to the active
-        /// segment being accumulated. When the segment reaches its target size, it is moved
-        /// to the refinement queue and a new segment becomes active.
         /// @param keyframeIdx Index of the keyframe for this submap
         /// @param pose Shared pointer to the LiDAR pose (world_T_lidar)
         /// @param cloud Shared pointer to the point cloud submap
         void accumulateSubmapToSegment(uint32_t keyframeIdx, const std::shared_ptr<gtsam::Pose3> &pose,
                                        const std::shared_ptr<open3d::geometry::PointCloud> &cloud);
 
-        /// @brief Get a lock-free read of the frozen global map snapshot.
-        /// @details Returns the current frozen map snapshot, or nullptr if no map has been
-        /// built yet. This is safe to call from the tracking thread without synchronization.
-        /// @return Shared pointer to the frozen map snapshot, or nullptr
-        std::shared_ptr<const FrozenMapSnapshot> getGlobalMap() const;
+        /// @brief Return a mutex-guarded copy of all frozen segments.
+        /// @details Zero-copy of clouds — legacyCloud is already shared_ptr<const>.
+        std::vector<std::shared_ptr<const FrozenSegment>> getAllFrozenSegments() const;
+
+        /// @brief Query the frozen global map by pose proximity.
+        /// @details Returns a snapshot containing every frozen segment whose centroid is
+        /// within `radius` of the query translation. Tensor representations are not
+        /// built here — consumers can trigger conversion lazily via `FrozenSegment::tensor()`.
+        /// @param pose Query pose (only translation is used)
+        /// @param radius Maximum centroid distance [m]
+        /// @return Snapshot containing the matching frozen segments
+        std::shared_ptr<const FrozenMapSnapshot> getGlobalMap(const gtsam::Pose3 &pose, double radius) const;
 
     private:
-        /// @brief Static worker function for the optimization thread.
-        /// @details Processes segments from queues, optimizes them, and updates the global map.
-        /// @param self Pointer to the BundleAdjustment instance
+        /// @brief Worker thread entry point.
         static void optimizationWorker(BundleAdjustment *self);
 
-        /// @brief Perform intra-segment pose graph optimization.
-        /// @details Optimizes the relative poses of submaps within a single segment
-        /// using a local pose graph.
-        /// @param segment The segment to refine
+        /// @brief Intra-segment pose graph optimization.
         void refineSegment(GlobalMapSegment &segment);
 
-        /// @brief Perform inter-segment pose graph optimization.
-        /// @details Optimizes the relative poses between all segments in the global map
-        /// to ensure consistency across segment boundaries.
-        /// @param segments All segments to align
-        void alignAllSegments(std::vector<GlobalMapSegment> &segments);
+        /// @brief Unified inter-segment PGO over `pendingSegments_` union newBatch with k-nearest
+        /// frozen segments as fixed references. Mutates the working set in place and partitions
+        /// segments into frozen / pending after optimization.
+        void alignAllSegments(std::vector<GlobalMapSegment> &workingSet);
 
-        /// @brief Build and publish the frozen map snapshot.
-        /// @details Merges all aligned segments into a single frozen map snapshot in
-        /// Open3D tensor format and publishes it via atomic pointer for tracking thread reads.
-        void buildFrozenSnapshot();
+        /// @brief Convert a converged segment to a FrozenSegment and append to frozenSegments_.
+        void freezeSegment(GlobalMapSegment &segment);
 
-        /// @brief Compute relative pose from one pose to another.
-        /// @details Helper function to compute the transformation from poseA to poseB.
-        /// @param poseA Reference pose
-        /// @param poseB Target pose
-        /// @return Relative pose: poseA^{-1} * poseB
-        gtsam::Pose3 computeRelativePose(const gtsam::Pose3 &poseA, const gtsam::Pose3 &poseB) const;
+        /// @brief Pick the k frozen segments closest to `centroid` by Euclidean distance.
+        std::vector<std::size_t> kNearestFrozen(const Eigen::Vector3d &centroid, std::size_t k) const;
 
         // Configuration
-        /// @brief Mapping system configuration
         MappingConfig config_;
 
-        // Threading and synchronization
-        /// @brief Optimization worker thread
+        // Threading
         std::thread optimizationThread_;
-        /// @brief Flag to signal shutdown of optimization worker
         std::atomic<bool> shutdown_{false};
 
         // Work queues
-        /// @brief Queue of segments waiting for intra-segment refinement
         SafeQueue<GlobalMapSegment> refinementQueue_;
-        /// @brief Queue of segments waiting for inter-segment alignment
         SafeQueue<GlobalMapSegment> alignmentQueue_;
-        /// @brief Semaphore signaled when work is pushed to refinementQueue_
         sem_t workSemaphore_;
 
         // Map state
-        /// @brief All optimized segments from history
-        std::vector<GlobalMapSegment> allSegments_;
-        /// @brief Currently accumulating segment
+        /// @brief Frozen, immutable segments (the "global map")
+        std::vector<std::shared_ptr<const FrozenSegment>> frozenSegments_;
+        /// @brief Segments under active alignment but not yet frozen (floating or unconverged)
+        std::vector<GlobalMapSegment> pendingSegments_;
+        /// @brief Currently accumulating segment (foreground writes from tracking thread)
         GlobalMapSegment activeSegment_;
         /// @brief Counter for assigning unique segment IDs
         uint32_t nextSegmentId_{0};
-
-        // Global map snapshot
-        /// @brief Frozen global map snapshot (protected by mutex for thread-safe updates)
-        std::shared_ptr<const FrozenMapSnapshot> globalMapSnapshot_;
-        /// @brief Mutex protecting access to globalMapSnapshot_
-        mutable std::mutex snapshotMutex_;
+        /// @brief Monotonic version counter, bumped each time a segment freezes
+        uint64_t mapVersion_{0};
+        /// @brief Mutex guarding `frozenSegments_` and `mapVersion_`
+        mutable std::mutex mapMutex_;
     };
 } // namespace mapping
 

@@ -7,6 +7,9 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
 #include <pthread.h>
 #include <semaphore.h>
 
@@ -14,6 +17,43 @@ SETUP_LOGS(DEBUG, "BundleAdjustment");
 
 namespace mapping
 {
+    namespace
+    {
+        // stiffness applied to identity edges between fixed reference nodes to emulate
+        // multi-fixed-node behavior that Open3D's PGO does not support natively
+        constexpr double FIXED_NODE_INFO_SCALE = 1e8;
+
+        // very small epsilon on rotation angle norm for numerical safety
+        constexpr double ROTATION_EPS = 1e-12;
+
+        // tiny union-find for the floating-component check
+        struct UnionFind
+        {
+            std::vector<std::size_t> parent;
+            explicit UnionFind(std::size_t n) : parent(n) { std::iota(parent.begin(), parent.end(), std::size_t{0}); }
+            std::size_t find(std::size_t x)
+            {
+                while (parent[x] != x)
+                {
+                    parent[x] = parent[parent[x]];
+                    x = parent[x];
+                }
+                return x;
+            }
+            void unite(std::size_t a, std::size_t b)
+            {
+                a = find(a);
+                b = find(b);
+                if (a != b)
+                    parent[a] = b;
+            }
+        };
+
+        Eigen::Vector3d centroidOf(const open3d::geometry::PointCloud &cloud)
+        {
+            return cloud.HasPoints() ? cloud.GetCenter() : Eigen::Vector3d::Zero();
+        }
+    } // namespace
 
     BundleAdjustment::BundleAdjustment(const MappingConfig &config) : config_(config), nextSegmentId_{1}
     {
@@ -40,10 +80,8 @@ namespace mapping
     {
         LOG(INFO, "Starting optimization worker thread");
 
-        // Spawn optimization thread
         optimizationThread_ = std::thread(&BundleAdjustment::optimizationWorker, this);
 
-        // Set thread to SCHED_IDLE priority using pthread_setschedparam
         struct sched_param param
         {
             0
@@ -62,7 +100,6 @@ namespace mapping
         shutdown_ = true;
         sem_post(&workSemaphore_);
 
-        // Wait for worker thread to finish
         if (optimizationThread_.joinable())
         {
             optimizationThread_.join();
@@ -73,107 +110,132 @@ namespace mapping
     void BundleAdjustment::accumulateSubmapToSegment(uint32_t keyframeIdx, const std::shared_ptr<gtsam::Pose3> &pose,
                                                      const std::shared_ptr<open3d::geometry::PointCloud> &cloud)
     {
-        // Add to active segment's submaps
-        activeSegment_.submaps[keyframeIdx] = {pose, cloud};
-
-        LOG(DEBUG, "Added submap at keyframe " << keyframeIdx << " to segment " << activeSegment_.id);
-
-        // Compute distance from first submap to last submap in active segment
+        // add step distance from the previous submap before inserting the new one
         if (!activeSegment_.submaps.empty())
         {
-            const auto &firstSubmap = activeSegment_.submaps.at(activeSegment_.startIdx);
-            const auto &lastSubmap = activeSegment_.submaps.rbegin()->second;
+            const Eigen::Vector3d prevTranslation = activeSegment_.submaps.rbegin()->second.first->translation();
+            activeSegment_.accumulatedDistance += (pose->translation() - prevTranslation).norm();
+        }
 
-            const Eigen::Vector3d firstTranslation = firstSubmap.first->translation();
-            const Eigen::Vector3d lastTranslation = lastSubmap.first->translation();
-            double distance = (firstTranslation - lastTranslation).norm();
+        activeSegment_.submaps[keyframeIdx] = {pose, cloud};
 
-            LOG(DEBUG, "Segment " << activeSegment_.id << " accumulated distance: " << distance << "m");
+        LOG(DEBUG, "Added submap at keyframe " << keyframeIdx << " to segment " << activeSegment_.id
+                                               << " (travel=" << activeSegment_.accumulatedDistance << "m)");
 
-            // Check if segment has reached threshold
-            if (distance >= config_.global_map_optimization.segment_length)
-            {
-                LOG(INFO,
-                    "Segment " << activeSegment_.id << " reached distance threshold. Moving to refinement queue.");
+        if (activeSegment_.accumulatedDistance >= config_.global_map_optimization.segment_length)
+        {
+            LOG(INFO, "Segment " << activeSegment_.id << " reached distance threshold. Moving to refinement queue.");
 
-                // Set state to WaitingForRefinement
-                activeSegment_.state = SegmentState::WaitingForRefinement;
+            activeSegment_.state = SegmentState::WaitingForRefinement;
 
-                refinementQueue_.push(activeSegment_);
-                sem_post(&workSemaphore_);
+            refinementQueue_.push(activeSegment_);
+            sem_post(&workSemaphore_);
 
-                // Create new active segment
-                GlobalMapSegment newSegment;
-                newSegment.id = nextSegmentId_++;
-                newSegment.startIdx = keyframeIdx;
-                newSegment.state = SegmentState::Accumulating;
-                newSegment.pcdMerged = nullptr;
+            GlobalMapSegment newSegment;
+            newSegment.id = nextSegmentId_++;
+            // keyframeIdx was just sealed into the outgoing segment; next segment starts one ahead
+            newSegment.startIdx = keyframeIdx + 1;
+            newSegment.state = SegmentState::Accumulating;
+            newSegment.pcdMerged = nullptr;
 
-                activeSegment_ = newSegment;
+            activeSegment_ = newSegment;
 
-                LOG(INFO, "Created new active segment with id " << activeSegment_.id);
-            }
+            LOG(INFO, "Created new active segment with id " << activeSegment_.id);
         }
     }
 
-    std::shared_ptr<const BundleAdjustment::FrozenMapSnapshot> BundleAdjustment::getGlobalMap() const
+    std::shared_ptr<const FrozenMapSnapshot> BundleAdjustment::getGlobalMap(const gtsam::Pose3 &pose,
+                                                                            double radius) const
     {
-        std::lock_guard<std::mutex> lock(snapshotMutex_);
-        return globalMapSnapshot_;
+        auto snapshot = std::make_shared<FrozenMapSnapshot>();
+        const Eigen::Vector3d query = pose.translation();
+        const double radiusSq = radius * radius;
+
+        std::vector<std::shared_ptr<const FrozenSegment>> candidates;
+        uint64_t version;
+        {
+            std::lock_guard<std::mutex> lock(mapMutex_);
+            candidates = frozenSegments_;
+            version = mapVersion_;
+        }
+
+        snapshot->segments.reserve(candidates.size());
+        for (const auto &seg : candidates)
+        {
+            if ((seg->centroid - query).squaredNorm() <= radiusSq)
+                snapshot->segments.push_back(seg);
+        }
+        snapshot->version = version;
+
+        return snapshot;
+    }
+
+    std::vector<std::size_t> BundleAdjustment::kNearestFrozen(const Eigen::Vector3d &centroid, std::size_t k) const
+    {
+        // worker thread is the sole writer of frozenSegments_, so a snapshot is fine
+        std::vector<std::shared_ptr<const FrozenSegment>> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(mapMutex_);
+            snapshot = frozenSegments_;
+        }
+
+        std::vector<std::pair<double, std::size_t>> scored;
+        scored.reserve(snapshot.size());
+        for (std::size_t i = 0; i < snapshot.size(); ++i)
+            scored.emplace_back((snapshot[i]->centroid - centroid).squaredNorm(), i);
+
+        const std::size_t take = std::min(k, scored.size());
+        std::partial_sort(scored.begin(), scored.begin() + take, scored.end(),
+                          [](const auto &a, const auto &b) { return a.first < b.first; });
+
+        std::vector<std::size_t> result;
+        result.reserve(take);
+        for (std::size_t i = 0; i < take; ++i)
+            result.push_back(scored[i].second);
+        return result;
     }
 
     void BundleAdjustment::optimizationWorker(BundleAdjustment *self)
     {
         LOG(INFO, "Optimization worker thread started");
 
-        // Set thread name for debugging (optional, Linux-only)
 #ifdef __linux__
         pthread_setname_np(pthread_self(), "BA_Optimizer");
 #endif
 
-        // Main worker loop
         while (!self->shutdown_)
         {
-            // 1. Drain refinement queue
+            // 1. drain refinement queue: each segment is intra-refined and pushed to alignment queue
             GlobalMapSegment segment;
             while (self->refinementQueue_.try_pop(segment))
             {
                 LOG(DEBUG, "Refining segment " << segment.id);
                 self->refineSegment(segment);
-
                 segment.state = SegmentState::WaitingForAlignment;
                 self->alignmentQueue_.push(std::move(segment));
-
-                LOG(DEBUG, "Segment " << segment.id << " moved to alignment queue");
             }
 
-            // 2. Drain alignment queue
-            std::vector<GlobalMapSegment> alignedSegments;
+            // 2. drain alignment queue into a fresh batch
+            std::vector<GlobalMapSegment> newBatch;
             while (self->alignmentQueue_.try_pop(segment))
+                newBatch.push_back(std::move(segment));
+
+            // 3. if there is a new batch, run unified PGO over pendingSegments_ combined with newBatch
+            if (!newBatch.empty())
             {
-                alignedSegments.push_back(std::move(segment));
+                std::vector<GlobalMapSegment> workingSet = std::move(self->pendingSegments_);
+                self->pendingSegments_.clear();
+                workingSet.reserve(workingSet.size() + newBatch.size());
+                for (auto &seg : newBatch)
+                    workingSet.push_back(std::move(seg));
+
+                LOG(INFO, "Running alignment on " << workingSet.size() << " segments ("
+                                                  << "pending was " << workingSet.size() - newBatch.size()
+                                                  << ", new batch " << newBatch.size() << ")");
+                self->alignAllSegments(workingSet);
             }
 
-            // 3. If we have aligned segments, align them and build snapshot
-            if (!alignedSegments.empty())
-            {
-                LOG(INFO, "Aligning " << alignedSegments.size() << " segments");
-                self->alignAllSegments(alignedSegments);
-
-                // Mark all segments as aligned and add to allSegments
-                for (auto &seg : alignedSegments)
-                {
-                    seg.state = SegmentState::Aligned;
-                    self->allSegments_.push_back(std::move(seg));
-                }
-
-                LOG(INFO, "Total aligned segments: " << self->allSegments_.size());
-
-                // Build and publish frozen snapshot
-                self->buildFrozenSnapshot();
-            }
-
-            // 4. Wait for new work
+            // 4. block until more work or shutdown
             sem_wait(&self->workSemaphore_);
         }
 
@@ -194,7 +256,6 @@ namespace mapping
             return;
         }
 
-        // ordered submap entries for random access in the loop closure pass
         struct SubmapEntry
         {
             open3d::geometry::PointCloud *cloud;
@@ -216,52 +277,38 @@ namespace mapping
         poseGraph.nodes_.reserve(N);
         poseGraph.edges_.reserve(N - 1);
 
-        // updated world poses chained from ICP results, used to init loop closure ICP
         std::vector<gtsam::Pose3> updatedPoses;
         updatedPoses.reserve(N);
 
-        // first node is the anchor — fixed at its odometry pose
         poseGraph.nodes_.emplace_back(ordered[0].odomPose.matrix());
         updatedPoses.push_back(ordered[0].odomPose);
 
-        // --- pass 1: sequential odometry edges ---
+        // pass 1: sequential odometry edges
         for (std::size_t i = 0; i < N - 1; ++i)
         {
             const std::size_t j = i + 1;
             const gtsam::Pose3 odomDelta = ordered[i].odomPose.between(ordered[j].odomPose);
 
-            /* NOTE: skip ICP for odometry edges: drift over short segment lengths will be negligible
-             * given well-initialized LiDAR-inertial odometry, so the odometry delta is used directly.
-             * The information matrix is still estimated from the geometry at the odometry alignment.
-            const auto icpResult = open3d::pipelines::registration::RegistrationICP(
-                *ordered[j].cloud, *ordered[i].cloud,
-                config_.global_map_optimization.icp_max_correspondence_distance, odomDelta.matrix(),
-                open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
-            */
-
             const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
                 *ordered[j].cloud, *ordered[i].cloud, config_.global_map_optimization.icp_max_correspondence_distance,
                 odomDelta.matrix());
 
-            // chain updated world pose: world_T_j = world_T_i * i_T_j_odom
             updatedPoses.push_back(updatedPoses[i].compose(odomDelta));
             poseGraph.nodes_.emplace_back(updatedPoses[j].matrix());
 
-            // edge: source=j, target=i, transformation=i_T_j (target_T_source convention)
             poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), odomDelta.matrix(), infoMatrix,
                                           /*uncertain=*/false);
 
             LOG(DEBUG, "odometry edge " << i << "->" << j);
         }
 
-        // --- pass 2: loop closure edges between nearby non-consecutive nodes ---
+        // pass 2: loop closure edges between nearby non-consecutive nodes
         const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
             1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
         const double loopClosureMaxDist = config_.global_map_optimization.loop_closure_max_distance,
                      loopClosureMaxAngle = config_.global_map_optimization.loop_closure_max_angle,
                      loopClosureMinFitness = config_.global_map_optimization.loop_closure_min_fitness;
 
-        // build the full pose graph with "loop closure" criteria between non-adjacent edges
         for (std::size_t i = 0; i < N; ++i)
         {
             for (std::size_t j = i + 2; j < N; ++j)
@@ -299,191 +346,286 @@ namespace mapping
         LOG(INFO, "Segment " << segment.id << " pose graph: " << poseGraph.nodes_.size() << " nodes, "
                              << poseGraph.edges_.size() << " edges");
 
-        // --- pass 3: global pose graph optimization ---
+        // pass 3: global pose graph optimization
         open3d::pipelines::registration::GlobalOptimization(
             poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
             open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(),
             open3d::pipelines::registration::GlobalOptimizationOption(
                 config_.global_map_optimization.icp_max_correspondence_distance,
-                // TODO: do these need to be configurable?
                 /*edge_prune_threshold=*/0.25,
                 /*preference_loop_closure=*/1.0,
                 /*reference_node=*/0));
 
-        // --- pass 4: apply optimized poses and merge into pcdMerged ---
-        // submaps are still in their local LiDAR frames (transformed in the prep loop above)
-        // transform each to world frame using the optimized node pose and accumulate
+        // pass 4: apply optimized poses and merge into pcdMerged
         for (std::size_t k = 0; k < N; ++k)
         {
             ordered[k].cloud->Transform(poseGraph.nodes_[k].pose_);
             *segment.pcdMerged += *ordered[k].cloud;
         }
 
-        // TODO: improve PCD quality with outlier removal?
         segment.pcdMerged = segment.pcdMerged->VoxelDownSample(config_.global_map_optimization.refinement_voxel_size);
         LOG(INFO, "Segment " << segment.id << " refined: " << segment.pcdMerged->points_.size() << " points");
     }
 
-    void BundleAdjustment::alignAllSegments(std::vector<GlobalMapSegment> &segments)
+    void BundleAdjustment::alignAllSegments(std::vector<GlobalMapSegment> &workingSet)
     {
-        const std::size_t M = segments.size();
-        LOG(INFO, "Aligning " << M << " new segments against " << allSegments_.size() << " existing segments");
+        const std::size_t M = workingSet.size();
+        if (M == 0)
+            return;
 
-        // pcdMerged of each segment carries world-frame normals inherited from refineSegment,
-        // so no EstimateNormals() calls are needed in either sub-pass below
+        // resolve k-nearest frozen references for each free segment
+        std::vector<Eigen::Vector3d> freeCentroids;
+        freeCentroids.reserve(M);
+        for (const auto &seg : workingSet)
+            freeCentroids.push_back(centroidOf(*seg.pcdMerged));
 
-        // --- sub-pass 1: anchor each new segment to the existing global map ---
-        // skipped on the first batch when allSegments_ is still empty
-        if (!allSegments_.empty())
+        const std::size_t k = static_cast<std::size_t>(config_.global_map_optimization.k_nearest_frozen);
+
+        std::vector<std::shared_ptr<const FrozenSegment>> frozenSnap;
         {
-            open3d::geometry::PointCloud globalMap;
-            for (const auto &seg : allSegments_)
+            std::lock_guard<std::mutex> lock(mapMutex_);
+            frozenSnap = frozenSegments_;
+        }
+
+        // collect union of selected reference indices and per-free reference lists
+        std::vector<std::vector<std::size_t>> perFreeRefs(M);
+        std::vector<std::size_t> refUnionSorted;
+        if (!frozenSnap.empty())
+        {
+            std::vector<bool> picked(frozenSnap.size(), false);
+            for (std::size_t n = 0; n < M; ++n)
             {
-                if (seg.pcdMerged && seg.pcdMerged->HasPoints())
-                    globalMap += *seg.pcdMerged;
+                std::vector<std::pair<double, std::size_t>> scored;
+                scored.reserve(frozenSnap.size());
+                for (std::size_t i = 0; i < frozenSnap.size(); ++i)
+                    scored.emplace_back((frozenSnap[i]->centroid - freeCentroids[n]).squaredNorm(), i);
+                const std::size_t take = std::min(k, scored.size());
+                std::partial_sort(scored.begin(), scored.begin() + take, scored.end(),
+                                  [](const auto &a, const auto &b) { return a.first < b.first; });
+                perFreeRefs[n].reserve(take);
+                for (std::size_t i = 0; i < take; ++i)
+                {
+                    const std::size_t refIdx = scored[i].second;
+                    perFreeRefs[n].push_back(refIdx);
+                    picked[refIdx] = true;
+                }
             }
+            for (std::size_t i = 0; i < frozenSnap.size(); ++i)
+                if (picked[i])
+                    refUnionSorted.push_back(i);
+        }
 
-            const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
-                1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
+        // map global frozen index -> PGO node index
+        const std::size_t R = refUnionSorted.size();
+        std::vector<std::size_t> frozenIdxToNode(frozenSnap.size(), 0);
+        for (std::size_t i = 0; i < R; ++i)
+            frozenIdxToNode[refUnionSorted[i]] = M + i;
 
-            for (auto &seg : segments)
+        // build pose graph: free nodes [0,M), reference nodes [M, M+R), all initialized at identity
+        // (clouds are in world frame, so any optimization correction emerges as the node pose itself)
+        open3d::pipelines::registration::PoseGraph poseGraph;
+        poseGraph.nodes_.reserve(M + R);
+        for (std::size_t i = 0; i < M + R; ++i)
+            poseGraph.nodes_.emplace_back(Eigen::Matrix4d::Identity());
+
+        // reference-rigidity stiff edges: identity transforms with very high information.
+        // emulates Open3D's missing "multi-fixed-node" feature; combined with reference_node=M
+        // this pins all reference nodes in place.
+        const Eigen::Matrix6d stiffInfo = Eigen::Matrix6d::Identity() * FIXED_NODE_INFO_SCALE;
+        for (std::size_t i = 0; i + 1 < R; ++i)
+        {
+            for (std::size_t j = i + 1; j < R; ++j)
             {
-                // both clouds are already in world frame, so init = Identity
-                const auto icpResult = open3d::pipelines::registration::RegistrationICP(
-                    *seg.pcdMerged, globalMap, config_.global_map_optimization.icp_max_correspondence_distance,
-                    Eigen::Matrix4d::Identity(),
-                    open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
-
-                if (icpResult.fitness_ >= config_.global_map_optimization.loop_closure_min_fitness)
-                {
-                    seg.pcdMerged->Transform(icpResult.transformation_);
-                    LOG(DEBUG, "segment " << seg.id << " anchored to global map, fitness=" << icpResult.fitness_);
-                }
-                else
-                {
-                    LOG(WARN, "segment " << seg.id << " failed global map registration (fitness=" << icpResult.fitness_
-                                         << "), keeping odometry pose");
-                }
+                poseGraph.edges_.emplace_back(static_cast<int>(M + i), static_cast<int>(M + j),
+                                              Eigen::Matrix4d::Identity(), stiffInfo, /*uncertain=*/false);
             }
         }
 
-        if (M < 2)
-            return;
-
-        // --- sub-pass 2: inter-new-segment PGO ---
-        // compute centroids for proximity checks — clouds are in world frame
-        std::vector<Eigen::Vector3d> centroids;
-        centroids.reserve(M);
-        for (const auto &seg : segments)
-            centroids.push_back(seg.pcdMerged->GetCenter());
-
-        open3d::pipelines::registration::PoseGraph poseGraph;
-        poseGraph.nodes_.reserve(M);
-        poseGraph.edges_.reserve(M - 1);
-
-        // node poses are Identity: clouds are in world frame, PGO finds small corrections
-        for (std::size_t k = 0; k < M; ++k)
-            poseGraph.nodes_.emplace_back(Eigen::Matrix4d::Identity());
-
         const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
             1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
-        // a larger correspondence distance than submap-level ICP
         const double segIcpMaxDist = config_.global_map_optimization.refinement_voxel_size * 2.0;
+        const double segLoopMaxDist = config_.global_map_optimization.segment_loop_closure_max_distance;
+        const double minFitness = config_.global_map_optimization.loop_closure_min_fitness;
 
+        // free <-> free edges: sequential always added, non-sequential gated on centroid distance + fitness
         for (std::size_t i = 0; i < M; ++i)
         {
             for (std::size_t j = i + 1; j < M; ++j)
             {
                 const bool isSequential = (j == i + 1);
-                const double dist = (centroids[i] - centroids[j]).norm();
+                const double dist = (freeCentroids[i] - freeCentroids[j]).norm();
 
-                // non-consecutive pairs are only attempted within proximity
-                if (!isSequential && dist > config_.global_map_optimization.segment_loop_closure_max_distance)
+                if (!isSequential && dist > segLoopMaxDist)
                     continue;
 
                 const auto icpResult = open3d::pipelines::registration::RegistrationICP(
-                    *segments[j].pcdMerged, *segments[i].pcdMerged, segIcpMaxDist, Eigen::Matrix4d::Identity(),
+                    *workingSet[j].pcdMerged, *workingSet[i].pcdMerged, segIcpMaxDist, Eigen::Matrix4d::Identity(),
                     open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
 
-                // sequential edges are always added; non-consecutive require fitness gate
-                if (!isSequential && icpResult.fitness_ < config_.global_map_optimization.loop_closure_min_fitness)
+                if (!isSequential && icpResult.fitness_ < minFitness)
                     continue;
 
                 const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
-                    *segments[j].pcdMerged, *segments[i].pcdMerged, segIcpMaxDist, icpResult.transformation_);
+                    *workingSet[j].pcdMerged, *workingSet[i].pcdMerged, segIcpMaxDist, icpResult.transformation_);
 
                 poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), icpResult.transformation_,
                                               infoMatrix, /*uncertain=*/!isSequential);
 
-                LOG(DEBUG, (isSequential ? "sequential" : "loop closure")
-                               << " edge " << i << "->" << j << " dist=" << dist << " fitness=" << icpResult.fitness_);
+                LOG(DEBUG, (isSequential ? "sequential" : "loop closure") << " free edge " << i << "->" << j << " dist="
+                                                                          << dist << " fitness=" << icpResult.fitness_);
             }
         }
 
-        LOG(INFO, "inter-segment pose graph: " << M << " nodes, " << poseGraph.edges_.size() << " edges");
-
-        open3d::pipelines::registration::GlobalOptimization(
-            poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
-            open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(),
-            open3d::pipelines::registration::GlobalOptimizationOption(segIcpMaxDist,
-                                                                      /*edge_prune_threshold=*/0.25,
-                                                                      /*preference_loop_closure=*/1.0,
-                                                                      /*reference_node=*/0));
-
-        // apply pose corrections from PGO to each segment's merged cloud
-        for (std::size_t k = 0; k < M; ++k)
+        // free <-> reference edges: ICP between each free segment and its k-nearest frozen refs
+        for (std::size_t n = 0; n < M; ++n)
         {
-            segments[k].pcdMerged->Transform(poseGraph.nodes_[k].pose_);
-            LOG(DEBUG, "segment " << segments[k].id << " pose correction applied");
-        }
-    }
-
-    void BundleAdjustment::buildFrozenSnapshot()
-    {
-        LOG(INFO, "Building frozen map snapshot from " << allSegments_.size() << " aligned segments");
-
-        auto snapshot = std::make_shared<FrozenMapSnapshot>();
-
-        // Merge all aligned segments into a single legacy PointCloud first
-        auto mergedLegacyCloud = std::make_shared<open3d::geometry::PointCloud>();
-
-        for (const auto &segment : allSegments_)
-        {
-            if (segment.state == SegmentState::Aligned && segment.pcdMerged)
+            for (std::size_t refIdx : perFreeRefs[n])
             {
-                if (segment.pcdMerged->HasPoints())
-                {
-                    *mergedLegacyCloud += *segment.pcdMerged;
-                }
+                const auto &refSeg = *frozenSnap[refIdx];
+                const auto icpResult = open3d::pipelines::registration::RegistrationICP(
+                    *workingSet[n].pcdMerged, *refSeg.legacyCloud, segIcpMaxDist, Eigen::Matrix4d::Identity(),
+                    open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
+
+                if (icpResult.fitness_ < minFitness)
+                    continue;
+
+                const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
+                    *workingSet[n].pcdMerged, *refSeg.legacyCloud, segIcpMaxDist, icpResult.transformation_);
+
+                const std::size_t refNode = frozenIdxToNode[refIdx];
+                poseGraph.edges_.emplace_back(static_cast<int>(n), static_cast<int>(refNode), icpResult.transformation_,
+                                              infoMatrix, /*uncertain=*/true);
+
+                LOG(DEBUG, "free->ref edge " << n << "->" << refNode << " (frozen id=" << refSeg.id
+                                             << ") fitness=" << icpResult.fitness_);
             }
         }
 
-        // Convert merged legacy point cloud to tensor format if it has points
-        if (mergedLegacyCloud->HasPoints())
+        LOG(INFO, "unified PGO: " << M << " free + " << R << " ref nodes, " << poseGraph.edges_.size() << " edges");
+
+        // run global optimization only if there are constraints to satisfy
+        const bool runOptimization = !poseGraph.edges_.empty();
+        if (runOptimization)
         {
-            snapshot->cloud = open3d::t::geometry::PointCloud::FromLegacy(*mergedLegacyCloud);
-        }
-        else
-        {
-            snapshot->cloud = open3d::t::geometry::PointCloud();
+            // reference_node pins one node; with stiff identity edges between refs, the rest of
+            // them stay rigidly attached. when there are no refs, pin node 0 by convention.
+            const int referenceNode = (R > 0) ? static_cast<int>(M) : 0;
+            open3d::pipelines::registration::GlobalOptimization(
+                poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
+                open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(),
+                open3d::pipelines::registration::GlobalOptimizationOption(segIcpMaxDist,
+                                                                          /*edge_prune_threshold=*/0.25,
+                                                                          /*preference_loop_closure=*/1.0,
+                                                                          referenceNode));
         }
 
-        snapshot->alignedSegmentCount = static_cast<uint32_t>(allSegments_.size());
-
-        // Store snapshot (protected by mutex)
+        // apply per-free corrections, record delta magnitudes for convergence test
+        for (std::size_t i = 0; i < M; ++i)
         {
-            std::lock_guard<std::mutex> lock(snapshotMutex_);
-            globalMapSnapshot_ = snapshot;
+            const Eigen::Matrix4d &delta = poseGraph.nodes_[i].pose_;
+            workingSet[i].pcdMerged->Transform(delta);
+
+            const Eigen::Matrix3d R_delta = delta.block<3, 3>(0, 0);
+            const Eigen::Vector3d t_delta = delta.block<3, 1>(0, 3);
+            const double rotAngle = Eigen::AngleAxisd(R_delta).angle();
+            workingSet[i].lastDeltaTranslation = t_delta.norm();
+            workingSet[i].lastDeltaRotation = std::abs(rotAngle) < ROTATION_EPS ? 0.0 : std::abs(rotAngle);
         }
 
-        LOG(INFO, "Published frozen map snapshot with " << snapshot->alignedSegmentCount << " aligned segments and "
-                                                        << (mergedLegacyCloud ? mergedLegacyCloud->points_.size() : 0)
-                                                        << " points");
+        // floating check via union-find over all PGO nodes (only edges that were added count)
+        UnionFind uf(M + R);
+        for (const auto &edge : poseGraph.edges_)
+            uf.unite(static_cast<std::size_t>(edge.source_node_id_), static_cast<std::size_t>(edge.target_node_id_));
+
+        std::vector<bool> isFloating(M, true);
+        if (R > 0)
+        {
+            const std::size_t refRoot = uf.find(M);
+            for (std::size_t i = 0; i < M; ++i)
+                isFloating[i] = (uf.find(i) != refRoot);
+        }
+        // when R == 0, every free segment is by definition floating
+
+        // partition working set into frozen / pending
+        std::vector<GlobalMapSegment> nextPending;
+        nextPending.reserve(M);
+
+        const double convT = config_.global_map_optimization.convergence_pose_delta_translation;
+        const double convR = config_.global_map_optimization.convergence_pose_delta_rotation;
+        const uint32_t iterCap = static_cast<uint32_t>(config_.global_map_optimization.max_align_iterations);
+
+        for (std::size_t i = 0; i < M; ++i)
+        {
+            auto &seg = workingSet[i];
+
+            if (isFloating[i])
+            {
+                // floating segments bypass the convergence/iteration check entirely: they sit in
+                // pendingSegments_ until a future batch bridges them to a frozen segment
+                LOG(DEBUG, "segment " << seg.id << " floating, returning to pending pool");
+                nextPending.push_back(std::move(seg));
+                continue;
+            }
+
+            ++seg.alignIterations;
+            const bool converged = seg.lastDeltaTranslation < convT && seg.lastDeltaRotation < convR;
+            const bool capHit = seg.alignIterations >= iterCap;
+
+            if (converged || capHit)
+            {
+                LOG(INFO, "Freezing segment " << seg.id << " (iters=" << seg.alignIterations
+                                              << ", dT=" << seg.lastDeltaTranslation << ", dR=" << seg.lastDeltaRotation
+                                              << ", capHit=" << capHit << ")");
+                freezeSegment(seg);
+            }
+            else
+            {
+                LOG(DEBUG, "segment " << seg.id << " not converged (dT=" << seg.lastDeltaTranslation
+                                      << ", dR=" << seg.lastDeltaRotation << "), returning to pending pool");
+                nextPending.push_back(std::move(seg));
+            }
+        }
+
+        // bootstrap: with no frozen segments yet, every segment is floating. force-freeze the
+        // oldest pending segment at its current pose so future batches have an anchor to align to.
+        bool frozenEmpty;
+        {
+            std::lock_guard<std::mutex> lock(mapMutex_);
+            frozenEmpty = frozenSegments_.empty();
+        }
+        if (frozenEmpty && !nextPending.empty())
+        {
+            LOG(INFO, "Bootstrap: force-freezing segment " << nextPending.front().id << " as the global-map anchor");
+            freezeSegment(nextPending.front());
+            nextPending.erase(nextPending.begin());
+        }
+
+        pendingSegments_ = std::move(nextPending);
+        LOG(INFO, "Alignment cycle done: pending=" << pendingSegments_.size());
     }
 
-    gtsam::Pose3 BundleAdjustment::computeRelativePose(const gtsam::Pose3 &poseA, const gtsam::Pose3 &poseB) const
+    std::vector<std::shared_ptr<const FrozenSegment>> BundleAdjustment::getAllFrozenSegments() const
     {
-        return poseA.inverse().compose(poseB);
+        std::lock_guard<std::mutex> lock(mapMutex_);
+        return frozenSegments_;
+    }
+
+    void BundleAdjustment::freezeSegment(GlobalMapSegment &segment)
+    {
+        auto frozen = std::make_shared<FrozenSegment>();
+        frozen->id = segment.id;
+        frozen->legacyCloud = std::shared_ptr<const open3d::geometry::PointCloud>(segment.pcdMerged);
+        frozen->centroid = centroidOf(*frozen->legacyCloud);
+        frozen->aabb = frozen->legacyCloud->GetAxisAlignedBoundingBox();
+        frozen->keyframeIndices.reserve(segment.submaps.size());
+        for (const auto &[kfIdx, _] : segment.submaps)
+            frozen->keyframeIndices.push_back(kfIdx);
+
+        segment.state = SegmentState::Aligned;
+
+        std::lock_guard<std::mutex> lock(mapMutex_);
+        frozenSegments_.push_back(std::move(frozen));
+        ++mapVersion_;
     }
 
 } // namespace mapping

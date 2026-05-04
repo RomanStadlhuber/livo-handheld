@@ -12,11 +12,14 @@
 #include <utility>
 #include <queue>
 #include <mutex>
+#include <limits>
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/NavState.h>
 #include <gtsam/inference/Symbol.h>
+#include <open3d/geometry/BoundingVolume.h>
 #include <open3d/geometry/PointCloud.h>
+#include <open3d/t/geometry/PointCloud.h>
 #include <opencv2/opencv.hpp>
 
 using gtsam::symbol_shorthand::B;
@@ -210,6 +213,53 @@ namespace mapping
         SegmentState state;
         /// @brief Merged point cloud of all submaps in this segment (nullptr until merged)
         std::shared_ptr<open3d::geometry::PointCloud> pcdMerged{nullptr};
+        /// @brief Sum of step distances between consecutive submaps [m]
+        double accumulatedDistance{0.0};
+        /// @brief Number of inter-segment PGO passes this segment has been through
+        uint32_t alignIterations{0};
+        /// @brief Translation magnitude of the last applied PGO correction [m]
+        double lastDeltaTranslation{std::numeric_limits<double>::infinity()};
+        /// @brief Rotation magnitude of the last applied PGO correction [rad]
+        double lastDeltaRotation{std::numeric_limits<double>::infinity()};
+    };
+
+    /// @ingroup types
+    /// @brief Frozen, immutable view of a converged segment for scan-to-map registration.
+    /// @details The legacy point cloud is shared (no copy) at freeze time. The tensor
+    /// representation is built lazily on the first `getGlobalMap()` call that surfaces
+    /// the segment, then cached. Centroid and AABB are precomputed at freeze time.
+    struct FrozenSegment
+    {
+        uint32_t id;
+        Eigen::Vector3d centroid;
+        open3d::geometry::AxisAlignedBoundingBox aabb;
+        std::shared_ptr<const open3d::geometry::PointCloud> legacyCloud;
+        /// @brief keyframe indices of all submaps that were merged into this segment
+        std::vector<uint32_t> keyframeIndices;
+        /// @brief lazily-populated tensor cloud, kept on the heap so the struct itself stays small
+        /// and the cloud data can outlive a FrozenSegment instance held only briefly by callers
+        mutable std::shared_ptr<const open3d::t::geometry::PointCloud> tensorCloud;
+        mutable std::once_flag tensorBuiltFlag;
+
+        /// @brief lazy accessor: builds the tensor cloud from legacy on first call, then caches
+        std::shared_ptr<const open3d::t::geometry::PointCloud> tensor() const
+        {
+            std::call_once(tensorBuiltFlag,
+                           [this]()
+                           {
+                               tensorCloud = std::make_shared<const open3d::t::geometry::PointCloud>(
+                                   open3d::t::geometry::PointCloud::FromLegacy(*legacyCloud));
+                           });
+            return tensorCloud;
+        }
+    };
+
+    /// @ingroup types
+    /// @brief Snapshot of frozen segments returned to the tracking thread.
+    struct FrozenMapSnapshot
+    {
+        std::vector<std::shared_ptr<const FrozenSegment>> segments;
+        uint64_t version{0};
     };
 } // namespace mapping
 #endif // MAPPING_TYPES_HPP_
