@@ -32,6 +32,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <unordered_set>
 
 // Global flag for signal handling
 std::atomic<bool> g_shutdown_requested{false};
@@ -76,8 +77,6 @@ public:
                     lidarMsgPc2 ? "sensor_msgs/PointCloud2" : "livox_ros_driver2/CustomMsg");
         mapping::MappingConfig config = loadConfig(configPath);
         slam_.setConfig(config);
-        // enable collecting marginalized submaps to accumulate the global map
-        slam_.setCollectMarginalizedSubmaps(true);
 
         // use callback groups so to keep feeding IMU while keyframe updates are running
         callbackGroupImu_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -115,7 +114,6 @@ public:
         pubHistoricalPosesPath_ = this->create_publisher<nav_msgs::msg::Path>("mapping/trajectory", 10);
         pubKeyframeSubmap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("mapping/keyframe_submap", 10);
         pubGlobalMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("mapping/map", 10);
-        globalMap_ = std::make_shared<open3d::geometry::PointCloud>();
         pubClusters_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("mapping/clusters", 10);
 
         tfBroadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -269,17 +267,40 @@ private:
             pubKeyframeSubmap_->publish(submapMsg);
         }
 
-        // build global map from marginalized keyframe submaps (most optimized poses)
+        // accumulate newly marginalized submaps into the raw-submap store
         auto marginalizedSubmaps = slam_.getMarginalizedSubmaps();
-        if (!marginalizedSubmaps.empty())
+        for (const auto &[idx, poseAndCloud] : marginalizedSubmaps)
+            rawSubmapClouds_[idx] = poseAndCloud.second;
+
+        // build dedup global map: frozen segments (corrected) + raw submaps not yet absorbed
+        auto frozenSegments = slam_.getAllFrozenSegments();
         {
-            for (const auto &[idx, poseAndCloud] : marginalizedSubmaps)
-                *globalMap_ += *poseAndCloud.second;
-            globalMap_ = globalMap_->VoxelDownSample(0.05);
-            sensor_msgs::msg::PointCloud2 globalMapMsg;
-            open3d_conversions::open3dToRos(*globalMap_, globalMapMsg, "map");
-            globalMapMsg.header.stamp = stamp;
-            pubGlobalMap_->publish(globalMapMsg);
+            open3d::geometry::PointCloud globalMapCloud;
+
+            // collect all keyframe indices already covered by frozen segments
+            std::unordered_set<uint32_t> absorbedKeyframes;
+            for (const auto &seg : frozenSegments)
+                for (uint32_t kfIdx : seg->keyframeIndices)
+                    absorbedKeyframes.insert(kfIdx);
+
+            // add corrected clouds from frozen segments
+            for (const auto &seg : frozenSegments)
+                if (seg->legacyCloud)
+                    globalMapCloud += *seg->legacyCloud;
+
+            // add raw clouds for keyframes not yet absorbed into any frozen segment
+            for (const auto &[idx, cloud] : rawSubmapClouds_)
+                if (absorbedKeyframes.find(idx) == absorbedKeyframes.end())
+                    globalMapCloud += *cloud;
+
+            if (!globalMapCloud.IsEmpty())
+            {
+                auto downsampled = globalMapCloud.VoxelDownSample(0.05);
+                sensor_msgs::msg::PointCloud2 globalMapMsg;
+                open3d_conversions::open3dToRos(*downsampled, globalMapMsg, "map");
+                globalMapMsg.header.stamp = stamp;
+                pubGlobalMap_->publish(globalMapMsg);
+            }
         }
 
         std::map<mapping::ClusterId, mapping::PointCluster> clusters = slam_.getCurrentClusters();
@@ -384,8 +405,8 @@ private:
     visualization_msgs::msg::MarkerArray clusterMarkersMsg_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
     std::map<uint32_t, geometry_msgs::msg::PoseStamped> historicalPoses;
-    /// @brief Naive accumulation of keyframe submaps to form the global map.
-    std::shared_ptr<open3d::geometry::PointCloud> globalMap_;
+    /// @brief raw marginalized submap clouds keyed by keyframe index (pre-BA correction)
+    std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> rawSubmapClouds_;
     rclcpp::Time startTime_;
     // accessed from both IMU and LiDAR callback threads without a lock
     // TODO: in the future, use a mutex for values like this
