@@ -91,6 +91,27 @@ namespace mapping
         {
             LOG(WARN, "Failed to set SCHED_IDLE priority for optimization worker: " << result);
         }
+
+#ifdef __linux__
+        // pin the BA worker to the first half of the available cores
+        // Open3D's TBB/OpenMP child threads inherit the affinity mask of their parent (main),
+        // so this effectively caps the cores available to all ICP and normal-estimation operations,
+        // leaving cores free for the tracking thread
+        const int totalCpus = static_cast<int>(std::thread::hardware_concurrency()),
+                  // number of physical CPU cores made available to the BA thread
+            baCpus = std::max(1, totalCpus / 2);
+        cpu_set_t cpuSet;  // "bitmask" indicating available CPUs
+        CPU_ZERO(&cpuSet); // first, make all unavailable, then add-back the 1st half of physical cores
+        for (int i = 0; i < baCpus; ++i)
+            CPU_SET(i, &cpuSet);
+        // CPU affinity is the only effective way to limit Open3D's resource usage here:
+        // Open3D spawns TBB/OpenMP workers that inherit the affinity mask but not SCHED_IDLE,
+        // so they run at full priority on whichever cores the mask permits
+        if (pthread_setaffinity_np(optimizationThread_.native_handle(), sizeof(cpu_set_t), &cpuSet) != 0)
+            LOG(WARN, "Failed to set CPU affinity for optimization worker");
+        else
+            LOG(INFO, "BA worker pinned to " << baCpus << " of " << totalCpus << " cores");
+#endif
     }
 
     void BundleAdjustment::stopOptimizationWorker()
@@ -285,12 +306,13 @@ namespace mapping
         std::vector<SubmapEntry> ordered;
         ordered.reserve(N);
 
-        // transform all submaps to their local LiDAR frame and estimate normals for point-to-plane ICP
+        // transform all submaps to their local LiDAR frame and estimate normals for point-to-plane ICP;
+        // KNN search is significantly faster than the default radius search on dense clouds
         for (auto &[kfIdx, poseAndCloud] : segment.submaps)
         {
             auto &[pose, cloud] = poseAndCloud;
             cloud->Transform(pose->inverse().matrix());
-            cloud->EstimateNormals();
+            cloud->EstimateNormals(open3d::geometry::KDTreeSearchParamKNN(7));
             ordered.push_back({cloud.get(), *pose});
         }
 
@@ -305,19 +327,19 @@ namespace mapping
         updatedPoses.push_back(ordered[0].odomPose);
 
         // pass 1: sequential odometry edges
+        // use a fixed information matrix for odometry edges: they are marked uncertain=false so the
+        // optimizer treats them as hard constraints regardless of the exact per-element weights,
+        // and skipping GetInformationMatrixFromPointClouds saves N-1 ICP calls per segment
+        const Eigen::Matrix6d odomInfo = Eigen::Matrix6d::Identity() * 100.0;
         for (std::size_t i = 0; i < N - 1; ++i)
         {
             const std::size_t j = i + 1;
             const gtsam::Pose3 odomDelta = ordered[i].odomPose.between(ordered[j].odomPose);
 
-            const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
-                *ordered[j].cloud, *ordered[i].cloud, config_.global_map_optimization.icp_max_correspondence_distance,
-                odomDelta.matrix());
-
             updatedPoses.push_back(updatedPoses[i].compose(odomDelta));
             poseGraph.nodes_.emplace_back(updatedPoses[j].matrix());
 
-            poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), odomDelta.matrix(), infoMatrix,
+            poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), odomDelta.matrix(), odomInfo,
                                           /*uncertain=*/false);
 
             LOG(DEBUG, "odometry edge " << i << "->" << j);
