@@ -113,6 +113,8 @@ namespace mapping
         /// @brief Translation of the last submap received via accumulateSubmapToSegment,
         /// used to compute incremental path length independently of which submaps were accepted
         std::optional<Eigen::Vector3d> lastReceivedTranslation_;
+        /// @brief Keyframe index of the first submap in the currently active segment
+        uint32_t activeSegmentStartIdx_{0};
         /// @brief Counter for assigning unique segment IDs
         uint32_t nextSegmentId_{0};
         /// @brief Monotonic version counter, bumped each time a segment freezes

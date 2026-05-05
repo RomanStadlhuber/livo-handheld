@@ -58,7 +58,7 @@ namespace mapping
     BundleAdjustment::BundleAdjustment(const MappingConfig &config) : config_(config), nextSegmentId_{1}
     {
         activeSegment_.id = 0;
-        activeSegment_.startIdx = 0;
+        activeSegmentStartIdx_ = 0;
         activeSegment_.state = SegmentState::Accumulating;
         activeSegment_.pcdMerged = nullptr;
 
@@ -157,7 +157,7 @@ namespace mapping
 
             GlobalMapSegment newSegment;
             newSegment.id = nextSegmentId_++;
-            newSegment.startIdx = keyframeIdx;
+            activeSegmentStartIdx_ = keyframeIdx;
             newSegment.state = SegmentState::Accumulating;
             newSegment.pcdMerged = nullptr;
             activeSegment_ = std::move(newSegment);

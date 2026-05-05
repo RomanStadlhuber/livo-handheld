@@ -204,8 +204,6 @@ namespace mapping
     {
         /// @brief Unique identifier for this segment
         uint32_t id;
-        /// @brief Keyframe index of the first submap in this segment
-        uint32_t startIdx;
         /// @brief Map of submaps: keyframe index -> (Pose3, PointCloud)
         std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
             submaps;
