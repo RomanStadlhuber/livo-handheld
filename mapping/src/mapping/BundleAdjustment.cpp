@@ -2,6 +2,7 @@
 /// @ingroup bundle_adjustment
 #include <mapping/BundleAdjustment.hpp>
 #include <mapping/logging.hpp>
+#include <open3d/utility/Logging.h>
 
 #include <thread>
 #include <atomic>
@@ -63,6 +64,9 @@ namespace mapping
         activeSegment_.pcdMerged = nullptr;
 
         sem_init(&workSemaphore_, 0, 0);
+
+        // TODO: comment this out when done with diagnostics
+        open3d::utility::SetVerbosityLevel(open3d::utility::VerbosityLevel::Debug);
 
         LOG(INFO, "BundleAdjustment initialized with config");
     }
@@ -415,7 +419,13 @@ namespace mapping
         // pass 3: global pose graph optimization
         open3d::pipelines::registration::GlobalOptimization(
             poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
-            open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(),
+            open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(
+                /*max_iteration=*/20,
+                /*min_relative_increment=*/1e-4,
+                /*min_relative_residual_increment=*/1e-4,
+                /*min_right_term=*/1e-3, // right hand side of JtJ * dx = Jt * r
+                /*min_residual=*/1e-4,
+                /*max_iteration_lm=*/10),
             open3d::pipelines::registration::GlobalOptimizationOption(
                 config_.global_map_optimization.icp_max_correspondence_distance,
                 /*edge_prune_threshold=*/0.25,
@@ -617,7 +627,13 @@ namespace mapping
             const int referenceNode = (R > 0) ? static_cast<int>(M) : 0;
             open3d::pipelines::registration::GlobalOptimization(
                 poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
-                open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(),
+                open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(
+                    /*max_iteration=*/20,
+                    /*min_relative_increment=*/1e-4,
+                    /*min_relative_residual_increment=*/1e-4,
+                    /*min_right_term=*/1e-3, // right hand side of JtJ * dx = Jt * r
+                    /*min_residual=*/1e-4,
+                    /*max_iteration_lm=*/10),
                 open3d::pipelines::registration::GlobalOptimizationOption(segIcpMaxDist,
                                                                           /*edge_prune_threshold=*/0.25,
                                                                           /*preference_loop_closure=*/1.0,
