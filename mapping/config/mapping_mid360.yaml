@@ -70,14 +70,16 @@ global_map_optimization:
   segment_length: 5.0          # [m]
   # IMPORTANT: should be larger than frontend voxel size!!
   icp_max_correspondence_distance: 1.5  # [m]
-  icp_iterations: 50
+  icp_iterations: 3
   refinement_voxel_size: 0.2    # [m]
   loop_closure_max_distance: 3.0   # [m]
   loop_closure_max_angle: 1.047    # [rad] ~60 deg
   loop_closure_min_fitness: 0.6
   segment_loop_closure_max_distance: 15.0  # [m]
-  convergence_pose_delta_translation: 0.05 # [m]
+  convergence_pose_delta_translation: 0.02 # [m]
   convergence_pose_delta_rotation: 0.01    # [rad]
   max_align_iterations: 5
   k_nearest_frozen: 3
+  submap_min_distance: 1.0      # [m], min travel from last accepted submap before accepting a new one
+  max_submaps_per_segment: 8    # hard cap; segment sealed early when hit
 
