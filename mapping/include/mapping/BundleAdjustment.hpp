@@ -20,6 +20,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <semaphore.h>
 
@@ -109,6 +110,9 @@ namespace mapping
         std::vector<GlobalMapSegment> pendingSegments_;
         /// @brief Currently accumulating segment (foreground writes from tracking thread)
         GlobalMapSegment activeSegment_;
+        /// @brief Translation of the last submap received via accumulateSubmapToSegment,
+        /// used to compute incremental path length independently of which submaps were accepted
+        std::optional<Eigen::Vector3d> lastReceivedTranslation_;
         /// @brief Counter for assigning unique segment IDs
         uint32_t nextSegmentId_{0};
         /// @brief Monotonic version counter, bumped each time a segment freezes

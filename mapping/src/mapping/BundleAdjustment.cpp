@@ -131,44 +131,67 @@ namespace mapping
     void BundleAdjustment::accumulateSubmapToSegment(uint32_t keyframeIdx, const std::shared_ptr<gtsam::Pose3> &pose,
                                                      const std::shared_ptr<open3d::geometry::PointCloud> &cloud)
     {
-        // add step distance from the previous submap before inserting the new one
-        if (!activeSegment_.submaps.empty())
+        const Eigen::Vector3d translation = pose->translation();
+
+        // accumulate path length from every received pose, not just accepted ones, so the segment
+        // sealing threshold reflects true travel distance even when submaps are skipped
+        if (lastReceivedTranslation_.has_value())
+            activeSegment_.accumulatedDistance += (translation - *lastReceivedTranslation_).norm();
+        lastReceivedTranslation_ = translation;
+
+        // helper: seal activeSegment_ and open a fresh one; the caller decides whether to then
+        // insert the current submap into the new segment
+        auto sealActiveSegment = [&](const char *reason)
         {
-            const Eigen::Vector3d prevTranslation = activeSegment_.submaps.rbegin()->second.first->translation();
-            activeSegment_.accumulatedDistance += (pose->translation() - prevTranslation).norm();
-        }
-
-        activeSegment_.submaps[keyframeIdx] = {pose, cloud};
-
-        LOG(DEBUG, "Added submap at keyframe " << keyframeIdx << " to segment " << activeSegment_.id
-                                               << " (travel=" << activeSegment_.accumulatedDistance << "m)");
-
-        if (activeSegment_.accumulatedDistance >= config_.global_map_optimization.segment_length)
-        {
-            LOG(INFO, "Segment " << activeSegment_.id << " reached distance threshold. Moving to refinement queue.");
-
+            LOG(INFO, "Segment " << activeSegment_.id << " sealed (" << reason
+                                 << ", submaps=" << activeSegment_.submaps.size()
+                                 << ", travel=" << activeSegment_.accumulatedDistance << "m)");
             activeSegment_.state = SegmentState::WaitingForRefinement;
-
             {
                 std::lock_guard<std::mutex> lock(mapMutex_);
                 for (const auto &[kfIdx, _] : activeSegment_.submaps)
                     sealedKeyframes_.push_back(kfIdx);
             }
-
             refinementQueue_.push(activeSegment_);
             sem_post(&workSemaphore_);
 
             GlobalMapSegment newSegment;
             newSegment.id = nextSegmentId_++;
-            // keyframeIdx was just sealed into the outgoing segment; next segment starts one ahead
-            newSegment.startIdx = keyframeIdx + 1;
+            newSegment.startIdx = keyframeIdx;
             newSegment.state = SegmentState::Accumulating;
             newSegment.pcdMerged = nullptr;
-
-            activeSegment_ = newSegment;
-
+            activeSegment_ = std::move(newSegment);
             LOG(INFO, "Created new active segment with id " << activeSegment_.id);
+        };
+
+        // gate: skip this submap if it is too close to the last accepted one
+        const double minDist = config_.global_map_optimization.submap_min_distance;
+        if (minDist > 0.0 && !activeSegment_.submaps.empty())
+        {
+            const double distFromLast =
+                (translation - activeSegment_.submaps.rbegin()->second.first->translation()).norm();
+            if (distFromLast < minDist)
+            {
+                // still check the distance threshold so a segment is not held open indefinitely
+                // when the robot barely moves and every submap gets rejected
+                if (activeSegment_.accumulatedDistance >= config_.global_map_optimization.segment_length)
+                    sealActiveSegment("distance threshold");
+                return;
+            }
         }
+
+        // seal early if the submap cap is about to be exceeded, then insert into the fresh segment
+        const int maxSubmaps = config_.global_map_optimization.max_submaps_per_segment;
+        if (maxSubmaps > 0 && static_cast<int>(activeSegment_.submaps.size()) >= maxSubmaps)
+            sealActiveSegment("submap cap");
+
+        activeSegment_.submaps[keyframeIdx] = {pose, cloud};
+        LOG(DEBUG, "Accepted submap at keyframe " << keyframeIdx << " to segment " << activeSegment_.id
+                                                  << " (n=" << activeSegment_.submaps.size()
+                                                  << ", travel=" << activeSegment_.accumulatedDistance << "m)");
+
+        if (activeSegment_.accumulatedDistance >= config_.global_map_optimization.segment_length)
+            sealActiveSegment("distance threshold");
     }
 
     std::shared_ptr<const FrozenMapSnapshot> BundleAdjustment::getGlobalMap(const gtsam::Pose3 &pose,
