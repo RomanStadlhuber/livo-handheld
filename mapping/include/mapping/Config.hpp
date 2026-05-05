@@ -349,6 +349,10 @@ namespace mapping
             0.01;                     // [rad], freeze segment when last PGO rotation correction is below this
         int max_align_iterations = 5; // hard cap on PGO passes before forced freeze
         int k_nearest_frozen = 3;     // number of nearest frozen segments used as references per free segment
+        double submap_min_distance =
+            0.0; // [m], minimum travel from the last accepted submap before accepting a new one (0 = disabled)
+        int max_submaps_per_segment =
+            0; // hard cap on submaps per segment; segment is sealed early when hit (0 = disabled)
     };
 
     inline void declare_config(GlobalMapOptimizationConfig &config)
@@ -379,6 +383,10 @@ namespace mapping
         check(config.convergence_pose_delta_rotation, GT, 0.0, "convergence_pose_delta_rotation");
         check(config.max_align_iterations, GT, 0, "max_align_iterations");
         check(config.k_nearest_frozen, GT, 0, "k_nearest_frozen");
+        field(config.submap_min_distance, "submap_min_distance", "m");
+        field(config.max_submaps_per_segment, "max_submaps_per_segment");
+        check(config.submap_min_distance, GE, 0.0, "submap_min_distance");
+        check(config.max_submaps_per_segment, GE, 0, "max_submaps_per_segment");
     }
 
     /// @brief Main mapping system configuration
