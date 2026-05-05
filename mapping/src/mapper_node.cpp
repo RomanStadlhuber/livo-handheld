@@ -277,20 +277,23 @@ private:
         {
             open3d::geometry::PointCloud globalMapCloud;
 
-            // collect all keyframe indices already covered by frozen segments
-            std::unordered_set<uint32_t> absorbedKeyframes;
+            // collect keyframe indices to exclude from raw rendering:
+            // - absorbed: already part of a frozen segment (shown via legacyCloud)
+            // - sealed: handed to the refinement pipeline; clouds may be in an intermediate frame
+            const auto sealedIndices = slam_.getSealedKeyframeIndices();
+            std::unordered_set<uint32_t> excludedKeyframes(sealedIndices.begin(), sealedIndices.end());
             for (const auto &seg : frozenSegments)
                 for (uint32_t kfIdx : seg->keyframeIndices)
-                    absorbedKeyframes.insert(kfIdx);
+                    excludedKeyframes.insert(kfIdx);
 
             // add corrected clouds from frozen segments
             for (const auto &seg : frozenSegments)
                 if (seg->legacyCloud)
                     globalMapCloud += *seg->legacyCloud;
 
-            // add raw clouds for keyframes not yet absorbed into any frozen segment
+            // add raw clouds for keyframes still accumulating in the active segment
             for (const auto &[idx, cloud] : rawSubmapClouds_)
-                if (absorbedKeyframes.find(idx) == absorbedKeyframes.end())
+                if (excludedKeyframes.find(idx) == excludedKeyframes.end())
                     globalMapCloud += *cloud;
 
             if (!globalMapCloud.IsEmpty())

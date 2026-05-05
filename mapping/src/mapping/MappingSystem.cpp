@@ -434,6 +434,11 @@ namespace mapping
         return bundleAdjustment_->getAllFrozenSegments();
     }
 
+    std::vector<uint32_t> MappingSystem::getSealedKeyframeIndices() const
+    {
+        return bundleAdjustment_->getSealedKeyframeIndices();
+    }
+
     void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }
 
 } // namespace mapping

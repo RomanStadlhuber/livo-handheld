@@ -84,6 +84,10 @@ namespace mapping
         /// @brief Return all frozen segments from the global map optimizer.
         std::vector<std::shared_ptr<const FrozenSegment>> getAllFrozenSegments() const;
 
+        /// @brief Return keyframe indices of sealed-but-not-yet-frozen segments.
+        /// @details See BundleAdjustment::getSealedKeyframeIndices.
+        std::vector<uint32_t> getSealedKeyframeIndices() const;
+
         /// @brief Get the current (possibly optimized) IMU-to-LiDAR extrinsic calibration.
         gtsam::Pose3 getImuToLidarExtrinsic() const { return states_.getImuToLidarExtrinsic(); }
         /// @brief Get the current (possibly optimized) temporal offset [s].

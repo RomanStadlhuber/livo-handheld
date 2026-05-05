@@ -57,6 +57,12 @@ namespace mapping
         /// @details Zero-copy of clouds — legacyCloud is already shared_ptr<const>.
         std::vector<std::shared_ptr<const FrozenSegment>> getAllFrozenSegments() const;
 
+        /// @brief Return the set of keyframe indices that belong to sealed-but-not-yet-frozen segments.
+        /// @details These submaps have been handed off to the refinement pipeline and their clouds
+        /// may be temporarily in an intermediate frame; callers should skip rendering them until
+        /// they appear in a frozen segment.
+        std::vector<uint32_t> getSealedKeyframeIndices() const;
+
         /// @brief Query the frozen global map by pose proximity.
         /// @details Returns a snapshot containing every frozen segment whose centroid is
         /// within `radius` of the query translation. Tensor representations are not
@@ -107,7 +113,10 @@ namespace mapping
         uint32_t nextSegmentId_{0};
         /// @brief Monotonic version counter, bumped each time a segment freezes
         uint64_t mapVersion_{0};
-        /// @brief Mutex guarding `frozenSegments_` and `mapVersion_`
+        /// @brief Keyframe indices of segments that have been sealed but not yet frozen.
+        /// Protected by mapMutex_.
+        std::vector<uint32_t> sealedKeyframes_;
+        /// @brief Mutex guarding `frozenSegments_`, `mapVersion_`, and `sealedKeyframes_`
         mutable std::mutex mapMutex_;
     };
 } // namespace mapping

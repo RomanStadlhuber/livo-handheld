@@ -128,6 +128,12 @@ namespace mapping
 
             activeSegment_.state = SegmentState::WaitingForRefinement;
 
+            {
+                std::lock_guard<std::mutex> lock(mapMutex_);
+                for (const auto &[kfIdx, _] : activeSegment_.submaps)
+                    sealedKeyframes_.push_back(kfIdx);
+            }
+
             refinementQueue_.push(activeSegment_);
             sem_post(&workSemaphore_);
 
@@ -664,8 +670,17 @@ namespace mapping
         segment.state = SegmentState::Aligned;
 
         std::lock_guard<std::mutex> lock(mapMutex_);
+        for (const auto &kfIdx : frozen->keyframeIndices)
+            sealedKeyframes_.erase(std::remove(sealedKeyframes_.begin(), sealedKeyframes_.end(), kfIdx),
+                                   sealedKeyframes_.end());
         frozenSegments_.push_back(std::move(frozen));
         ++mapVersion_;
+    }
+
+    std::vector<uint32_t> BundleAdjustment::getSealedKeyframeIndices() const
+    {
+        std::lock_guard<std::mutex> lock(mapMutex_);
+        return sealedKeyframes_;
     }
 
 } // namespace mapping
