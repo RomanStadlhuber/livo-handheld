@@ -65,6 +65,11 @@ namespace mapping
 
         sem_init(&workSemaphore_, 0, 0);
 
+        const int totalCpus = static_cast<int>(std::thread::hardware_concurrency());
+        const int baCpus = std::max(1, totalCpus / 2);
+        backgroundArena_ = std::make_unique<tbb::task_arena>(baCpus, 1, tbb::task_arena::priority::low);
+        LOG(INFO, "BA arena: " << baCpus << "/" << totalCpus << " threads, low priority");
+
         // TODO: comment this out when done with diagnostics
         // open3d::utility::SetVerbosityLevel(open3d::utility::VerbosityLevel::Debug);
 
@@ -95,27 +100,6 @@ namespace mapping
         {
             LOG(WARN, "Failed to set SCHED_IDLE priority for optimization worker: " << result);
         }
-
-#ifdef __linux__
-        // pin the BA worker to the first half of the available cores
-        // Open3D's TBB/OpenMP child threads inherit the affinity mask of their parent (main),
-        // so this effectively caps the cores available to all ICP and normal-estimation operations,
-        // leaving cores free for the tracking thread
-        const int totalCpus = static_cast<int>(std::thread::hardware_concurrency()),
-                  // number of physical CPU cores made available to the BA thread
-            baCpus = std::max(1, totalCpus / 2);
-        cpu_set_t cpuSet;  // "bitmask" indicating available CPUs
-        CPU_ZERO(&cpuSet); // first, make all unavailable, then add-back the 1st half of physical cores
-        for (int i = 0; i < baCpus; ++i)
-            CPU_SET(i, &cpuSet);
-        // CPU affinity is the only effective way to limit Open3D's resource usage here:
-        // Open3D spawns TBB/OpenMP workers that inherit the affinity mask but not SCHED_IDLE,
-        // so they run at full priority on whichever cores the mask permits
-        if (pthread_setaffinity_np(optimizationThread_.native_handle(), sizeof(cpu_set_t), &cpuSet) != 0)
-            LOG(WARN, "Failed to set CPU affinity for optimization worker");
-        else
-            LOG(INFO, "BA worker pinned to " << baCpus << " of " << totalCpus << " cores");
-#endif
     }
 
     void BundleAdjustment::stopOptimizationWorker()
@@ -265,7 +249,7 @@ namespace mapping
             while (self->refinementQueue_.try_pop(segment))
             {
                 LOG(DEBUG, "Refining segment " << segment.id);
-                self->refineSegment(segment);
+                self->backgroundArena_->execute([&] { self->refineSegment(segment); });
 
                 bool hasFrozen;
                 {
@@ -301,7 +285,7 @@ namespace mapping
                 LOG(INFO, "Running alignment on " << workingSet.size() << " segments ("
                                                   << "pending was " << workingSet.size() - newBatch.size()
                                                   << ", new batch " << newBatch.size() << ")");
-                self->alignAllSegments(workingSet);
+                self->backgroundArena_->execute([&] { self->alignAllSegments(workingSet); });
             }
 
             // 4. block until more work or shutdown

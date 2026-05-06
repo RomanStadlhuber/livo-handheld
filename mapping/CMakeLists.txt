@@ -38,6 +38,8 @@ list(APPEND CMAKE_PREFIX_PATH "/install/open3d-devel/lib/cmake")
 find_package(Open3D REQUIRED)
 find_package(open3d_conversions REQUIRED) # for converting to ROS PointCloud2
 find_package(config_utilities REQUIRED)
+set(TBB_DIR "/usr/lib/x86_64-linux-gnu/cmake/TBB" CACHE PATH "" FORCE)
+find_package(TBB REQUIRED CONFIG)
 
 
 # set(CMAKE_BUILD_TYPE Release)
@@ -75,11 +77,12 @@ add_library(mapping
 target_include_directories(mapping PUBLIC include)
 
 target_link_libraries(mapping
-  Eigen3::Eigen 
+  Eigen3::Eigen
   ${OpenCV_LIBS}
   Open3D::Open3D
-  gtsam 
-  gtsam_unstable 
+  gtsam
+  gtsam_unstable
+  TBB::tbb
   config_utilities::config_utilities
 )
 

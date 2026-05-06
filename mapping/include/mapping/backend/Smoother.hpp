@@ -16,6 +16,8 @@
 // NOTE: FeatureManager is used by updateAndOptimizeGraph to set the cluster->factorIdx mapping
 #include <mapping/backend/FeatureManager.hpp>
 
+#include <tbb/task_arena.h>
+
 #include <iostream>
 
 namespace mapping
@@ -84,6 +86,9 @@ namespace mapping
         gtsam::FixedLagSmootherKeyTimestampMap initialSmootherIndices_;
         // whether the initial priors have been added to the graph and the smoother has been bootstrapped
         bool bootstrapped_{false};
+
+        // TBB arena for all GTSAM parallel work; normal priority, sized to complement the BA arena
+        std::unique_ptr<tbb::task_arena> frontendArena_;
     };
 } // namespace mapping
 

@@ -16,6 +16,8 @@
 #include <open3d/pipelines/registration/PoseGraph.h>
 #include <open3d/t/geometry/PointCloud.h>
 
+#include <tbb/task_arena.h>
+
 #include <thread>
 #include <atomic>
 #include <memory>
@@ -124,6 +126,9 @@ namespace mapping
         std::vector<uint32_t> sealedKeyframes_;
         /// @brief Mutex guarding `frozenSegments_`, `mapVersion_`, and `sealedKeyframes_`
         mutable std::mutex mapMutex_;
+
+        // TBB arena for all Open3D parallel work; low priority yields to the tracking thread
+        std::unique_ptr<tbb::task_arena> backgroundArena_;
     };
 } // namespace mapping
 
