@@ -66,7 +66,7 @@ namespace mapping
         sem_init(&workSemaphore_, 0, 0);
 
         // TODO: comment this out when done with diagnostics
-        open3d::utility::SetVerbosityLevel(open3d::utility::VerbosityLevel::Debug);
+        // open3d::utility::SetVerbosityLevel(open3d::utility::VerbosityLevel::Debug);
 
         LOG(INFO, "BundleAdjustment initialized with config");
     }
@@ -316,130 +316,52 @@ namespace mapping
         const std::size_t N = segment.submaps.size();
         LOG(INFO, "Refining segment " << segment.id << " with " << N << " submaps");
 
-        segment.pcdMerged = std::make_shared<open3d::geometry::PointCloud>();
-
-        if (N < 2)
-        {
-            for (auto &[kfIdx, poseAndCloud] : segment.submaps)
-                *segment.pcdMerged += *poseAndCloud.second;
-            return;
-        }
-
-        struct SubmapEntry
-        {
-            open3d::geometry::PointCloud *cloud;
-            gtsam::Pose3 odomPose;
-        };
-        std::vector<SubmapEntry> ordered;
+        // collect in keyframe order (submaps map is keyed by keyframe index)
+        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> ordered;
         ordered.reserve(N);
-
-        // transform all submaps to their local LiDAR frame and estimate normals for point-to-plane ICP;
-        // KNN search is significantly faster than the default radius search on dense clouds
         for (auto &[kfIdx, poseAndCloud] : segment.submaps)
         {
-            auto &[pose, cloud] = poseAndCloud;
-            cloud->Transform(pose->inverse().matrix());
-            cloud->EstimateNormals(open3d::geometry::KDTreeSearchParamKNN(7));
-            ordered.push_back({cloud.get(), *pose});
+            // normals needed as ICP targets in the chain below; Transform propagates them correctly
+            poseAndCloud.second->EstimateNormals(open3d::geometry::KDTreeSearchParamKNN(7));
+            ordered.push_back(poseAndCloud.second);
         }
 
-        open3d::pipelines::registration::PoseGraph poseGraph;
-        poseGraph.nodes_.reserve(N);
-        poseGraph.edges_.reserve(N * N);
-
-        std::vector<gtsam::Pose3> updatedPoses;
-        updatedPoses.reserve(N);
-
-        poseGraph.nodes_.emplace_back(ordered[0].odomPose.matrix());
-        updatedPoses.push_back(ordered[0].odomPose);
-
-        // pass 1: sequential odometry edges
-        // use a fixed information matrix for odometry edges: they are marked uncertain=false so the
-        // optimizer treats them as hard constraints regardless of the exact per-element weights,
-        // and skipping GetInformationMatrixFromPointClouds saves N-1 ICP calls per segment
-        const Eigen::Matrix6d odomInfo = Eigen::Matrix6d::Identity() * 100.0;
-        for (std::size_t i = 0; i < N - 1; ++i)
+        // chain ICP: align each submap sequentially to the previous one to correct intra-segment
+        // LIO drift. initial guess is identity since submaps are already roughly aligned in world
+        // frame. N-1 ICP calls, no PGO, no loop closure search.
+        if (N >= 2)
         {
-            const std::size_t j = i + 1;
-            const gtsam::Pose3 odomDelta = ordered[i].odomPose.between(ordered[j].odomPose);
+            const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
+                1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
+            const double maxDist = config_.global_map_optimization.icp_max_correspondence_distance;
+            const double minFitness = config_.global_map_optimization.loop_closure_min_fitness;
 
-            updatedPoses.push_back(updatedPoses[i].compose(odomDelta));
-            poseGraph.nodes_.emplace_back(updatedPoses[j].matrix());
-
-            poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), odomDelta.matrix(), odomInfo,
-                                          /*uncertain=*/false);
-
-            LOG(DEBUG, "odometry edge " << i << "->" << j);
-        }
-
-        // pass 2: loop closure edges between nearby non-consecutive nodes
-        const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
-            1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
-        const double loopClosureMaxDist = config_.global_map_optimization.loop_closure_max_distance,
-                     loopClosureMaxAngle = config_.global_map_optimization.loop_closure_max_angle,
-                     loopClosureMinFitness = config_.global_map_optimization.loop_closure_min_fitness;
-
-        for (std::size_t i = 0; i < N; ++i)
-        {
-            for (std::size_t j = i + 2; j < N; ++j)
+            for (std::size_t i = 1; i < N; ++i)
             {
-                const double dist = (updatedPoses[i].translation() - updatedPoses[j].translation()).norm();
-                if (dist > loopClosureMaxDist)
-                    continue;
-
-                const double angle = updatedPoses[i].rotation().between(updatedPoses[j].rotation()).axisAngle().second;
-                if (angle > loopClosureMaxAngle)
-                    continue;
-
-                const gtsam::Pose3 i_T_j_init = updatedPoses[i].between(updatedPoses[j]);
-
-                const auto icpResult = open3d::pipelines::registration::RegistrationICP(
-                    *ordered[j].cloud, *ordered[i].cloud,
-                    config_.global_map_optimization.icp_max_correspondence_distance, i_T_j_init.matrix(),
+                const auto result = open3d::pipelines::registration::RegistrationICP(
+                    *ordered[i], *ordered[i - 1], maxDist, Eigen::Matrix4d::Identity(),
                     open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
 
-                if (icpResult.fitness_ < loopClosureMinFitness)
-                    continue;
-
-                const auto infoMatrix = open3d::pipelines::registration::GetInformationMatrixFromPointClouds(
-                    *ordered[j].cloud, *ordered[i].cloud,
-                    config_.global_map_optimization.icp_max_correspondence_distance, icpResult.transformation_);
-
-                poseGraph.edges_.emplace_back(static_cast<int>(j), static_cast<int>(i), icpResult.transformation_,
-                                              infoMatrix, /*uncertain=*/true);
-
-                LOG(DEBUG,
-                    "loop closure edge " << i << "<->" << j << " dist=" << dist << " fitness=" << icpResult.fitness_);
+                if (result.fitness_ >= minFitness)
+                {
+                    ordered[i]->Transform(result.transformation_);
+                    LOG(DEBUG, "chain ICP " << i - 1 << "->" << i << " fitness=" << result.fitness_);
+                }
+                else
+                    LOG(WARN, "chain ICP " << i - 1 << "->" << i << " failed (fitness=" << result.fitness_
+                                           << "), keeping odometry pose");
             }
         }
 
-        LOG(INFO, "Segment " << segment.id << " pose graph: " << poseGraph.nodes_.size() << " nodes, "
-                             << poseGraph.edges_.size() << " edges");
-
-        // pass 3: global pose graph optimization
-        open3d::pipelines::registration::GlobalOptimization(
-            poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
-            open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(
-                /*max_iteration=*/20,
-                /*min_relative_increment=*/1e-4,
-                /*min_relative_residual_increment=*/1e-4,
-                /*min_right_term=*/1e-3, // right hand side of JtJ * dx = Jt * r
-                /*min_residual=*/1e-4,
-                /*max_iteration_lm=*/10),
-            open3d::pipelines::registration::GlobalOptimizationOption(
-                config_.global_map_optimization.icp_max_correspondence_distance,
-                /*edge_prune_threshold=*/0.25,
-                /*preference_loop_closure=*/1.0,
-                /*reference_node=*/0));
-
-        // pass 4: apply optimized poses and merge into pcdMerged
-        for (std::size_t k = 0; k < N; ++k)
-        {
-            ordered[k].cloud->Transform(poseGraph.nodes_[k].pose_);
-            *segment.pcdMerged += *ordered[k].cloud;
-        }
+        segment.pcdMerged = std::make_shared<open3d::geometry::PointCloud>();
+        for (const auto &cloud : ordered)
+            *segment.pcdMerged += *cloud;
 
         segment.pcdMerged = segment.pcdMerged->VoxelDownSample(config_.global_map_optimization.refinement_voxel_size);
+
+        // normals on the merged cloud are required by point-to-plane ICP in alignAllSegments
+        segment.pcdMerged->EstimateNormals(open3d::geometry::KDTreeSearchParamKNN(7));
+
         LOG(INFO, "Segment " << segment.id << " refined: " << segment.pcdMerged->points_.size() << " points");
     }
 
@@ -628,12 +550,12 @@ namespace mapping
             open3d::pipelines::registration::GlobalOptimization(
                 poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
                 open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(
-                    /*max_iteration=*/20,
+                    /*max_iteration=*/12,
                     /*min_relative_increment=*/1e-4,
                     /*min_relative_residual_increment=*/1e-4,
                     /*min_right_term=*/1e-3, // right hand side of JtJ * dx = Jt * r
                     /*min_residual=*/1e-4,
-                    /*max_iteration_lm=*/10),
+                    /*max_iteration_lm=*/6),
                 open3d::pipelines::registration::GlobalOptimizationOption(segIcpMaxDist,
                                                                           /*edge_prune_threshold=*/0.25,
                                                                           /*preference_loop_closure=*/1.0,
