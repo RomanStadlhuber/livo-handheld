@@ -331,62 +331,48 @@ namespace mapping
         field(config.camera, "camera");
     }
 
-    /// @brief Global map optimization parameters for segment accumulation and refinement
+    /// @brief Global map optimization parameters for submap-level pose graph optimization
     struct GlobalMapOptimizationConfig
     {
-        double segment_length = 5.0;                  // [m], distance threshold for sealing segments
-        double icp_max_correspondence_distance = 1.5; // [m], for pairwise ICP alignment
-        int icp_iterations = 50;                      // max iterations for ICP convergence
-        double refinement_voxel_size = 0.2;           // [m], voxel size for segment cloud merging
-        double loop_closure_max_distance = 3.0;       // [m], max translation between nodes for loop closure attempt
-        double loop_closure_max_angle = 1.047;        // [rad], max rotation between nodes (~60 deg)
-        double loop_closure_min_fitness = 0.3;        // min ICP inlier ratio to accept a loop closure edge
-        double segment_loop_closure_max_distance =
-            15.0; // [m], max centroid distance between non-consecutive segments for loop closure
-        double convergence_pose_delta_translation =
-            0.05; // [m], freeze segment when last PGO translation correction is below this
-        double convergence_pose_delta_rotation =
-            0.01;                     // [rad], freeze segment when last PGO rotation correction is below this
-        int max_align_iterations = 5; // hard cap on PGO passes before forced freeze
-        int k_nearest_frozen = 3;     // number of nearest frozen segments used as references per free segment
-        double submap_min_distance =
-            0.0; // [m], minimum travel from the last accepted submap before accepting a new one (0 = disabled)
-        int max_submaps_per_segment =
-            0; // hard cap on submaps per segment; segment is sealed early when hit (0 = disabled)
+        double submap_min_distance = 5.0; // [m], min travel from last accepted submap before accepting a new one
+        double submap_min_angle = 0.785;  // [rad], min rotation (~45 deg) from last accepted submap
+        double icp_max_correspondence_distance = 1.5;     // [m], for pairwise ICP alignment
+        int icp_iterations = 50;                          // max iterations for ICP convergence
+        double refinement_voxel_size = 0.2;               // [m], voxel size applied to each accepted submap
+        double loop_closure_search_radius = 15.0;         // [m], max pose distance for non-sequential loop closure
+        double loop_closure_min_fitness = 0.3;            // min ICP inlier ratio to accept a loop closure edge
+        double convergence_pose_delta_translation = 0.05; // [m], freeze submap when PGO translation delta is below this
+        double convergence_pose_delta_rotation = 0.01;    // [rad], freeze submap when PGO rotation delta is below this
+        int max_align_iterations = 5;                     // hard cap on PGO passes before forced freeze
+        int k_nearest_frozen = 3; // number of nearest frozen submaps used as references per free submap
     };
 
     inline void declare_config(GlobalMapOptimizationConfig &config)
     {
         using namespace config;
         name("GlobalMapOptimizationConfig");
-        field(config.segment_length, "segment_length", "m");
+        field(config.submap_min_distance, "submap_min_distance", "m");
+        field(config.submap_min_angle, "submap_min_angle", "rad");
         field(config.icp_max_correspondence_distance, "icp_max_correspondence_distance", "m");
         field(config.icp_iterations, "icp_iterations");
         field(config.refinement_voxel_size, "refinement_voxel_size", "m");
-        field(config.loop_closure_max_distance, "loop_closure_max_distance", "m");
-        field(config.loop_closure_max_angle, "loop_closure_max_angle", "rad");
+        field(config.loop_closure_search_radius, "loop_closure_search_radius", "m");
         field(config.loop_closure_min_fitness, "loop_closure_min_fitness");
-        field(config.segment_loop_closure_max_distance, "segment_loop_closure_max_distance", "m");
         field(config.convergence_pose_delta_translation, "convergence_pose_delta_translation", "m");
         field(config.convergence_pose_delta_rotation, "convergence_pose_delta_rotation", "rad");
         field(config.max_align_iterations, "max_align_iterations");
         field(config.k_nearest_frozen, "k_nearest_frozen");
-        check(config.segment_length, GT, 0.0, "segment_length");
+        check(config.submap_min_distance, GT, 0.0, "submap_min_distance");
+        check(config.submap_min_angle, GT, 0.0, "submap_min_angle");
         check(config.icp_max_correspondence_distance, GT, 0.0, "icp_max_correspondence_distance");
         check(config.icp_iterations, GT, 0, "icp_iterations");
         check(config.refinement_voxel_size, GT, 0.0, "refinement_voxel_size");
-        check(config.loop_closure_max_distance, GT, 0.0, "loop_closure_max_distance");
-        check(config.loop_closure_max_angle, GT, 0.0, "loop_closure_max_angle");
+        check(config.loop_closure_search_radius, GT, 0.0, "loop_closure_search_radius");
         check(config.loop_closure_min_fitness, GT, 0.0, "loop_closure_min_fitness");
-        check(config.segment_loop_closure_max_distance, GT, 0.0, "segment_loop_closure_max_distance");
         check(config.convergence_pose_delta_translation, GT, 0.0, "convergence_pose_delta_translation");
         check(config.convergence_pose_delta_rotation, GT, 0.0, "convergence_pose_delta_rotation");
         check(config.max_align_iterations, GT, 0, "max_align_iterations");
         check(config.k_nearest_frozen, GT, 0, "k_nearest_frozen");
-        field(config.submap_min_distance, "submap_min_distance", "m");
-        field(config.max_submaps_per_segment, "max_submaps_per_segment");
-        check(config.submap_min_distance, GE, 0.0, "submap_min_distance");
-        check(config.max_submaps_per_segment, GE, 0, "max_submaps_per_segment");
     }
 
     /// @brief Main mapping system configuration
