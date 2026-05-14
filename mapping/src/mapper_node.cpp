@@ -272,26 +272,25 @@ private:
         for (const auto &[idx, poseAndCloud] : marginalizedSubmaps)
             rawSubmapClouds_[idx] = poseAndCloud.second;
 
-        // build dedup global map: frozen segments (corrected) + raw submaps not yet absorbed
-        auto frozenSegments = slam_.getAllFrozenSegments();
+        // build dedup global map: frozen submaps (corrected) + raw submaps not yet absorbed
+        auto frozenSubmaps = slam_.getAllFrozenSubmaps();
         {
             open3d::geometry::PointCloud globalMapCloud;
 
             // collect keyframe indices to exclude from raw rendering:
-            // - absorbed: already part of a frozen segment (shown via legacyCloud)
-            // - sealed: handed to the refinement pipeline; clouds may be in an intermediate frame
-            const auto sealedIndices = slam_.getSealedKeyframeIndices();
-            std::unordered_set<uint32_t> excludedKeyframes(sealedIndices.begin(), sealedIndices.end());
-            for (const auto &seg : frozenSegments)
-                for (uint32_t kfIdx : seg->keyframeIndices)
-                    excludedKeyframes.insert(kfIdx);
+            // - absorbed: already frozen (shown via legacyCloud)
+            // - pending: handed to the BA optimizer; clouds may be in an intermediate frame
+            const auto pendingIndices = slam_.getPendingKeyframeIndices();
+            std::unordered_set<uint32_t> excludedKeyframes(pendingIndices.begin(), pendingIndices.end());
+            for (const auto &sub : frozenSubmaps)
+                excludedKeyframes.insert(sub->keyframeIdx);
 
-            // add corrected clouds from frozen segments
-            for (const auto &seg : frozenSegments)
-                if (seg->legacyCloud)
-                    globalMapCloud += *seg->legacyCloud;
+            // add corrected clouds from frozen submaps
+            for (const auto &sub : frozenSubmaps)
+                if (sub->legacyCloud)
+                    globalMapCloud += *sub->legacyCloud;
 
-            // add raw clouds for keyframes still accumulating in the active segment
+            // add raw clouds for keyframes not yet frozen or pending
             for (const auto &[idx, cloud] : rawSubmapClouds_)
                 if (excludedKeyframes.find(idx) == excludedKeyframes.end())
                     globalMapCloud += *cloud;
