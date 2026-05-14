@@ -185,57 +185,19 @@ namespace mapping
     };
 
     /// @ingroup types
-    /// @brief State of a global map segment
-    enum class SegmentState
+    /// @brief Frozen, immutable view of a converged submap for scan-to-map registration.
+    /// @details The legacy point cloud is world-frame, produced by applying the final optimized
+    /// pose to the body-frame cloud at freeze time.
+    /// The tensor representation is built lazily when needed for scan-to-map registration.
+    struct FrozenSubmap
     {
-        /// @brief Segment is accumulating submaps
-        Accumulating,
-        /// @brief Segment is waiting for refinement
-        WaitingForRefinement,
-        /// @brief Segment is waiting for alignment
-        WaitingForAlignment,
-        /// @brief Segment has been aligned
-        Aligned,
-    };
-
-    /// @ingroup types
-    /// @brief A segment of the global map containing multiple submaps
-    struct GlobalMapSegment
-    {
-        /// @brief Unique identifier for this segment
-        uint32_t id;
-        /// @brief Map of submaps: keyframe index -> (Pose3, PointCloud)
-        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
-            submaps;
-        /// @brief Current state of this segment
-        SegmentState state;
-        /// @brief Merged point cloud of all submaps in this segment (nullptr until merged)
-        std::shared_ptr<open3d::geometry::PointCloud> pcdMerged{nullptr};
-        /// @brief Sum of step distances between consecutive submaps [m]
-        double accumulatedDistance{0.0};
-        /// @brief Number of inter-segment PGO passes this segment has been through
-        uint32_t alignIterations{0};
-        /// @brief Translation magnitude of the last applied PGO correction [m]
-        double lastDeltaTranslation{std::numeric_limits<double>::infinity()};
-        /// @brief Rotation magnitude of the last applied PGO correction [rad]
-        double lastDeltaRotation{std::numeric_limits<double>::infinity()};
-    };
-
-    /// @ingroup types
-    /// @brief Frozen, immutable view of a converged segment for scan-to-map registration.
-    /// @details The legacy point cloud is shared (no copy) at freeze time. The tensor
-    /// representation is built lazily on the first `getGlobalMap()` call that surfaces
-    /// the segment, then cached. Centroid and AABB are precomputed at freeze time.
-    struct FrozenSegment
-    {
-        uint32_t id;
-        Eigen::Vector3d centroid;
+        uint32_t keyframeIdx;
+        gtsam::Pose3 pose; // world pose at freeze time
+        /// @brief Axis-aligned bounding box, computed by Open3D and used for scan-to-map candidate search.
         open3d::geometry::AxisAlignedBoundingBox aabb;
         std::shared_ptr<const open3d::geometry::PointCloud> legacyCloud;
-        /// @brief keyframe indices of all submaps that were merged into this segment
-        std::vector<uint32_t> keyframeIndices;
         /// @brief lazily-populated tensor cloud, kept on the heap so the struct itself stays small
-        /// and the cloud data can outlive a FrozenSegment instance held only briefly by callers
+        /// and the cloud data can outlive a FrozenSubmap instance held only briefly by callers
         mutable std::shared_ptr<const open3d::t::geometry::PointCloud> tensorCloud;
         mutable std::once_flag tensorBuiltFlag;
 
@@ -253,10 +215,10 @@ namespace mapping
     };
 
     /// @ingroup types
-    /// @brief Snapshot of frozen segments returned to the tracking thread.
+    /// @brief Snapshot of frozen submaps returned to the tracking thread.
     struct FrozenMapSnapshot
     {
-        std::vector<std::shared_ptr<const FrozenSegment>> segments;
+        std::vector<std::shared_ptr<const FrozenSubmap>> submaps;
         uint64_t version{0};
     };
 } // namespace mapping
