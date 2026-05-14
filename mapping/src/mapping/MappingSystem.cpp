@@ -238,7 +238,7 @@ namespace mapping
         auto newlyMarginalized = states_.getMarginalizedSubmaps();
         for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
         {
-            bundleAdjustment_->accumulateSubmapToSegment(kfIdx, poseAndCloud.first, poseAndCloud.second);
+            bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
             pendingVizSubmaps_[kfIdx] = poseAndCloud;
         }
 
@@ -429,14 +429,14 @@ namespace mapping
         return submaps;
     }
 
-    std::vector<std::shared_ptr<const FrozenSegment>> MappingSystem::getAllFrozenSegments() const
+    std::vector<std::shared_ptr<const FrozenSubmap>> MappingSystem::getAllFrozenSubmaps() const
     {
-        return bundleAdjustment_->getAllFrozenSegments();
+        return bundleAdjustment_->getAllFrozenSubmaps();
     }
 
-    std::vector<uint32_t> MappingSystem::getSealedKeyframeIndices() const
+    std::vector<uint32_t> MappingSystem::getPendingKeyframeIndices() const
     {
-        return bundleAdjustment_->getSealedKeyframeIndices();
+        return bundleAdjustment_->getPendingKeyframeIndices();
     }
 
     void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }
