@@ -32,7 +32,6 @@
 #include <iostream>
 #include <memory>
 #include <string>
-#include <unordered_set>
 
 // Global flag for signal handling
 std::atomic<bool> g_shutdown_requested{false};
@@ -267,39 +266,27 @@ private:
             pubKeyframeSubmap_->publish(submapMsg);
         }
 
-        // accumulate newly marginalized submaps into the raw-submap store
-        auto marginalizedSubmaps = slam_.getMarginalizedSubmaps();
-        for (const auto &[idx, poseAndCloud] : marginalizedSubmaps)
-            rawSubmapClouds_[idx] = poseAndCloud.second;
-
-        // build dedup global map: frozen submaps (corrected) + raw submaps not yet absorbed
-        auto frozenSubmaps = slam_.getAllFrozenSubmaps();
+        // build global map from the full BA state: frozen (corrected) + active (pending optimization)
         {
-            open3d::geometry::PointCloud globalMapCloud;
+            open3d::geometry::PointCloud pcdGlobalMap;
 
-            // collect keyframe indices to exclude from raw rendering:
-            // - absorbed: already frozen (shown via pcd)
-            // - pending: handed to the BA optimizer; clouds may be in an intermediate frame
-            const auto pendingIndices = slam_.getPendingKeyframeIndices();
-            std::unordered_set<uint32_t> excludedKeyframes(pendingIndices.begin(), pendingIndices.end());
-            for (const auto &sub : frozenSubmaps)
-                excludedKeyframes.insert(sub->keyframeIdx);
-
-            // add corrected clouds from frozen submaps
-            for (const auto &sub : frozenSubmaps)
+            for (const auto &sub : slam_.getAllFrozenSubmaps())
                 if (sub->pcd)
-                    globalMapCloud += *sub->pcd;
+                    pcdGlobalMap += *sub->pcd;
 
-            // add raw clouds for keyframes not yet frozen or pending
-            for (const auto &[idx, cloud] : rawSubmapClouds_)
-                if (excludedKeyframes.find(idx) == excludedKeyframes.end())
-                    globalMapCloud += *cloud;
+            for (const auto &[_, submap] : slam_.getAllActiveSubmaps())
+                if (submap.pcd)
+                {
+                    open3d::geometry::PointCloud pcdWorld = *(submap.pcd);
+                    pcdWorld.Transform(submap.pose.matrix());
+                    pcdGlobalMap += pcdWorld;
+                }
 
-            if (!globalMapCloud.IsEmpty())
+            if (!pcdGlobalMap.IsEmpty())
             {
-                auto downsampled = globalMapCloud.VoxelDownSample(0.05);
+                auto pcdDownsampled = pcdGlobalMap.VoxelDownSample(0.05);
                 sensor_msgs::msg::PointCloud2 globalMapMsg;
-                open3d_conversions::open3dToRos(*downsampled, globalMapMsg, "map");
+                open3d_conversions::open3dToRos(*pcdDownsampled, globalMapMsg, "map");
                 globalMapMsg.header.stamp = stamp;
                 pubGlobalMap_->publish(globalMapMsg);
             }
@@ -407,8 +394,6 @@ private:
     visualization_msgs::msg::MarkerArray clusterMarkersMsg_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster_;
     std::map<uint32_t, geometry_msgs::msg::PoseStamped> historicalPoses;
-    /// @brief raw marginalized submap clouds keyed by keyframe index (pre-BA correction)
-    std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> rawSubmapClouds_;
     rclcpp::Time startTime_;
     // accessed from both IMU and LiDAR callback threads without a lock
     // TODO: in the future, use a mutex for values like this
