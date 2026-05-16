@@ -195,22 +195,22 @@ namespace mapping
         gtsam::Pose3 pose; // world pose at freeze time
         /// @brief Axis-aligned bounding box, computed by Open3D and used for scan-to-map candidate search.
         open3d::geometry::AxisAlignedBoundingBox aabb;
-        std::shared_ptr<const open3d::geometry::PointCloud> legacyCloud;
+        std::shared_ptr<const open3d::geometry::PointCloud> pcd;
         /// @brief lazily-populated tensor cloud, kept on the heap so the struct itself stays small
         /// and the cloud data can outlive a FrozenSubmap instance held only briefly by callers
-        mutable std::shared_ptr<const open3d::t::geometry::PointCloud> tensorCloud;
+        mutable std::shared_ptr<const open3d::t::geometry::PointCloud> tensor;
         mutable std::once_flag tensorBuiltFlag;
 
         /// @brief lazy accessor: builds the tensor cloud from legacy on first call, then caches
-        std::shared_ptr<const open3d::t::geometry::PointCloud> tensor() const
+        std::shared_ptr<const open3d::t::geometry::PointCloud> getTensorLazy() const
         {
             std::call_once(tensorBuiltFlag,
                            [this]()
                            {
-                               tensorCloud = std::make_shared<const open3d::t::geometry::PointCloud>(
-                                   open3d::t::geometry::PointCloud::FromLegacy(*legacyCloud));
+                               tensor = std::make_shared<const open3d::t::geometry::PointCloud>(
+                                   open3d::t::geometry::PointCloud::FromLegacy(*pcd));
                            });
-            return tensorCloud;
+            return tensor;
         }
     };
 

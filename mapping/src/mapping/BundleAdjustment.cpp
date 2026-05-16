@@ -218,7 +218,7 @@ namespace mapping
             if (!e.isFrozen)
                 return workingSet[e.srcIdx].pcd;
             std::shared_ptr<open3d::geometry::PointCloud> pcdBody =
-                std::make_shared<open3d::geometry::PointCloud>(*frozenSnap[e.srcIdx]->legacyCloud);
+                std::make_shared<open3d::geometry::PointCloud>(*frozenSnap[e.srcIdx]->pcd);
             pcdBody->Transform(frozenSnap[e.srcIdx]->pose.inverse().matrix());
             return pcdBody;
         };
@@ -318,12 +318,12 @@ namespace mapping
             open3d::pipelines::registration::GlobalOptimization(
                 poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
                 open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(
-                    /*max_iteration=*/12,
+                    /*max_iteration=*/20,
                     /*min_relative_increment=*/1e-4,
                     /*min_relative_residual_increment=*/1e-4,
                     /*min_right_term=*/1e-3,
                     /*min_residual=*/1e-4,
-                    /*max_iteration_lm=*/6),
+                    /*max_iteration_lm=*/10),
                 open3d::pipelines::registration::GlobalOptimizationOption(
                     icpMaxDist, /*edge_prune_threshold=*/0.25, /*preference_loop_closure=*/1.0, referenceNode));
         }
@@ -382,7 +382,7 @@ namespace mapping
         std::shared_ptr<FrozenSubmap> frozen = std::make_shared<FrozenSubmap>();
         frozen->keyframeIdx = submap.keyframeIdx;
         frozen->pose = submap.pose;
-        frozen->legacyCloud = pcdWorld;
+        frozen->pcd = pcdWorld;
         frozen->aabb = pcdWorld->GetAxisAlignedBoundingBox();
 
         std::lock_guard<std::mutex> lock(mapMutex_);

@@ -278,7 +278,7 @@ private:
             open3d::geometry::PointCloud globalMapCloud;
 
             // collect keyframe indices to exclude from raw rendering:
-            // - absorbed: already frozen (shown via legacyCloud)
+            // - absorbed: already frozen (shown via pcd)
             // - pending: handed to the BA optimizer; clouds may be in an intermediate frame
             const auto pendingIndices = slam_.getPendingKeyframeIndices();
             std::unordered_set<uint32_t> excludedKeyframes(pendingIndices.begin(), pendingIndices.end());
@@ -287,8 +287,8 @@ private:
 
             // add corrected clouds from frozen submaps
             for (const auto &sub : frozenSubmaps)
-                if (sub->legacyCloud)
-                    globalMapCloud += *sub->legacyCloud;
+                if (sub->pcd)
+                    globalMapCloud += *sub->pcd;
 
             // add raw clouds for keyframes not yet frozen or pending
             for (const auto &[idx, cloud] : rawSubmapClouds_)
