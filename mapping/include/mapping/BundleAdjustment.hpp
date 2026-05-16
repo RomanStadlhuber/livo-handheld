@@ -104,6 +104,8 @@ namespace mapping
         std::optional<gtsam::Pose3> lastAcceptedPose_;
 
         std::unique_ptr<tbb::task_arena> backgroundArena_;
+
+        std::size_t numAcceptedSubmaps{0};
     };
 } // namespace mapping
 

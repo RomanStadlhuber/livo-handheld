@@ -96,14 +96,14 @@ namespace mapping
         submap.pose = *pose;
         submap.pcd = std::move(pcdBody);
 
-        LOG(DEBUG,
-            "Accepted submap at keyframe " << keyframeIdx << " (t=" << submap.pose.translation().transpose() << ")");
+        LOG(DEBUG, "Accepted submap (BA #" << numAcceptedSubmaps << ") at keyframe " << keyframeIdx);
 
         {
             std::lock_guard<std::mutex> lock(mapMutex_);
             activeSubmapSnapshot_[keyframeIdx] = {submap.pose, submap.pcd};
         }
         incomingQueue_.push(std::move(submap));
+        numAcceptedSubmaps++;
         sem_post(&workSemaphore_);
     }
 
@@ -164,7 +164,7 @@ namespace mapping
                     self->pendingSubmaps_.erase(self->pendingSubmaps_.begin());
                 }
 
-                if (!self->pendingSubmaps_.empty())
+                if (self->pendingSubmaps_.size() >= 3)
                     self->backgroundArena_->execute([&] { self->optimizeGlobalMap(self->pendingSubmaps_); });
             }
             // let the optimization worker wait until new submaps are pending
@@ -253,8 +253,8 @@ namespace mapping
         {
             for (std::size_t mj = mi + 1; mj < M; ++mj)
             {
-                const PoseGraphNode &ni = poseGraphNodes[mi]; // earlier in keyframe order (target)
-                const PoseGraphNode &nj = poseGraphNodes[mj]; // later in keyframe order (source)
+                const PoseGraphNode &ni = poseGraphNodes[mi]; // earlier in keyframe order (source)
+                const PoseGraphNode &nj = poseGraphNodes[mj]; // later in keyframe order (target)
                 // don't insert "odometry" edges for frozen submaps,
                 // this has already been done in the above nested loop
                 if (ni.isFrozen && nj.isFrozen)
@@ -273,13 +273,12 @@ namespace mapping
                 // ICP is only used to test for the information matrix of the relative pose
                 if (isSequential)
                 {
-                    // odometry edge using SLAM poses directly, no ICP needed
-                    const Eigen::Matrix4d Tpgo = (nj.pose.inverse() * ni.pose).matrix();
-                    const Eigen::Matrix4d Tinfo = (ni.pose.inverse() * nj.pose).matrix();
+                    // odometry edge: forward relative pose from ni (source) to nj (target)
+                    const Eigen::Matrix4d Tpgo = (ni.pose.inverse() * nj.pose).matrix();
                     const Eigen::Matrix6d infoMatrix =
                         open3d::pipelines::registration::GetInformationMatrixFromPointClouds(*pcdJ, *pcdI, icpMaxDist,
-                                                                                             Tinfo);
-                    poseGraph.edges_.emplace_back(nj.pgoIdx, ni.pgoIdx, Tpgo, infoMatrix, /*uncertain=*/false);
+                                                                                             Tpgo);
+                    poseGraph.edges_.emplace_back(ni.pgoIdx, nj.pgoIdx, Tpgo, infoMatrix, /*uncertain=*/false);
                     LOG(DEBUG, "seq edge kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx);
                 }
                 // non-sequential nodes get loop closure tested (already gated above)
@@ -296,7 +295,7 @@ namespace mapping
                     const Eigen::Matrix6d infoMatrix =
                         open3d::pipelines::registration::GetInformationMatrixFromPointClouds(*pcdJ, *pcdI, icpMaxDist,
                                                                                              icpResult.transformation_);
-                    poseGraph.edges_.emplace_back(nj.pgoIdx, ni.pgoIdx, icpResult.transformation_.inverse(), infoMatrix,
+                    poseGraph.edges_.emplace_back(ni.pgoIdx, nj.pgoIdx, icpResult.transformation_, infoMatrix,
                                                   /*uncertain=*/true);
                     LOG(DEBUG, "loop edge kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx
                                               << " fitness=" << icpResult.fitness_);
@@ -312,12 +311,12 @@ namespace mapping
             open3d::pipelines::registration::GlobalOptimization(
                 poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
                 open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(
-                    /*max_iteration=*/20,
+                    /*max_iteration=*/60,
                     /*min_relative_increment=*/1e-4,
                     /*min_relative_residual_increment=*/1e-4,
                     /*min_right_term=*/1e-3,
                     /*min_residual=*/1e-4,
-                    /*max_iteration_lm=*/10),
+                    /*max_iteration_lm=*/20),
                 open3d::pipelines::registration::GlobalOptimizationOption(
                     icpMaxDist, /*edge_prune_threshold=*/0.25, /*preference_loop_closure=*/1.0, referenceNode));
         }
