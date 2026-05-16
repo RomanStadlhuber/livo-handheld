@@ -185,6 +185,17 @@ namespace mapping
     };
 
     /// @ingroup types
+    /// @brief Snapshot of a pending submap currently under global optimization.
+    /// @details The point cloud is stored in body frame.
+    /// Apply pose to the cloud to obtain world-frame coordinates.
+    /// Keyed by keyframe index in the map returned by getAllActiveSubmaps().
+    struct ActiveSubmap
+    {
+        gtsam::Pose3 pose;                                       // current world pose, updated each optimization cycle
+        std::shared_ptr<const open3d::geometry::PointCloud> pcd; // body-frame cloud
+    };
+
+    /// @ingroup types
     /// @brief Frozen, immutable view of a converged submap for scan-to-map registration.
     /// @details The legacy point cloud is world-frame, produced by applying the final optimized
     /// pose to the body-frame cloud at freeze time.
@@ -195,7 +206,8 @@ namespace mapping
         gtsam::Pose3 pose; // world pose at freeze time
         /// @brief Axis-aligned bounding box, computed by Open3D and used for scan-to-map candidate search.
         open3d::geometry::AxisAlignedBoundingBox aabb;
-        std::shared_ptr<const open3d::geometry::PointCloud> pcd;
+        std::shared_ptr<const open3d::geometry::PointCloud> pcd;     // world-frame cloud
+        std::shared_ptr<const open3d::geometry::PointCloud> pcdBody; // body-frame cloud, kept for ICP
         /// @brief lazily-populated tensor cloud, kept on the heap so the struct itself stays small
         /// and the cloud data can outlive a FrozenSubmap instance held only briefly by callers
         mutable std::shared_ptr<const open3d::t::geometry::PointCloud> tensor;
