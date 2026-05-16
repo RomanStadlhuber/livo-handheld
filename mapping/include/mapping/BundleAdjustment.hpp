@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <map>
 #include <vector>
 #include <limits>
 #include <semaphore.h>
@@ -51,10 +52,11 @@ namespace mapping
         /// @brief Return a mutex-guarded copy of all frozen submaps.
         std::vector<std::shared_ptr<const FrozenSubmap>> getAllFrozenSubmaps() const;
 
-        /// @brief Return keyframe indices of submaps that are pending optimization.
-        /// @details These submaps are in an intermediate frame; callers should skip
-        /// rendering them until they appear in frozenSubmaps_.
-        std::vector<uint32_t> getPendingKeyframeIndices() const;
+        /// @brief Return a snapshot of all submaps currently under optimization.
+        /// @details Keyed by keyframe index.
+        /// Each entry holds the current world pose and the immutable body-frame cloud.
+        /// Apply pose to the cloud to obtain world-frame coordinates for visualization.
+        std::map<uint32_t, ActiveSubmap> getAllActiveSubmaps() const;
 
         /// @brief Query the frozen global map by pose proximity.
         /// @details Returns a snapshot of every frozen submap whose pose origin is within radius of the query pose.
@@ -93,8 +95,9 @@ namespace mapping
         std::vector<PendingSubmap> pendingSubmaps_;
         uint64_t mapVersion_{0};
 
-        /// @brief Keyframe indices currently in pendingSubmaps_; protected by mapMutex_.
-        std::vector<uint32_t> pendingKeyframes_;
+        /// @brief Visualization snapshot of all currently-pending submaps, keyed by keyframe index.
+        /// Protected by mapMutex_; updated in accumulateSubmap, freezeSubmap, and after each PGO cycle.
+        std::map<uint32_t, ActiveSubmap> activeSubmapSnapshot_;
         mutable std::mutex mapMutex_;
 
         /// @brief Pose of the last accepted submap, used for the distance/angle gate.

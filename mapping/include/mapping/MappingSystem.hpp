@@ -72,11 +72,6 @@ namespace mapping
         /// @brief Get the current keyframe counter value.
         uint32_t getKeyframeCount() const;
 
-        /// @brief Drain and return submaps that were marginalized since the last call.
-        /// Maps keyframe index to {world_T_lidar pose, pointcloud}.
-        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
-        getMarginalizedSubmaps();
-
         /// @brief Enable or disable collection of marginalized submaps.
         /// Disabled by default to avoid unbounded memory growth in headless mode.
         void setCollectMarginalizedSubmaps(bool enable);
@@ -84,8 +79,11 @@ namespace mapping
         /// @brief Return all frozen submaps from the global map optimizer.
         std::vector<std::shared_ptr<const FrozenSubmap>> getAllFrozenSubmaps() const;
 
-        /// @brief Return keyframe indices of submaps currently pending global optimization.
-        std::vector<uint32_t> getPendingKeyframeIndices() const;
+        /// @brief Return a snapshot of all submaps currently under optimization.
+        /// @details Keyed by keyframe index.
+        /// Each entry holds the current world pose and the immutable body-frame cloud.
+        /// Apply pose to the cloud to obtain world-frame coordinates for visualization.
+        std::map<uint32_t, ActiveSubmap> getAllActiveSubmaps() const;
 
         /// @brief Get the current (possibly optimized) IMU-to-LiDAR extrinsic calibration.
         gtsam::Pose3 getImuToLidarExtrinsic() const { return states_.getImuToLidarExtrinsic(); }
@@ -145,10 +143,6 @@ namespace mapping
         // configuration and cached extrinsic
         MappingConfig config_;
         gtsam::Pose3 imu_T_lidar_;
-
-        // marginalized submaps buffered for the viz path; drained by getMarginalizedSubmaps()
-        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
-            pendingVizSubmaps_;
     };
 
 } // namespace mapping

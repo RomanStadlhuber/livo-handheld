@@ -101,7 +101,7 @@ namespace mapping
 
         {
             std::lock_guard<std::mutex> lock(mapMutex_);
-            pendingKeyframes_.push_back(keyframeIdx);
+            activeSubmapSnapshot_[keyframeIdx] = {submap.pose, submap.pcd};
         }
         incomingQueue_.push(std::move(submap));
         sem_post(&workSemaphore_);
@@ -212,15 +212,11 @@ namespace mapping
                   [](const PoseGraphNode &a, const PoseGraphNode &b) { return a.keyframeIdx < b.keyframeIdx; });
 
         // helper fn to return the body-frame point cloud for a node in the graph
-        // for active submaps this is stored directly, for frozen submaps it is derived on demand
-        auto getBodyPcd = [&](const PoseGraphNode &e) -> std::shared_ptr<open3d::geometry::PointCloud>
+        auto getBodyPcd = [&](const PoseGraphNode &e) -> std::shared_ptr<const open3d::geometry::PointCloud>
         {
             if (!e.isFrozen)
                 return workingSet[e.srcIdx].pcd;
-            std::shared_ptr<open3d::geometry::PointCloud> pcdBody =
-                std::make_shared<open3d::geometry::PointCloud>(*frozenSnap[e.srcIdx]->pcd);
-            pcdBody->Transform(frozenSnap[e.srcIdx]->pose.inverse().matrix());
-            return pcdBody;
+            return frozenSnap[e.srcIdx]->pcdBody;
         };
 
         // build pose graph: active nodes [0,A), frozen reference nodes [A,A+R)
@@ -271,10 +267,8 @@ namespace mapping
                     if ((ni.pose.translation() - nj.pose.translation()).norm() > loopRadius)
                         continue;
                 }
-                // NOTE: free maps are still in body frame -> O(1)
-                // but frozen maps are in the global frame -> O(numPts + copy)
-                const std::shared_ptr<open3d::geometry::PointCloud> pcdJ = getBodyPcd(nj);
-                const std::shared_ptr<open3d::geometry::PointCloud> pcdI = getBodyPcd(ni);
+                const std::shared_ptr<const open3d::geometry::PointCloud> pcdJ = getBodyPcd(nj);
+                const std::shared_ptr<const open3d::geometry::PointCloud> pcdI = getBodyPcd(ni);
                 // sequential nodes get odometry edges from their latest poses,
                 // ICP is only used to test for the information matrix of the relative pose
                 if (isSequential)
@@ -369,6 +363,18 @@ namespace mapping
         }
 
         pendingSubmaps_ = std::move(nextPending);
+
+        // update snapshot poses to reflect the result of this optimization cycle
+        {
+            std::lock_guard<std::mutex> lock(mapMutex_);
+            for (const auto &sub : pendingSubmaps_)
+            {
+                auto it = activeSubmapSnapshot_.find(sub.keyframeIdx);
+                if (it != activeSubmapSnapshot_.end())
+                    it->second.pose = sub.pose;
+            }
+        }
+
         LOG(INFO, "Optimization cycle done: pending=" << pendingSubmaps_.size());
     }
 
@@ -383,11 +389,11 @@ namespace mapping
         frozen->keyframeIdx = submap.keyframeIdx;
         frozen->pose = submap.pose;
         frozen->pcd = pcdWorld;
+        frozen->pcdBody = submap.pcd;
         frozen->aabb = pcdWorld->GetAxisAlignedBoundingBox();
 
         std::lock_guard<std::mutex> lock(mapMutex_);
-        pendingKeyframes_.erase(std::remove(pendingKeyframes_.begin(), pendingKeyframes_.end(), submap.keyframeIdx),
-                                pendingKeyframes_.end());
+        activeSubmapSnapshot_.erase(submap.keyframeIdx);
         frozenSubmaps_.push_back(std::move(frozen));
         ++mapVersion_;
     }
@@ -398,10 +404,10 @@ namespace mapping
         return frozenSubmaps_;
     }
 
-    std::vector<uint32_t> BundleAdjustment::getPendingKeyframeIndices() const
+    std::map<uint32_t, ActiveSubmap> BundleAdjustment::getAllActiveSubmaps() const
     {
         std::lock_guard<std::mutex> lock(mapMutex_);
-        return pendingKeyframes_;
+        return activeSubmapSnapshot_;
     }
 
 } // namespace mapping

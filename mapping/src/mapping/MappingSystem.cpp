@@ -234,13 +234,10 @@ namespace mapping
          */
         marginalizeKeyframesOutsideSlidingWindow(idxKeyframe);
 
-        // drain newly marginalized submaps: tee to BA pipeline and buffer for viz
+        // drain newly marginalized submaps into the BA pipeline
         auto newlyMarginalized = states_.getMarginalizedSubmaps();
         for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
-        {
             bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
-            pendingVizSubmaps_[kfIdx] = poseAndCloud;
-        }
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
         const bool isTracking =
@@ -419,24 +416,14 @@ namespace mapping
 
     uint32_t MappingSystem::getKeyframeCount() const { return states_.getKeyframeCount(); }
 
-    std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
-    MappingSystem::getMarginalizedSubmaps()
-    {
-        auto submaps = std::exchange(pendingVizSubmaps_, {});
-        if (config_.camera_frontend.colorize_scans)
-            for (auto &[idx, poseAndCloud] : submaps)
-                removeUncoloredPoints(poseAndCloud.second);
-        return submaps;
-    }
-
     std::vector<std::shared_ptr<const FrozenSubmap>> MappingSystem::getAllFrozenSubmaps() const
     {
         return bundleAdjustment_->getAllFrozenSubmaps();
     }
 
-    std::vector<uint32_t> MappingSystem::getPendingKeyframeIndices() const
+    std::map<uint32_t, ActiveSubmap> MappingSystem::getAllActiveSubmaps() const
     {
-        return bundleAdjustment_->getPendingKeyframeIndices();
+        return bundleAdjustment_->getAllActiveSubmaps();
     }
 
     void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }
