@@ -72,6 +72,7 @@ namespace mapping
             uint32_t alignIterations{0};
             double lastDeltaTranslation{std::numeric_limits<double>::infinity()};
             double lastDeltaRotation{std::numeric_limits<double>::infinity()};
+            bool icpAligned{false};
         };
 
         static void optimizationWorker(BundleAdjustment *self);

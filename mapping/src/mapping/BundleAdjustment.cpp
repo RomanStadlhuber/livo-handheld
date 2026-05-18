@@ -232,7 +232,7 @@ namespace mapping
         {
             PoseGraphNode &ni = poseGraphNodes[m];
             PoseGraphNode &nj = poseGraphNodes[m + 1];
-            if (nj.isFrozen)
+            if (nj.isFrozen || workingSet[nj.srcIdx].icpAligned)
                 continue;
             const auto pcdI = getBodyPcd(ni);
             const auto pcdJ = getBodyPcd(nj);
@@ -245,6 +245,7 @@ namespace mapping
                 const gtsam::Pose3 refinedPose(ni.pose.matrix() * result.transformation_);
                 nj.pose = refinedPose;
                 workingSet[nj.srcIdx].pose = refinedPose;
+                workingSet[nj.srcIdx].icpAligned = true;
                 LOG(DEBUG,
                     "chain ICP kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx << " fitness=" << result.fitness_);
             }
