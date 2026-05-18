@@ -164,6 +164,7 @@ namespace mapping
                     self->pendingSubmaps_.erase(self->pendingSubmaps_.begin());
                 }
 
+                // guard for minimum number of active submaps in PGO to avoid adversarial optimization results
                 if (self->pendingSubmaps_.size() >= 3)
                     self->backgroundArena_->execute([&] { self->optimizeGlobalMap(self->pendingSubmaps_); });
             }
@@ -219,7 +220,41 @@ namespace mapping
             return frozenSnap[e.srcIdx]->pcdBody;
         };
 
+        const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
+            1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
+        const double icpMaxDist = config_.global_map_optimization.icp_max_correspondence_distance;
+        const double loopRadius = config_.global_map_optimization.loop_closure_search_radius;
+        const double minFitness = config_.global_map_optimization.loop_closure_min_fitness;
+
+        // phase 1: sequential ICP chain to refine active submap poses before PGO
+        const std::size_t M = poseGraphNodes.size();
+        for (std::size_t m = 0; m + 1 < M; ++m)
+        {
+            PoseGraphNode &ni = poseGraphNodes[m];
+            PoseGraphNode &nj = poseGraphNodes[m + 1];
+            if (nj.isFrozen)
+                continue;
+            const auto pcdI = getBodyPcd(ni);
+            const auto pcdJ = getBodyPcd(nj);
+            const Eigen::Matrix4d initialGuess = (ni.pose.inverse() * nj.pose).matrix();
+            const auto result = open3d::pipelines::registration::RegistrationICP(
+                *pcdJ, *pcdI, icpMaxDist, initialGuess,
+                open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
+            if (result.fitness_ >= minFitness)
+            {
+                const gtsam::Pose3 refinedPose(ni.pose.matrix() * result.transformation_);
+                nj.pose = refinedPose;
+                workingSet[nj.srcIdx].pose = refinedPose;
+                LOG(DEBUG,
+                    "chain ICP kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx << " fitness=" << result.fitness_);
+            }
+            else
+                LOG(DEBUG, "chain ICP kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx
+                                          << " failed (fitness=" << result.fitness_ << ")");
+        }
+
         // build pose graph: active nodes [0,A), frozen reference nodes [A,A+R)
+        // nodes are added after phase 1 so they carry refined poses
         open3d::pipelines::registration::PoseGraph poseGraph;
         poseGraph.nodes_.reserve(A + R);
         for (std::size_t i = 0; i < A; ++i)
@@ -235,20 +270,13 @@ namespace mapping
         for (std::size_t i = 0; i + 1 < R; ++i)
             for (std::size_t j = i + 1; j < R; ++j)
                 poseGraph.edges_.emplace_back(static_cast<int>(A + j), static_cast<int>(A + i),
-                                              (frozenSnap[j]->pose.inverse() * frozenSnap[i]->pose).matrix(), infoFixed,
+                                              (frozenSnap[i]->pose.inverse() * frozenSnap[j]->pose).matrix(), infoFixed,
                                               /*uncertain=*/false);
 
-        const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
-            1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
-        const double icpMaxDist = config_.global_map_optimization.icp_max_correspondence_distance;
-        const double loopRadius = config_.global_map_optimization.loop_closure_search_radius;
-        const double minFitness = config_.global_map_optimization.loop_closure_min_fitness;
-
-        // save pre-PGO poses for convergence delta computation
+        // save pre-PGO poses after phase 1 so convergence deltas measure PGO-only correction
         std::vector<gtsam::Pose3> prevPoses(A);
         for (std::size_t i = 0; i < A; ++i)
             prevPoses[i] = workingSet[i].pose;
-        const std::size_t M = poseGraphNodes.size();
         for (std::size_t mi = 0; mi < M; ++mi)
         {
             for (std::size_t mj = mi + 1; mj < M; ++mj)
@@ -273,10 +301,10 @@ namespace mapping
                 // ICP is only used to test for the information matrix of the relative pose
                 if (isSequential)
                 {
-                    // odometry edge: forward relative pose from ni (source) to nj (target)
-                    const Eigen::Matrix4d Tpgo = (ni.pose.inverse() * nj.pose).matrix();
+                    // odometry edge: Open3D convention is T = P_target^-1 * P_source
+                    const Eigen::Matrix4d Tpgo = (nj.pose.inverse() * ni.pose).matrix();
                     const Eigen::Matrix6d infoMatrix =
-                        open3d::pipelines::registration::GetInformationMatrixFromPointClouds(*pcdJ, *pcdI, icpMaxDist,
+                        open3d::pipelines::registration::GetInformationMatrixFromPointClouds(*pcdI, *pcdJ, icpMaxDist,
                                                                                              Tpgo);
                     poseGraph.edges_.emplace_back(ni.pgoIdx, nj.pgoIdx, Tpgo, infoMatrix, /*uncertain=*/false);
                     LOG(DEBUG, "seq edge kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx);
@@ -285,15 +313,17 @@ namespace mapping
                 else
                 {
                     // loop closure: ICP with SLAM relative pose as initial guess
-                    const Eigen::Matrix4d initialGuess = (ni.pose.inverse() * nj.pose).matrix();
+                    // Open3D edge (source=ni, target=nj) stores T = P_nj^-1 * P_ni,
+                    // so ICP source is pcdI (ni) and target is pcdJ (nj)
+                    const Eigen::Matrix4d initialGuess = (nj.pose.inverse() * ni.pose).matrix();
                     const auto icpResult = open3d::pipelines::registration::RegistrationICP(
-                        *pcdJ, *pcdI, icpMaxDist, initialGuess,
+                        *pcdI, *pcdJ, icpMaxDist, initialGuess,
                         open3d::pipelines::registration::TransformationEstimationPointToPlane(), icpCriteria);
                     // loop closure test from ICP result
                     if (icpResult.fitness_ < minFitness)
                         continue;
                     const Eigen::Matrix6d infoMatrix =
-                        open3d::pipelines::registration::GetInformationMatrixFromPointClouds(*pcdJ, *pcdI, icpMaxDist,
+                        open3d::pipelines::registration::GetInformationMatrixFromPointClouds(*pcdI, *pcdJ, icpMaxDist,
                                                                                              icpResult.transformation_);
                     poseGraph.edges_.emplace_back(ni.pgoIdx, nj.pgoIdx, icpResult.transformation_, infoMatrix,
                                                   /*uncertain=*/true);
@@ -330,6 +360,10 @@ namespace mapping
             workingSet[i].lastDeltaRotation = dR.axisAngle().second;
             workingSet[i].pose = newPose;
         }
+
+        for (std::size_t i = 0; i < A; ++i)
+            LOG(DEBUG, "PGO delta kf" << workingSet[i].keyframeIdx << ": dT=" << workingSet[i].lastDeltaTranslation
+                                      << " dR=" << workingSet[i].lastDeltaRotation);
 
         // partition working set: freeze converged/capped, keep the rest in pendingSubmaps_
         const double convT = config_.global_map_optimization.convergence_pose_delta_translation;
