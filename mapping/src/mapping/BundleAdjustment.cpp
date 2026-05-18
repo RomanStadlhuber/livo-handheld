@@ -396,9 +396,7 @@ namespace mapping
             {
                 LOG(INFO, "Freezing submap " << sub.keyframeIdx << " (iters=" << sub.alignIterations
                                              << ", dT=" << sub.lastDeltaTranslation << ", dR=" << sub.lastDeltaRotation
-                                             << ", capout=" << capHit
-                              ? "yes"
-                              : "no" << ")");
+                                             << ", capout=" << (capHit ? "yes" : "no") << ")");
                 freezeSubmap(sub);
                 numSubmapsFrozen++;
             }
