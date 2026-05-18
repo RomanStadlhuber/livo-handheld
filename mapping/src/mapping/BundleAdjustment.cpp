@@ -22,6 +22,8 @@ namespace mapping
         // stiffness applied to edges between fixed reference nodes to emulate
         // multi-fixed-node behavior that Open3D's PGO does not support natively
         constexpr double FIXED_NODE_INFO_SCALE = 1e8;
+        // minimum number of required active submaps before building & optimizing a graph
+        constexpr std::size_t MIN_ACTIVE_SUBMAPS = 3;
 
     } // namespace
 
@@ -81,7 +83,12 @@ namespace mapping
             const double dist = (pose->translation() - lastAcceptedPose_->translation()).norm();
             const double angle = lastAcceptedPose_->rotation().between(pose->rotation()).axisAngle().second;
             if (dist < minDist && angle < minAngle)
+            {
+                // debug-log the full BA state on every accumulation call
+                LOG(DEBUG, "Submap rejected, BA state - " << pendingSubmaps_.size() << " active, "
+                                                          << frozenSubmaps_.size() << " frozen");
                 return;
+            }
         }
 
         lastAcceptedPose_ = *pose;
@@ -96,7 +103,8 @@ namespace mapping
         submap.pose = *pose;
         submap.pcd = std::move(pcdBody);
 
-        LOG(DEBUG, "Accepted submap (BA #" << numAcceptedSubmaps << ") at keyframe " << keyframeIdx);
+        LOG(INFO, "Accepted submap (BA #" << numAcceptedSubmaps << ") at keyframe " << keyframeIdx);
+        LOG(DEBUG, "BA state - " << pendingSubmaps_.size() << " active, " << frozenSubmaps_.size() << " frozen");
 
         {
             std::lock_guard<std::mutex> lock(mapMutex_);
@@ -165,7 +173,7 @@ namespace mapping
                 }
 
                 // guard for minimum number of active submaps in PGO to avoid adversarial optimization results
-                if (self->pendingSubmaps_.size() >= 3)
+                if (self->pendingSubmaps_.size() >= MIN_ACTIVE_SUBMAPS)
                     self->backgroundArena_->execute([&] { self->optimizeGlobalMap(self->pendingSubmaps_); });
             }
             // let the optimization worker wait until new submaps are pending
@@ -342,12 +350,12 @@ namespace mapping
             open3d::pipelines::registration::GlobalOptimization(
                 poseGraph, open3d::pipelines::registration::GlobalOptimizationLevenbergMarquardt(),
                 open3d::pipelines::registration::GlobalOptimizationConvergenceCriteria(
-                    /*max_iteration=*/60,
+                    /*max_iteration=*/20,
                     /*min_relative_increment=*/1e-4,
                     /*min_relative_residual_increment=*/1e-4,
                     /*min_right_term=*/1e-3,
                     /*min_residual=*/1e-4,
-                    /*max_iteration_lm=*/20),
+                    /*max_iteration_lm=*/6),
                 open3d::pipelines::registration::GlobalOptimizationOption(
                     icpMaxDist, /*edge_prune_threshold=*/0.25, /*preference_loop_closure=*/1.0, referenceNode));
         }
@@ -374,6 +382,9 @@ namespace mapping
         std::vector<PendingSubmap> nextPending;
         nextPending.reserve(A);
 
+        // no. of submaps that were frozen during one PGO pass
+        std::size_t numSubmapsFrozen{0};
+
         for (std::size_t i = 0; i < A; ++i)
         {
             PendingSubmap &sub = workingSet[i];
@@ -385,15 +396,14 @@ namespace mapping
             {
                 LOG(INFO, "Freezing submap " << sub.keyframeIdx << " (iters=" << sub.alignIterations
                                              << ", dT=" << sub.lastDeltaTranslation << ", dR=" << sub.lastDeltaRotation
-                                             << ", cap=" << capHit << ")");
+                                             << ", capout=" << capHit
+                              ? "yes"
+                              : "no" << ")");
                 freezeSubmap(sub);
+                numSubmapsFrozen++;
             }
             else
-            {
-                LOG(DEBUG, "submap " << sub.keyframeIdx << " pending (dT=" << sub.lastDeltaTranslation
-                                     << ", dR=" << sub.lastDeltaRotation << ")");
                 nextPending.push_back(std::move(sub));
-            }
         }
 
         pendingSubmaps_ = std::move(nextPending);
@@ -409,7 +419,9 @@ namespace mapping
             }
         }
 
-        LOG(INFO, "Optimization cycle done: pending=" << pendingSubmaps_.size());
+        LOG(INFO, "Optimization cycle done - still active: " << pendingSubmaps_.size()
+                                                             << ", froze: " << numSubmapsFrozen << " ("
+                                                             << frozenSubmaps_.size() << " total)");
     }
 
     void BundleAdjustment::freezeSubmap(PendingSubmap &submap)
