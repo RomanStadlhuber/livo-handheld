@@ -4,8 +4,13 @@
 #include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
 
+#include <open3d/t/geometry/PointCloud.h>
+#include <open3d/t/pipelines/registration/Registration.h>
+#include <open3d/t/pipelines/registration/TransformationEstimation.h>
+
 #include <csignal>
 #include <iostream>
+#include <set>
 
 SETUP_LOGS(DEBUG, "MappingSystem");
 
@@ -255,6 +260,8 @@ namespace mapping
             return;
         }
 
+        registerScanToMap(ptrNewSubmapVoxelized, states_.getCurrentState().pose());
+
         /* Build factors and optimize. The feature manager accumulates marginalization factors
          * from the prior marginalization step and combines them with newly created/updated
          * tracking factors. std::exchange is used internally to clear the factor buffers.
@@ -288,6 +295,120 @@ namespace mapping
         if (idxKeyframe > config_.lidar_frontend.clustering.insert_lag)
             featureManager_.createNewClusters(states_, idxKeyframe - config_.lidar_frontend.clustering.insert_lag,
                                               config_.lidar_frontend.clustering.sampling_voxel_size);
+    }
+
+    void MappingSystem::registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
+                                          const gtsam::Pose3 &predictedPose)
+    {
+        const auto &s2mCfg = config_.global_map_optimization.scan_to_map_registration;
+
+        // skip until the BA has produced at least one frozen submap
+        if (bundleAdjustment_->getNumFrozenSubmaps() == 0)
+            return;
+
+        // predicted LiDAR frame pose in the world
+        const gtsam::Pose3 world_T_lidar = predictedPose.compose(states_.getImuToLidarExtrinsic());
+        const open3d::geometry::AxisAlignedBoundingBox scanAabb = scan->GetAxisAlignedBoundingBox();
+        auto candidates = bundleAdjustment_->getGlobalMap(world_T_lidar, scanAabb, s2mCfg.max_candidates);
+
+        // compute the set of keyframe indices returned by this search
+        std::set<uint32_t> newIds;
+        for (const auto &sm : candidates)
+            newIds.insert(sm->keyframeIdx);
+
+        // determine additions and removals relative to the current cache
+        std::vector<std::shared_ptr<const FrozenSubmap>> toAdd;
+        std::vector<uint32_t> toRemove;
+        for (const auto &sm : candidates)
+        {
+            if (registrationCache_.submaps.find(sm->keyframeIdx) == registrationCache_.submaps.end())
+                toAdd.push_back(sm);
+        }
+        for (const auto &[id, sm] : registrationCache_.submaps)
+        {
+            if (newIds.find(id) == newIds.end())
+                toRemove.push_back(id);
+        }
+
+        const bool hasRemovals = !toRemove.empty();
+        const bool hasAdditions = !toAdd.empty();
+
+        // check whether registration cache pcd needs to be updated or rebuilt
+        if (hasRemovals || hasAdditions)
+        {
+            // apply removals
+            for (uint32_t id : toRemove)
+                registrationCache_.submaps.erase(id);
+            // apply additions
+            for (const auto &sm : toAdd)
+                registrationCache_.submaps[sm->keyframeIdx] = sm;
+            registrationCache_.dirty = true;
+        }
+
+        if (registrationCache_.submaps.empty())
+            return;
+
+        if (registrationCache_.dirty)
+        {
+            if (hasRemovals || !registrationCache_.pcd)
+            {
+                // full rebuild: merge all cached world-frame clouds from scratch
+                open3d::geometry::PointCloud pcdMerged;
+                for (const auto &[id, sm] : registrationCache_.submaps)
+                    pcdMerged += *sm->pcdWorld;
+                pcdMerged = *pcdMerged.VoxelDownSample(s2mCfg.cache_voxel_size);
+                registrationCache_.pcd = std::make_shared<open3d::t::geometry::PointCloud>(
+                    open3d::t::geometry::PointCloud::FromLegacy(pcdMerged, open3d::core::Float64));
+            }
+            else
+            {
+                // incremental: convert only the new clouds to tensor and append to the existing cache
+                open3d::geometry::PointCloud pcdNewLegacy;
+                for (const auto &sm : toAdd)
+                    pcdNewLegacy += *sm->pcdWorld;
+                // convert to tensor API first, then merge
+                const open3d::t::geometry::PointCloud pcdNewTensor =
+                    open3d::t::geometry::PointCloud::FromLegacy(pcdNewLegacy, open3d::core::Float64);
+                registrationCache_.pcd = std::make_shared<open3d::t::geometry::PointCloud>(
+                    (*registrationCache_.pcd + pcdNewTensor).VoxelDownSample(s2mCfg.cache_voxel_size));
+            }
+            registrationCache_.dirty = false;
+            LOG(DEBUG, "registration cache rebuilt: " << registrationCache_.submaps.size() << " submaps, "
+                                                      << registrationCache_.pcd->GetPointPositions().GetLength()
+                                                      << " pts");
+        }
+
+        // build per-scale ICP criteria from config vectors
+        const size_t numScales = s2mCfg.voxel_sizes.size();
+        std::vector<open3d::t::pipelines::registration::ICPConvergenceCriteria> criteriaList;
+        criteriaList.reserve(numScales);
+        for (size_t i = 0; i < numScales; ++i)
+            criteriaList.emplace_back(1e-6, 1e-6, s2mCfg.max_iterations_per_scale[i]);
+
+        // convert scan to tensor; Float64 dtype required by the MultiScaleICP API
+        const open3d::t::geometry::PointCloud pcdScanTensor =
+            open3d::t::geometry::PointCloud::FromLegacy(*scan, open3d::core::Float64);
+        const open3d::t::geometry::PointCloud &pcdTarget = *registrationCache_.pcd;
+
+        // initial guess: predicted LiDAR-to-world transform (source is body frame, target is world frame)
+        const Eigen::Matrix4d initGuessMat = world_T_lidar.matrix();
+        const open3d::core::Tensor initGuess(initGuessMat.data(), {4, 4}, open3d::core::Float64,
+                                             open3d::core::Device("CPU:0"));
+
+        const auto result = open3d::t::pipelines::registration::MultiScaleICP(
+            pcdScanTensor, pcdTarget, s2mCfg.voxel_sizes, criteriaList, s2mCfg.max_correspondence_distances, initGuess,
+            open3d::t::pipelines::registration::TransformationEstimationPointToPoint());
+
+        LOG(DEBUG, "scan-to-map ICP: fitness=" << result.fitness_ << " rmse=" << result.inlier_rmse_
+                                               << " (threshold=" << s2mCfg.fitness_threshold << ")");
+
+        if (result.fitness_ < s2mCfg.fitness_threshold)
+        {
+            LOG(DEBUG, "scan-to-map registration rejected, fitness below threshold");
+            return;
+        }
+
+        // TODO: extract pose correction from result.transformation_ and add unary constraint to keyframe
     }
 
     void MappingSystem::recoverState()

@@ -130,6 +130,13 @@ namespace mapping
         gtsam::NonlinearFactorGraph constructSystemPriors(const uint32_t &idxKeyframe, const gtsam::NavState &xPrior,
                                                           const gtsam::imuBias::ConstantBias &bPrior) const;
 
+        /// @brief Update the registration cache with a new set of candidate submaps and run scan-to-map ICP.
+        /// @details Computes the scan AABB, queries the BA for candidate frozen submaps, updates
+        /// the cache (incremental merge on additions, full rebuild on removals), and runs
+        /// multi-scale ICP against the merged reference cloud.
+        void registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
+                               const gtsam::Pose3 &predictedPose);
+
         // subsystem instances
         Buffers buffers_;
         States states_;
@@ -139,6 +146,8 @@ namespace mapping
         FeatureManager featureManager_;
         Smoother smoother_;
         std::unique_ptr<BundleAdjustment> bundleAdjustment_;
+
+        RegistrationCache registrationCache_;
 
         // configuration and cached extrinsic
         MappingConfig config_;
