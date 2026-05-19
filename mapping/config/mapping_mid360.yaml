@@ -79,4 +79,12 @@ global_map_optimization:
   convergence_pose_delta_rotation: 0.01    # [rad]
   max_align_iterations: 5
   k_nearest_frozen: 3
+  scan_to_map_registration:
+    aabb_inflation_margin: 0.25  # [m], compensates for odometry drift at submap boundaries
+    max_candidates: 5
+    cache_voxel_size: 0.15       # [m], voxel size for the merged reference map
+    voxel_sizes: [0.4, 0.2, -1.0]                 # [m] per ICP scale, strictly decreasing, -1 = original
+    max_correspondence_distances: [1.0, 0.5, 0.2] # [m] per ICP scale
+    max_iterations_per_scale: [30, 15, 10]
+    fitness_threshold: 0.3       # min inlier ratio to accept registration result
 
