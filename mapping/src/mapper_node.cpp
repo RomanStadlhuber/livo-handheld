@@ -271,8 +271,8 @@ private:
             open3d::geometry::PointCloud pcdGlobalMap;
 
             for (const auto &sub : slam_.getAllFrozenSubmaps())
-                if (sub->pcd)
-                    pcdGlobalMap += *sub->pcd;
+                if (sub->pcdWorld)
+                    pcdGlobalMap += *sub->pcdWorld;
 
             for (const auto &[_, submap] : slam_.getAllActiveSubmaps())
                 if (submap.pcd)
