@@ -12,16 +12,17 @@
 
 namespace mapping
 {
+    /// @brief IOFormat for printing Eigen matrices row-by-row with bracket-wrapped rows.
+    inline const Eigen::IOFormat MTX_FMT{Eigen::StreamPrecision, 0, "  ", "\n    ", "[", "]"};
+
     /// @ingroup helpers
     /// @brief Convert LidarData to Open3D PointCloud (no undistortion).
     /// @param lidar_data The raw LiDAR scan, potentially undistorted.
     /// @param minPointDist Minimum point distance to include
     /// @param maxPointDist Maximum point distance to include
     /// @return an Open3D PointCloud, with scan timestamp info removed.
-    inline open3d::geometry::PointCloud Scan2PCD(
-        const std::shared_ptr<LidarData> &lidar_data,
-        double minPointDist,
-        double maxPointDist)
+    inline open3d::geometry::PointCloud Scan2PCD(const std::shared_ptr<LidarData> &lidar_data, double minPointDist,
+                                                 double maxPointDist)
     {
         open3d::geometry::PointCloud pcd;
         size_t point_num = lidar_data->points.size();
@@ -48,10 +49,9 @@ namespace mapping
     ///         - planeCenter: centroid of input points
     ///         - planePoints: Nx3 matrix of centered points (w_p - w_planeCenter)
     ///         - planeThickness: mean squared point-to-plane distance (lower is better)
-    inline std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double> planeFitSVD(
-        const std::vector<Eigen::Vector3d> &points,
-        double planarityThreshold = 0.1,
-        double linearityThreshold = 0.5)
+    inline std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double>
+    planeFitSVD(const std::vector<Eigen::Vector3d> &points, double planarityThreshold = 0.1,
+                double linearityThreshold = 0.5)
     {
         const size_t numPoints = points.size();
 
@@ -108,10 +108,9 @@ namespace mapping
     ///         - planeCenter: centroid of input points
     ///         - planePoints: Nx3 matrix of centered points (w_p - w_planeCenter)
     ///         - planeThickness: mean squared point-to-plane distance (lower is better)
-    inline std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double> planeFitCovariance(
-        const std::vector<Eigen::Vector3d> &points,
-        double planarityThreshold = 0.1,
-        double linearityThreshold = 0.5)
+    inline std::tuple<bool, Eigen::Vector3d, Eigen::Vector3d, Eigen::MatrixXd, double>
+    planeFitCovariance(const std::vector<Eigen::Vector3d> &points, double planarityThreshold = 0.1,
+                       double linearityThreshold = 0.5)
     {
         const size_t n = points.size();
 
@@ -164,8 +163,7 @@ namespace mapping
     /// @note Points where `colors_[i] == NO_COLOR` are removed, along with their position entry.
     /// If the pointcloud has no colors at all, all points are removed.
     /// @param ptrPcd
-    inline void removeUncoloredPoints(
-        std::shared_ptr<open3d::geometry::PointCloud> ptrPcd)
+    inline void removeUncoloredPoints(std::shared_ptr<open3d::geometry::PointCloud> ptrPcd)
     {
         if (!ptrPcd->HasColors())
         {
