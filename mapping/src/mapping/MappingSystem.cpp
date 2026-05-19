@@ -8,8 +8,11 @@
 #include <open3d/t/pipelines/registration/Registration.h>
 #include <open3d/t/pipelines/registration/TransformationEstimation.h>
 
+#include <gtsam/slam/PriorFactor.h>
+
 #include <csignal>
 #include <iostream>
+#include <optional>
 #include <set>
 
 SETUP_LOGS(DEBUG, "MappingSystem");
@@ -228,6 +231,10 @@ namespace mapping
         // NOTE: undistorted-scan buffer needs to be cleared manually since it is required for accumulating & coloring
         buffers_.getScanBuffer().clear();
 
+        // snapshot the scan in LiDAR body frame before createKeyframeSubmap transforms it to world frame in-place
+        // for registerScanToMap we need the pointcloud to be in the LiDAR frame
+        const auto ptrScanBodyFrame = std::make_shared<open3d::geometry::PointCloud>(*ptrNewSubmapVoxelized);
+
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe =
             states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
@@ -260,16 +267,21 @@ namespace mapping
             return;
         }
 
-        registerScanToMap(ptrNewSubmapVoxelized, states_.getCurrentState().pose());
+        const auto registrationPrior =
+            registerScanToMap(ptrScanBodyFrame, states_.getCurrentState().pose(), idxKeyframe);
 
         /* Build factors and optimize. The feature manager accumulates marginalization factors
          * from the prior marginalization step and combines them with newly created/updated
          * tracking factors. std::exchange is used internally to clear the factor buffers.
          */
         // modifies featureManager_: creates/updates/removes LiDAR factors, clears internal factor buffers
-        auto const &[featureFactors, factorsToRemove] =
+        auto [featureFactors, factorsToRemove] =
             featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
 
+        /*
+        if (registrationPrior) // add registration prior if it has a value
+            featureFactors.add(*registrationPrior);
+        */
         gtsam::CombinedImuFactor imuFactor = imuFrontend_.createPreintegrationFactor(idxKeyframe - 1, idxKeyframe);
 
         /* Run iSAM2 update, extract state estimate, and update all keyframe submap poses.
@@ -297,14 +309,15 @@ namespace mapping
                                               config_.lidar_frontend.clustering.sampling_voxel_size);
     }
 
-    void MappingSystem::registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
-                                          const gtsam::Pose3 &predictedPose)
+    std::optional<gtsam::NonlinearFactor::shared_ptr>
+    MappingSystem::registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
+                                     const gtsam::Pose3 &predictedPose, const uint32_t &idxKeyframe)
     {
         const auto &cfgScanToMap = config_.global_map_optimization.scan_to_map_registration;
 
         // skip until the BA has produced at least one frozen submap
         if (bundleAdjustment_->getNumFrozenSubmaps() == 0)
-            return;
+            return std::nullopt;
 
         // predicted LiDAR frame pose in the world
         const gtsam::Pose3 world_T_lidar = predictedPose.compose(states_.getImuToLidarExtrinsic());
@@ -346,7 +359,7 @@ namespace mapping
         }
 
         if (registrationCache_.submaps.empty())
-            return;
+            return std::nullopt;
 
         if (registrationCache_.dirty)
         {
@@ -391,7 +404,15 @@ namespace mapping
         const open3d::t::geometry::PointCloud &pcdTarget = *registrationCache_.pcd;
 
         // initial guess: predicted LiDAR-to-world transform (source is body frame, target is world frame)
-        const Eigen::Matrix4d initGuessMat = world_T_lidar.matrix();
+        // Open3D tensors are row-major (see tests:
+        // https://github.com/isl-org/Open3D/blob/main/cpp/tests/core/Tensor.cpp)
+        //
+        // Eigen matrices are column-major by default:
+        // https://libeigen.gitlab.io/eigen/docs-nightly/group__TopicStorageOrders.html
+        // > If the storage order is not specified, then Eigen defaults to storing the entry in column-major.
+        //
+        // Explicitly use a row-major matrix so data() produces the layout Open3D expects.
+        const Eigen::Matrix<double, 4, 4, Eigen::RowMajor> initGuessMat{world_T_lidar.matrix()};
         const open3d::core::Tensor initGuess(initGuessMat.data(), {4, 4}, open3d::core::Float64,
                                              open3d::core::Device("CPU:0"));
 
@@ -405,10 +426,36 @@ namespace mapping
         if (result.fitness_ < cfgScanToMap.fitness_threshold)
         {
             LOG(DEBUG, "scan-to-map registration rejected, fitness below threshold");
-            return;
+            return std::nullopt;
         }
 
-        // TODO: extract pose correction from result.transformation_ and add unary constraint to keyframe
+        // extract LiDAR-in-world pose from the ICP result (row-major Open3D tensor to Eigen)
+        const auto transformData = result.transformation_.ToFlatVector<double>();
+        const Eigen::Matrix4d icpMat =
+            Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>>(transformData.data());
+        const gtsam::Pose3 world_T_lidar_icp{gtsam::Rot3(icpMat.block<3, 3>(0, 0)), icpMat.block<3, 1>(0, 3)};
+
+        // map LiDAR pose to IMU frame using the inverse imu-to-lidar calibration
+        const gtsam::Pose3 world_T_imu_icp = world_T_lidar_icp.compose(imu_T_lidar_.inverse());
+
+        // compute 6x6 information matrix for the prior noise model
+        open3d::core::Tensor icpInformationTensor = open3d::t::pipelines::registration::GetInformationMatrix(
+            pcdScanTensor, pcdTarget, cfgScanToMap.max_correspondence_distances.back(), result.transformation_);
+        const auto informationData = icpInformationTensor.ToFlatVector<double>();
+        const Eigen::Matrix<double, 6, 6> icpInformation =
+            Eigen::Map<const Eigen::Matrix<double, 6, 6, Eigen::RowMajor>>(informationData.data());
+
+        LOG_MULTI(DEBUG, "scan-to-map ICP result",
+                  STREAM("T_pred  t=[" << predictedPose.translation().transpose() << "]"
+                                       << "  rpy=[" << predictedPose.rotation().rpy().transpose() << "]"),
+                  STREAM("T_icp   t=[" << world_T_imu_icp.translation().transpose() << "]"
+                                       << "  rpy=[" << world_T_imu_icp.rotation().rpy().transpose() << "]"));
+        // log the full 6x6 ICP information matrix using Eigens IO formatting (defined in helpers.hpp)
+        // https://libeigen.gitlab.io/eigen/docs-3.3/structEigen_1_1IOFormat.html
+        LOG_MULTI(DEBUG, "information matrix", STREAM(icpInformation.format(MTX_FMT)));
+
+        const auto noiseModel = gtsam::noiseModel::Gaussian::Information(icpInformation);
+        return boost::make_shared<gtsam::PriorFactor<gtsam::Pose3>>(X(idxKeyframe), world_T_imu_icp, noiseModel);
     }
 
     void MappingSystem::recoverState()

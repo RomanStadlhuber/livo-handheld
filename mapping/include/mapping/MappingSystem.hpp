@@ -134,8 +134,11 @@ namespace mapping
         /// @details Computes the scan AABB, queries the BA for candidate frozen submaps, updates
         /// the cache (incremental merge on additions, full rebuild on removals), and runs
         /// multi-scale ICP against the merged reference cloud.
-        void registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
-                               const gtsam::Pose3 &predictedPose);
+        /// @return A PriorFactor on X(idxKeyframe) if ICP converged above the fitness threshold,
+        /// std::nullopt otherwise.
+        std::optional<gtsam::NonlinearFactor::shared_ptr>
+        registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
+                          const gtsam::Pose3 &predictedPose, const uint32_t &idxKeyframe);
 
         // subsystem instances
         Buffers buffers_;
