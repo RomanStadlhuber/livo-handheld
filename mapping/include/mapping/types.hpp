@@ -199,39 +199,28 @@ namespace mapping
     /// @brief Frozen, immutable view of a converged submap for scan-to-map registration.
     /// @details The legacy point cloud is world-frame, produced by applying the final optimized
     /// pose to the body-frame cloud at freeze time.
-    /// The tensor representation is built lazily when needed for scan-to-map registration.
     struct FrozenSubmap
     {
         uint32_t keyframeIdx;
         gtsam::Pose3 pose; // world pose at freeze time
         /// @brief Axis-aligned bounding box, computed by Open3D and used for scan-to-map candidate search.
         open3d::geometry::AxisAlignedBoundingBox aabb;
-        std::shared_ptr<const open3d::geometry::PointCloud> pcd;     // world-frame cloud
-        std::shared_ptr<const open3d::geometry::PointCloud> pcdBody; // body-frame cloud, kept for ICP
-        /// @brief lazily-populated tensor cloud, kept on the heap so the struct itself stays small
-        /// and the cloud data can outlive a FrozenSubmap instance held only briefly by callers
-        mutable std::shared_ptr<const open3d::t::geometry::PointCloud> tensor;
-        mutable std::once_flag tensorBuiltFlag;
-
-        /// @brief lazy accessor: builds the tensor cloud from legacy on first call, then caches
-        std::shared_ptr<const open3d::t::geometry::PointCloud> getTensorLazy() const
-        {
-            std::call_once(tensorBuiltFlag,
-                           [this]()
-                           {
-                               tensor = std::make_shared<const open3d::t::geometry::PointCloud>(
-                                   open3d::t::geometry::PointCloud::FromLegacy(*pcd));
-                           });
-            return tensor;
-        }
+        std::shared_ptr<const open3d::geometry::PointCloud> pcdWorld; // world-frame cloud
+        std::shared_ptr<const open3d::geometry::PointCloud> pcdBody;  // body-frame cloud, kept for ICP
     };
 
     /// @ingroup types
-    /// @brief Snapshot of frozen submaps returned to the tracking thread.
-    struct FrozenMapSnapshot
+    /// @brief Cache of frozen submaps used as the reference map for scan-to-map registration.
+    /// @details Keyed by keyframe index for stable identity across BA updates.
+    /// The merged tensor cloud is rebuilt when dirty is true.
+    /// On add-only updates the new clouds are merged in incrementally.
+    /// On any removal the cloud is rebuilt from scratch from all current entries.
+    struct RegistrationCache
     {
-        std::vector<std::shared_ptr<const FrozenSubmap>> submaps;
-        uint64_t version{0};
+        std::map<uint32_t, std::shared_ptr<const FrozenSubmap>> submaps;
+        bool dirty{false};
+        // merged, voxelized world-frame reference cloud used for ICP
+        std::shared_ptr<open3d::t::geometry::PointCloud> pcd;
     };
 } // namespace mapping
 #endif // MAPPING_TYPES_HPP_
