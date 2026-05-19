@@ -331,6 +331,39 @@ namespace mapping
         field(config.camera, "camera");
     }
 
+    /// @brief Parameters for scan-to-map registration using the frozen global map.
+    struct ScanToMapRegistrationConfig
+    {
+        // [m], inflates the query AABB before submap candidate search, compensates for odometry drift at boundaries
+        double aabb_inflation_margin = 0.25;
+        size_t max_candidates = 5;      // max frozen submaps returned per search
+        double cache_voxel_size = 0.15; // [m], voxel size for the merged reference map
+        // voxel sizes per ICP scale, strictly decreasing, last entry may be -1 for original resolution
+        std::vector<double> voxel_sizes = {0.4, 0.2, -1.0};
+        // max correspondence distance per ICP scale
+        std::vector<double> max_correspondence_distances = {1.0, 0.5, 0.2};
+        // max ICP iterations per scale
+        std::vector<int> max_iterations_per_scale = {30, 15, 10};
+        double fitness_threshold = 0.3; // min inlier ratio to accept the registration result
+    };
+
+    inline void declare_config(ScanToMapRegistrationConfig &config)
+    {
+        using namespace config;
+        name("ScanToMapRegistrationConfig");
+        field(config.aabb_inflation_margin, "aabb_inflation_margin", "m");
+        field(config.max_candidates, "max_candidates");
+        field(config.cache_voxel_size, "cache_voxel_size", "m");
+        field(config.voxel_sizes, "voxel_sizes");
+        field(config.max_correspondence_distances, "max_correspondence_distances");
+        field(config.max_iterations_per_scale, "max_iterations_per_scale");
+        field(config.fitness_threshold, "fitness_threshold");
+        check(config.aabb_inflation_margin, GE, 0.0, "aabb_inflation_margin");
+        check(config.max_candidates, GT, 0, "max_candidates");
+        check(config.cache_voxel_size, GT, 0.0, "cache_voxel_size");
+        check(config.fitness_threshold, GT, 0.0, "fitness_threshold");
+    }
+
     /// @brief Global map optimization parameters for submap-level pose graph optimization
     struct GlobalMapOptimizationConfig
     {
@@ -345,6 +378,7 @@ namespace mapping
         double convergence_pose_delta_rotation = 0.01;    // [rad], freeze submap when PGO rotation delta is below this
         int max_align_iterations = 5;                     // hard cap on PGO passes before forced freeze
         int k_nearest_frozen = 3; // number of nearest frozen submaps used as references per free submap
+        ScanToMapRegistrationConfig scan_to_map_registration;
     };
 
     inline void declare_config(GlobalMapOptimizationConfig &config)
@@ -362,6 +396,7 @@ namespace mapping
         field(config.convergence_pose_delta_rotation, "convergence_pose_delta_rotation", "rad");
         field(config.max_align_iterations, "max_align_iterations");
         field(config.k_nearest_frozen, "k_nearest_frozen");
+        field(config.scan_to_map_registration, "scan_to_map_registration");
         check(config.submap_min_distance, GT, 0.0, "submap_min_distance");
         check(config.submap_min_angle, GT, 0.0, "submap_min_angle");
         check(config.icp_max_correspondence_distance, GT, 0.0, "icp_max_correspondence_distance");
