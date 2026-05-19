@@ -9,6 +9,7 @@
 #include <vector>
 #include <numeric>
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <pthread.h>
 #include <semaphore.h>
@@ -115,29 +116,72 @@ namespace mapping
         sem_post(&workSemaphore_);
     }
 
-    std::shared_ptr<const FrozenMapSnapshot> BundleAdjustment::getGlobalMap(const gtsam::Pose3 &pose,
-                                                                            double radius) const
+    std::vector<std::shared_ptr<const FrozenSubmap>>
+    BundleAdjustment::getGlobalMap(const gtsam::Pose3 &pose,
+                                   const open3d::geometry::AxisAlignedBoundingBox &query_aabb_body, size_t N) const
     {
-        auto snapshot = std::make_shared<FrozenMapSnapshot>();
-        const Eigen::Vector3d query = pose.translation();
-        const double radiusSq = radius * radius;
-
-        std::vector<std::shared_ptr<const FrozenSubmap>> candidates;
-        uint64_t version;
+        std::vector<std::shared_ptr<const FrozenSubmap>> frozen;
         {
             std::lock_guard<std::mutex> lock(mapMutex_);
-            candidates = frozenSubmaps_;
-            version = mapVersion_;
+            frozen = frozenSubmaps_;
         }
 
-        snapshot->submaps.reserve(candidates.size());
-        for (const auto &seg : candidates)
+        if (frozen.empty())
+            return {};
+
+        const double margin = config_.global_map_optimization.scan_to_map_registration.aabb_inflation_margin;
+
+        // transform the body-frame query AABB into world frame via the 8 corners
+        const Eigen::Vector3d &lo = query_aabb_body.min_bound_;
+        const Eigen::Vector3d &hi = query_aabb_body.max_bound_;
+        Eigen::Vector3d worldMin = Eigen::Vector3d::Constant(std::numeric_limits<double>::max());
+        Eigen::Vector3d worldMax = Eigen::Vector3d::Constant(std::numeric_limits<double>::lowest());
+        // each corner is transformed to world frame, the component-wise min/max over all 8
+        // gives the tightest axis-aligned bounds enclosing the rotated box
+        for (int cx = 0; cx < 2; ++cx)
+            for (int cy = 0; cy < 2; ++cy)
+                for (int cz = 0; cz < 2; ++cz)
+                {
+                    Eigen::Vector3d corner(cx ? hi.x() : lo.x(), cy ? hi.y() : lo.y(), cz ? hi.z() : lo.z());
+                    Eigen::Vector3d w = pose.transformFrom(corner);
+                    worldMin = worldMin.cwiseMin(w);
+                    worldMax = worldMax.cwiseMax(w);
+                }
+        // inflate by margin to tolerate drift between BA cycles
+        worldMin.array() -= margin;
+        worldMax.array() += margin;
+        const open3d::geometry::AxisAlignedBoundingBox queryWorld(worldMin, worldMax);
+
+        const Eigen::Vector3d queryCenter = pose.translation();
+
+        struct Candidate
         {
-            if ((seg->pose.translation() - query).squaredNorm() <= radiusSq)
-                snapshot->submaps.push_back(seg);
+            std::shared_ptr<const FrozenSubmap> submap;
+            double distSq;
+        };
+        std::vector<Candidate> candidates;
+        candidates.reserve(frozen.size());
+
+        for (const auto &sm : frozen)
+        {
+            // AABB overlap test: .array() makes comparisons component-wise, .any() fails on separation along any axis
+            if ((queryWorld.min_bound_.array() > sm->aabb.max_bound_.array()).any())
+                continue;
+            if ((queryWorld.max_bound_.array() < sm->aabb.min_bound_.array()).any())
+                continue;
+            const double dSq = (queryCenter - sm->pose.translation()).squaredNorm();
+            candidates.push_back({sm, dSq});
         }
-        snapshot->version = version;
-        return snapshot;
+
+        const size_t K = std::min(N, candidates.size());
+        std::partial_sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(K), candidates.end(),
+                          [](const Candidate &a, const Candidate &b) { return a.distSq < b.distSq; });
+
+        std::vector<std::shared_ptr<const FrozenSubmap>> result;
+        result.reserve(K);
+        for (size_t i = 0; i < K; ++i)
+            result.push_back(std::move(candidates[i].submap));
+        return result;
     }
 
     void BundleAdjustment::optimizationWorker(BundleAdjustment *self)
@@ -432,7 +476,7 @@ namespace mapping
         std::shared_ptr<FrozenSubmap> frozen = std::make_shared<FrozenSubmap>();
         frozen->keyframeIdx = submap.keyframeIdx;
         frozen->pose = submap.pose;
-        frozen->pcd = pcdWorld;
+        frozen->pcdWorld = pcdWorld;
         frozen->pcdBody = submap.pcd;
         frozen->aabb = pcdWorld->GetAxisAlignedBoundingBox();
 
@@ -452,6 +496,18 @@ namespace mapping
     {
         std::lock_guard<std::mutex> lock(mapMutex_);
         return activeSubmapSnapshot_;
+    }
+
+    size_t BundleAdjustment::getNumFrozenSubmaps() const
+    {
+        std::lock_guard<std::mutex> lock(mapMutex_);
+        return frozenSubmaps_.size();
+    }
+
+    size_t BundleAdjustment::getNumActiveSubmaps() const
+    {
+        std::lock_guard<std::mutex> lock(mapMutex_);
+        return activeSubmapSnapshot_.size();
     }
 
 } // namespace mapping

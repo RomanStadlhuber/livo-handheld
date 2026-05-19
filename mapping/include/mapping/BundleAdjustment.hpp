@@ -58,9 +58,16 @@ namespace mapping
         /// Apply pose to the cloud to obtain world-frame coordinates for visualization.
         std::map<uint32_t, ActiveSubmap> getAllActiveSubmaps() const;
 
-        /// @brief Query the frozen global map by pose proximity.
-        /// @details Returns a snapshot of every frozen submap whose pose origin is within radius of the query pose.
-        std::shared_ptr<const FrozenMapSnapshot> getGlobalMap(const gtsam::Pose3 &pose, double radius) const;
+        size_t getNumFrozenSubmaps() const;
+        size_t getNumActiveSubmaps() const;
+
+        /// @brief Query the frozen global map by pose and scan AABB.
+        /// @details Transforms the query AABB to world frame, tests overlap against each frozen submap AABB
+        /// (inflated by the configured margin), then returns the N nearest overlapping submaps by
+        /// center-to-center distance.
+        std::vector<std::shared_ptr<const FrozenSubmap>>
+        getGlobalMap(const gtsam::Pose3 &pose, const open3d::geometry::AxisAlignedBoundingBox &query_aabb_body,
+                     size_t N) const;
 
     private:
         /// @brief Per-submap state tracked internally during optimization cycles.
