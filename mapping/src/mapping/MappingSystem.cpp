@@ -300,7 +300,7 @@ namespace mapping
     void MappingSystem::registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
                                           const gtsam::Pose3 &predictedPose)
     {
-        const auto &s2mCfg = config_.global_map_optimization.scan_to_map_registration;
+        const auto &cfgScanToMap = config_.global_map_optimization.scan_to_map_registration;
 
         // skip until the BA has produced at least one frozen submap
         if (bundleAdjustment_->getNumFrozenSubmaps() == 0)
@@ -309,7 +309,7 @@ namespace mapping
         // predicted LiDAR frame pose in the world
         const gtsam::Pose3 world_T_lidar = predictedPose.compose(states_.getImuToLidarExtrinsic());
         const open3d::geometry::AxisAlignedBoundingBox scanAabb = scan->GetAxisAlignedBoundingBox();
-        auto candidates = bundleAdjustment_->getGlobalMap(world_T_lidar, scanAabb, s2mCfg.max_candidates);
+        auto candidates = bundleAdjustment_->getGlobalMap(world_T_lidar, scanAabb, cfgScanToMap.max_candidates);
 
         // compute the set of keyframe indices returned by this search
         std::set<uint32_t> newIds;
@@ -356,7 +356,7 @@ namespace mapping
                 open3d::geometry::PointCloud pcdMerged;
                 for (const auto &[id, sm] : registrationCache_.submaps)
                     pcdMerged += *sm->pcdWorld;
-                pcdMerged = *pcdMerged.VoxelDownSample(s2mCfg.cache_voxel_size);
+                pcdMerged = *pcdMerged.VoxelDownSample(cfgScanToMap.cache_voxel_size);
                 registrationCache_.pcd = std::make_shared<open3d::t::geometry::PointCloud>(
                     open3d::t::geometry::PointCloud::FromLegacy(pcdMerged, open3d::core::Float64));
             }
@@ -370,7 +370,7 @@ namespace mapping
                 const open3d::t::geometry::PointCloud pcdNewTensor =
                     open3d::t::geometry::PointCloud::FromLegacy(pcdNewLegacy, open3d::core::Float64);
                 registrationCache_.pcd = std::make_shared<open3d::t::geometry::PointCloud>(
-                    (*registrationCache_.pcd + pcdNewTensor).VoxelDownSample(s2mCfg.cache_voxel_size));
+                    (*registrationCache_.pcd + pcdNewTensor).VoxelDownSample(cfgScanToMap.cache_voxel_size));
             }
             registrationCache_.dirty = false;
             LOG(DEBUG, "registration cache rebuilt: " << registrationCache_.submaps.size() << " submaps, "
@@ -379,11 +379,11 @@ namespace mapping
         }
 
         // build per-scale ICP criteria from config vectors
-        const size_t numScales = s2mCfg.voxel_sizes.size();
+        const size_t numScales = cfgScanToMap.voxel_sizes.size();
         std::vector<open3d::t::pipelines::registration::ICPConvergenceCriteria> criteriaList;
         criteriaList.reserve(numScales);
         for (size_t i = 0; i < numScales; ++i)
-            criteriaList.emplace_back(1e-6, 1e-6, s2mCfg.max_iterations_per_scale[i]);
+            criteriaList.emplace_back(1e-6, 1e-6, cfgScanToMap.max_iterations_per_scale[i]);
 
         // convert scan to tensor; Float64 dtype required by the MultiScaleICP API
         const open3d::t::geometry::PointCloud pcdScanTensor =
@@ -396,13 +396,13 @@ namespace mapping
                                              open3d::core::Device("CPU:0"));
 
         const auto result = open3d::t::pipelines::registration::MultiScaleICP(
-            pcdScanTensor, pcdTarget, s2mCfg.voxel_sizes, criteriaList, s2mCfg.max_correspondence_distances, initGuess,
-            open3d::t::pipelines::registration::TransformationEstimationPointToPoint());
+            pcdScanTensor, pcdTarget, cfgScanToMap.voxel_sizes, criteriaList, cfgScanToMap.max_correspondence_distances,
+            initGuess, open3d::t::pipelines::registration::TransformationEstimationPointToPoint());
 
         LOG(DEBUG, "scan-to-map ICP: fitness=" << result.fitness_ << " rmse=" << result.inlier_rmse_
-                                               << " (threshold=" << s2mCfg.fitness_threshold << ")");
+                                               << " (threshold=" << cfgScanToMap.fitness_threshold << ")");
 
-        if (result.fitness_ < s2mCfg.fitness_threshold)
+        if (result.fitness_ < cfgScanToMap.fitness_threshold)
         {
             LOG(DEBUG, "scan-to-map registration rejected, fitness below threshold");
             return;
