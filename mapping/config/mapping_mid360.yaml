@@ -1,5 +1,5 @@
 backend:
-  sliding_window_size: 14 # [keyframes]
+  sliding_window_size: 7 # [keyframes]
   init_time_window: 2.0 # [sec.]
   solver_iterations: 2 
   isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
@@ -67,8 +67,8 @@ intrinsics:
       - -0.00185591
 
 global_map_optimization:
-  submap_min_distance: 5.0      # [m], min travel from last accepted submap
-  submap_min_angle: 0.785       # [rad], ~45 deg, min rotation from last accepted submap
+  submap_min_distance: 1.0      # [m], min travel from last accepted submap
+  submap_min_angle: 0.4       # [rad], min rotation from last accepted submap
   # IMPORTANT: should be larger than frontend voxel size!!
   icp_max_correspondence_distance: 1.5  # [m]
   icp_iterations: 3
@@ -78,7 +78,6 @@ global_map_optimization:
   convergence_pose_delta_translation: 0.02 # [m]
   convergence_pose_delta_rotation: 0.01    # [rad]
   max_align_iterations: 5
-  k_nearest_frozen: 3
   scan_to_map_registration:
     aabb_inflation_margin: 0.25  # [m], compensates for odometry drift at submap boundaries
     max_candidates: 5
@@ -86,5 +85,5 @@ global_map_optimization:
     voxel_sizes: [0.4, 0.2, -1.0]                 # [m] per ICP scale, strictly decreasing, -1 = original
     max_correspondence_distances: [1.0, 0.5, 0.2] # [m] per ICP scale
     max_iterations_per_scale: [30, 15, 10]
-    fitness_threshold: 0.3       # min inlier ratio to accept registration result
+    fitness_threshold: 0.2       # min inlier ratio to accept registration result
 
