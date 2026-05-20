@@ -24,7 +24,7 @@ namespace mapping
         // multi-fixed-node behavior that Open3D's PGO does not support natively
         constexpr double FIXED_NODE_INFO_SCALE = 1e8;
         // minimum number of required active submaps before building & optimizing a graph
-        constexpr std::size_t MIN_ACTIVE_SUBMAPS = 3;
+        constexpr std::size_t MIN_ACTIVE_SUBMAPS = 2;
 
     } // namespace
 

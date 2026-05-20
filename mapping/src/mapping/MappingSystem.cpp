@@ -278,10 +278,9 @@ namespace mapping
         auto [featureFactors, factorsToRemove] =
             featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
 
-        /*
         if (registrationPrior) // add registration prior if it has a value
             featureFactors.add(*registrationPrior);
-        */
+
         gtsam::CombinedImuFactor imuFactor = imuFrontend_.createPreintegrationFactor(idxKeyframe - 1, idxKeyframe);
 
         /* Run iSAM2 update, extract state estimate, and update all keyframe submap poses.
