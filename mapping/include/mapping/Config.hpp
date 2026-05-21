@@ -377,7 +377,6 @@ namespace mapping
         double convergence_pose_delta_translation = 0.05; // [m], freeze submap when PGO translation delta is below this
         double convergence_pose_delta_rotation = 0.01;    // [rad], freeze submap when PGO rotation delta is below this
         int max_align_iterations = 5;                     // hard cap on PGO passes before forced freeze
-        int k_nearest_frozen = 3; // number of nearest frozen submaps used as references per free submap
         ScanToMapRegistrationConfig scan_to_map_registration;
     };
 
@@ -395,7 +394,6 @@ namespace mapping
         field(config.convergence_pose_delta_translation, "convergence_pose_delta_translation", "m");
         field(config.convergence_pose_delta_rotation, "convergence_pose_delta_rotation", "rad");
         field(config.max_align_iterations, "max_align_iterations");
-        field(config.k_nearest_frozen, "k_nearest_frozen");
         field(config.scan_to_map_registration, "scan_to_map_registration");
         check(config.submap_min_distance, GT, 0.0, "submap_min_distance");
         check(config.submap_min_angle, GT, 0.0, "submap_min_angle");
@@ -407,7 +405,6 @@ namespace mapping
         check(config.convergence_pose_delta_translation, GT, 0.0, "convergence_pose_delta_translation");
         check(config.convergence_pose_delta_rotation, GT, 0.0, "convergence_pose_delta_rotation");
         check(config.max_align_iterations, GT, 0, "max_align_iterations");
-        check(config.k_nearest_frozen, GT, 0, "k_nearest_frozen");
     }
 
     /// @brief Main mapping system configuration
