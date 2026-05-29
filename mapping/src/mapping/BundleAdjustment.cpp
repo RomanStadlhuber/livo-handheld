@@ -332,6 +332,9 @@ namespace mapping
             prevPoses[i] = workingSet[i].pose;
         for (std::size_t mi = 0; mi < M; ++mi)
         {
+            constexpr std::size_t MAX_PGO_LOOP_CLOSURES = 3; // max. number of LCs when building pose graph
+            std::size_t numLoopClosures = 0;                 // number of LCs made on a node
+
             for (std::size_t mj = mi + 1; mj < M; ++mj)
             {
                 const PoseGraphNode &ni = poseGraphNodes[mi]; // earlier in keyframe order (source)
@@ -365,6 +368,9 @@ namespace mapping
                 // non-sequential nodes get loop closure tested (already gated above)
                 else
                 {
+                    // skip loop closure check if this node has already reached the max. number of loop closures
+                    if (numLoopClosures >= MAX_PGO_LOOP_CLOSURES)
+                        continue;
                     // loop closure: ICP with SLAM relative pose as initial guess
                     // Open3D edge (source=ni, target=nj) stores T = P_nj^-1 * P_ni,
                     // so ICP source is pcdI (ni) and target is pcdJ (nj)
@@ -382,6 +388,8 @@ namespace mapping
                                                   /*uncertain=*/true);
                     LOG(DEBUG, "loop edge kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx
                                               << " fitness=" << icpResult.fitness_);
+                    // counter to bound max. number of loop closures per node
+                    numLoopClosures++;
                 }
             }
         }
