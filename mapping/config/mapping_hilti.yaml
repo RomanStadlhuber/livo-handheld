@@ -9,10 +9,10 @@ lidar_frontend:
   undistort: false # generic LiDAR time offsets currently not supported
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
-  normal_consistency_threshold: 0.8 # [0-1], accepting new points based updated normal consistency
+  normal_consistency_threshold: 0.85 # [0-1], accepting new points based updated normal consistency
   planarity_check:
-    linearity: 0.3 # 0.5
-    planarity: 0.3 # 0.1
+    linearity: 0.3
+    planarity: 0.3
   clustering:
     min_points: 5
     max_points: 20
@@ -26,7 +26,7 @@ lidar_frontend:
     # during testing on the HILTI SLAM datasets, sometimes keyframes are selected based on
     # elapsed no. of scans, but no preintegration factor can be created to constrain the velocity
     # an IndeterminantLinearSystemException will likely arise on variable v<N> because of this
-    thresh_elapsed_scans: 10
+    thresh_elapsed_scans: 6
 
 camera_frontend:
   color_space: RGB # can be RGB or BGR (both 8-bit)
@@ -78,7 +78,7 @@ global_map_optimization:
   icp_iterations: 6
   refinement_voxel_size: 0.2    # [m]
   loop_closure_search_radius: 15.0  # [m], max centroid distance for non-sequential loop closure
-  loop_closure_min_fitness: 0.45
+  loop_closure_min_fitness: 0.6
   convergence_pose_delta_translation: 0.02 # [m]
   convergence_pose_delta_rotation: 0.01    # [rad]
   max_align_iterations: 20
