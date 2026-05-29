@@ -315,21 +315,27 @@ namespace mapping
         for (std::size_t i = 0; i < R; ++i)
             poseGraph.nodes_.emplace_back(frozenSnap[i]->pose.matrix());
 
-        // fixed edges between all frozen reference pairs using their actual relative poses
+        // fixed edges connect every frozen reference node to the origin frozenSnap[0] in a star topology
+        // this holds the frozen subgraph rigid relative to the fixed reference node
+        // the star uses R-1 edges instead of the R*(R-1)/2 of an all-pairs clique
         // NOTE that Open3Ds PGO currently does not support fixing variables,
         // so this is a workaround
-        // TODO: investigate whether this is a bottleneck and what other options are available
+        // - previously, added R^2 edges between all reference nodes
+        // - the single loop replaces this with one edge from each node to the (truly fixed) origin node
         const Eigen::Matrix6d infoFixed = Eigen::Matrix6d::Identity() * FIXED_NODE_INFO_SCALE;
-        for (std::size_t i = 0; i + 1 < R; ++i)
-            for (std::size_t j = i + 1; j < R; ++j)
-                poseGraph.edges_.emplace_back(static_cast<int>(A + j), static_cast<int>(A + i),
-                                              (frozenSnap[i]->pose.inverse() * frozenSnap[j]->pose).matrix(), infoFixed,
-                                              /*uncertain=*/false);
+        const std::size_t edgesBeforeFrozenPass = poseGraph.edges_.size();
+        for (std::size_t j = 1; j < R; ++j)
+            poseGraph.edges_.emplace_back(static_cast<int>(A + j), static_cast<int>(A + 0),
+                                          (frozenSnap[0]->pose.inverse() * frozenSnap[j]->pose).matrix(), infoFixed,
+                                          /*uncertain=*/false);
+        const std::size_t numFrozenEdges = poseGraph.edges_.size() - edgesBeforeFrozenPass;
+        LOG(INFO, "frozen<->frozen pass: " << numFrozenEdges << " fixed edges added");
 
         // save pre-PGO poses after phase 1 so convergence deltas measure PGO-only correction
         std::vector<gtsam::Pose3> prevPoses(A);
         for (std::size_t i = 0; i < A; ++i)
             prevPoses[i] = workingSet[i].pose;
+        const std::size_t edgesBeforeActivePass = poseGraph.edges_.size();
         for (std::size_t mi = 0; mi < M; ++mi)
         {
             constexpr std::size_t MAX_PGO_LOOP_CLOSURES = 3; // max. number of LCs when building pose graph
@@ -394,7 +400,11 @@ namespace mapping
             }
         }
 
-        LOG(INFO, "PGO: " << A << " active + " << R << " ref nodes, " << poseGraph.edges_.size() << " edges");
+        const std::size_t numActivePassEdges = poseGraph.edges_.size() - edgesBeforeActivePass;
+        LOG(INFO, "active pass: " << numActivePassEdges << " sequential and loop closure edges added");
+
+        LOG(INFO, "PGO graph: " << poseGraph.nodes_.size() << " nodes (" << A << " active + " << R << " ref), "
+                                << poseGraph.edges_.size() << " edges");
         // run PGO
         if (!poseGraph.edges_.empty())
         {
