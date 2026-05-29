@@ -1,18 +1,18 @@
 backend:
   sliding_window_size: 14 # [keyframes]
   init_time_window: 2.0 # [sec.]
-  solver_iterations: 3 
+  solver_iterations: 2
   isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
 
 lidar_frontend:
-  voxel_size: 1.0 # [m]
+  voxel_size: 0.5 # [m]
   undistort: false # generic LiDAR time offsets currently not supported
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
   normal_consistency_threshold: 0.8 # [0-1], accepting new points based updated normal consistency
   planarity_check:
-    linearity: 0.3
-    planarity: 0.3
+    linearity: 0.3 # 0.5
+    planarity: 0.3 # 0.1
   clustering:
     min_points: 5
     max_points: 20
@@ -20,9 +20,13 @@ lidar_frontend:
     sampling_voxel_size: 2.5 # [m], voxel size to use for cluster supplementation (0 = all)
     insert_lag: 0 # keyframe delay to use when inserting new clusters from keyframes
   keyframe:
-    thresh_distance: 0.35 # [m]
-    thresh_angle: 0.349 # [rad], ~20 [°]
-    thresh_elapsed_scans: 3
+    thresh_distance: 0.2 # [m]
+    thresh_angle: 0.1745 # [rad]
+    # IMPORTANT:
+    # during testing on the HILTI SLAM datasets, sometimes keyframes are selected based on
+    # elapsed no. of scans, but no preintegration factor can be created to constrain the velocity
+    # an IndeterminantLinearSystemException will likely arise on variable v<N> because of this
+    thresh_elapsed_scans: 10
 
 camera_frontend:
   color_space: RGB # can be RGB or BGR (both 8-bit)
@@ -67,18 +71,17 @@ intrinsics:
       - -0.00185591
 
 global_map_optimization:
-  submap_min_distance: 5.0      # [m], min travel from last accepted submap
-  submap_min_angle: 0.785       # [rad], ~45 deg, min rotation from last accepted submap
+  submap_min_distance: 0.6      # [m], min travel from last accepted submap
+  submap_min_angle: 0.25       # [rad], min rotation from last accepted submap
   # IMPORTANT: should be larger than frontend voxel size!!
-  icp_max_correspondence_distance: 1.5  # [m]
-  icp_iterations: 5
+  icp_max_correspondence_distance: 1.0  # [m]
+  icp_iterations: 6
   refinement_voxel_size: 0.2    # [m]
   loop_closure_search_radius: 15.0  # [m], max centroid distance for non-sequential loop closure
-  loop_closure_min_fitness: 0.6
-  convergence_pose_delta_translation: 0.05 # [m]
+  loop_closure_min_fitness: 0.45
+  convergence_pose_delta_translation: 0.02 # [m]
   convergence_pose_delta_rotation: 0.01    # [rad]
-  max_align_iterations: 5
-  k_nearest_frozen: 3
+  max_align_iterations: 20
   scan_to_map_registration:
     aabb_inflation_margin: 0.25  # [m], compensates for odometry drift at submap boundaries
     max_candidates: 5
@@ -86,5 +89,5 @@ global_map_optimization:
     voxel_sizes: [0.4, 0.2, -1.0]                 # [m] per ICP scale, strictly decreasing, -1 = original
     max_correspondence_distances: [1.0, 0.5, 0.2] # [m] per ICP scale
     max_iterations_per_scale: [30, 15, 10]
-    fitness_threshold: 0.3       # min inlier ratio to accept registration result
+    fitness_threshold: 0.1       # min inlier ratio to accept registration result
 
