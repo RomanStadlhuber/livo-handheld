@@ -553,6 +553,13 @@ namespace mapping
                 LOG_STAMPED(WARN, states_.tLastScan_, "could not retrieve state for keyframe " << idxKf);
             }
         }
+        // inject latest predicted state when no keyframe has been selected yet,
+        // this essentially allows upstream to consume poses at the rate of update()/track()/getStates()
+        // (states_.tLastImu_ is set after successful preintegration)
+        auto const &[idxLatestKF, tLatestKF] = *(states_.getKeyframeTimestamps().rbegin());
+        if (states_.tLastImu_ > tLatestKF)
+            states[idxLatestKF + 1] = NavStateStamped{states_.getCurrentState(), states_.tLastImu_};
+
         return states;
     }
 
