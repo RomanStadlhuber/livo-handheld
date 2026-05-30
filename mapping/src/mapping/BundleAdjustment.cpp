@@ -76,8 +76,8 @@ namespace mapping
     void BundleAdjustment::accumulateSubmap(uint32_t keyframeIdx, const std::shared_ptr<gtsam::Pose3> &pose,
                                             const std::shared_ptr<open3d::geometry::PointCloud> &cloud)
     {
-        const double minDist = config_.global_map_optimization.submap_min_distance;
-        const double minAngle = config_.global_map_optimization.submap_min_angle;
+        const double minDist = config_.bundle_adjustment.submap_min_distance;
+        const double minAngle = config_.bundle_adjustment.submap_min_angle;
 
         if (lastAcceptedPose_.has_value())
         {
@@ -129,7 +129,7 @@ namespace mapping
         if (frozen.empty())
             return {};
 
-        const double margin = config_.global_map_optimization.scan_to_map_registration.aabb_inflation_margin;
+        const double margin = config_.bundle_adjustment.scan_to_map_registration.aabb_inflation_margin;
 
         // transform the body-frame query AABB into world frame via the 8 corners
         const Eigen::Vector3d &lo = query_aabb_body.min_bound_;
@@ -273,10 +273,10 @@ namespace mapping
         };
 
         const open3d::pipelines::registration::ICPConvergenceCriteria icpCriteria{
-            1e-4, 1e-4, config_.global_map_optimization.icp_iterations};
-        const double icpMaxDist = config_.global_map_optimization.icp_max_correspondence_distance;
-        const double loopRadius = config_.global_map_optimization.loop_closure_search_radius;
-        const double minFitness = config_.global_map_optimization.loop_closure_min_fitness;
+            1e-4, 1e-4, config_.bundle_adjustment.icp_iterations};
+        const double icpMaxDist = config_.bundle_adjustment.icp_max_correspondence_distance;
+        const double loopRadius = config_.bundle_adjustment.loop_closure_search_radius;
+        const double minFitness = config_.bundle_adjustment.loop_closure_min_fitness;
 
         // phase 1: sequential ICP chain to refine active submap poses before PGO
         const std::size_t M = poseGraphNodes.size();
@@ -437,9 +437,9 @@ namespace mapping
                                       << " dR=" << workingSet[i].lastDeltaRotation);
 
         // partition working set: freeze converged/capped, keep the rest in pendingSubmaps_
-        const double convT = config_.global_map_optimization.convergence_pose_delta_translation;
-        const double convR = config_.global_map_optimization.convergence_pose_delta_rotation;
-        const uint32_t iterCap = static_cast<uint32_t>(config_.global_map_optimization.max_align_iterations);
+        const double convT = config_.bundle_adjustment.convergence_pose_delta_translation;
+        const double convR = config_.bundle_adjustment.convergence_pose_delta_rotation;
+        const uint32_t iterCap = static_cast<uint32_t>(config_.bundle_adjustment.max_align_iterations);
 
         std::vector<PendingSubmap> nextPending;
         nextPending.reserve(A);

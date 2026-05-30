@@ -312,7 +312,7 @@ namespace mapping
     MappingSystem::registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
                                      const gtsam::Pose3 &predictedPose, const uint32_t &idxKeyframe)
     {
-        const auto &cfgScanToMap = config_.global_map_optimization.scan_to_map_registration;
+        const auto &cfgScanToMap = config_.bundle_adjustment.scan_to_map_registration;
 
         // skip until the BA has produced at least one frozen submap
         if (bundleAdjustment_->getNumFrozenSubmaps() == 0)

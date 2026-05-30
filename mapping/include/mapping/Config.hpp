@@ -364,8 +364,8 @@ namespace mapping
         check(config.fitness_threshold, GT, 0.0, "fitness_threshold");
     }
 
-    /// @brief Global map optimization parameters for submap-level pose graph optimization
-    struct GlobalMapOptimizationConfig
+    /// @brief Bundle adjustment parameters for submap-level pose graph optimization
+    struct BundleAdjustmentConfig
     {
         double submap_min_distance = 5.0; // [m], min travel from last accepted submap before accepting a new one
         double submap_min_angle = 0.785;  // [rad], min rotation (~45 deg) from last accepted submap
@@ -380,10 +380,10 @@ namespace mapping
         ScanToMapRegistrationConfig scan_to_map_registration;
     };
 
-    inline void declare_config(GlobalMapOptimizationConfig &config)
+    inline void declare_config(BundleAdjustmentConfig &config)
     {
         using namespace config;
-        name("GlobalMapOptimizationConfig");
+        name("BundleAdjustmentConfig");
         field(config.submap_min_distance, "submap_min_distance", "m");
         field(config.submap_min_angle, "submap_min_angle", "rad");
         field(config.icp_max_correspondence_distance, "icp_max_correspondence_distance", "m");
@@ -417,7 +417,7 @@ namespace mapping
         ExtrinsicsConfig extrinsics;
         RecoveryConfig recovery;
         IntrinsicsConfig intrinsics;
-        GlobalMapOptimizationConfig global_map_optimization;
+        BundleAdjustmentConfig bundle_adjustment;
     };
 
     inline void declare_config(MappingConfig &config)
@@ -431,7 +431,7 @@ namespace mapping
         field(config.extrinsics, "extrinsics");
         field(config.recovery, "recovery");
         field(config.intrinsics, "intrinsics");
-        field(config.global_map_optimization, "global_map_optimization");
+        field(config.bundle_adjustment, "bundle_adjustment");
     }
 
 } // namespace mapping
