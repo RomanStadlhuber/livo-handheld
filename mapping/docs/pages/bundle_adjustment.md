@@ -15,7 +15,7 @@ seen locations.
 
 After poses and their submap pointclouds have been marginalized from the sliding window
 and are no longer actively used for tracking, they are shifted into the secondary pose
-graph by `BundleAdjustment::accumulateSubmap`.
+graph by [`BundleAdjustment::accumulateSubmap`](@ref BundleAdjustment::accumulateSubmap).
 
 The secondary pose graph is loosely coupled and handled by
 [Open3Ds Multiway registration](https://www.open3d.org/docs/release/tutorial/pipelines/multiway_registration.html)
@@ -24,7 +24,7 @@ the main LiDAR inertial tracking poses and point-to-plane ICP - in a loosey coup
 
 > **Note:** to reduce the computational load, the number of submaps accepted into the
 > secondary graph is limited by configurable translation & orientation thresholds
-> see (`BundleAdjustmentConfig`).
+> see ([`BundleAdjustmentConfig`](@ref BundleAdjustmentConfig)).
 
 ## The Submap Lifecycle
 
@@ -33,8 +33,9 @@ Once a submap gets marginalized from the sliding window, its LiDAR-frame pose
 the PGO buffer when exceepding a certain pose delta.
 These submaps are then waiting to be optimized.
 
-The BA system will await `BundleAdjustment::MIN_ACTIVE_SUBMAPS` before beginning the
-processing.
+The BA system will await
+[`BundleAdjustment::MIN_ACTIVE_SUBMAPS`](@ref BundleAdjustment::MIN_ACTIVE_SUBMAPS)
+before beginning the processing.
 This is for two reasons:
 - before building the graph which is to be optimized, the submaps are further aligned
   using ICP to mitigate coarse drift between the active submap pointclouds
@@ -67,7 +68,8 @@ Additionally, each submap is checking other nearby submaps (both frozen and acti
 loop closure constraints, of which there will usually be plenty, given there is
 sufficient overlap between the pointclouds.
 However, to further bound the computational load on the PGO process itself, the number of
-loop closures per submap is bounded to `MAX_PGO_LOOP_CLOSURES`, a low number.
+loop closures per submap is bounded to
+[`MAX_PGO_LOOP_CLOSURES`](@ref BundleAdjustment::MAX_PGO_LOOP_CLOSURES), a low number.
 While the odometry edges are set as `certain=true`, loop closure edges are uncertain so
 that the outer PGO loop has the ability to reject spurious associations that would
 otherwise corrupt the system.
@@ -131,7 +133,9 @@ consistend pointcloud map, which `MappingSystem` can use to register new keyfram
 against and provide reasonable pose priors, thus improving overall system accuracy.
 
 Based on the current pose and overlap of the pointclouds axis-aligned bounding-boxes
-(AABBs) an internal `MapppingSystem::registrationCache_` is built-up, making sure that
+(AABBs) an internal
+[`MappingSystem::registrationCache_`](@ref MappingSystem::registrationCache_)
+is built-up, making sure that
 only the submaps with reasonable overlap are used for registration.
 The cache will be marked *dirty* when a new sumbmap enters the current keyframes AABB
 or one that is currently cached leaves it.
@@ -143,12 +147,14 @@ While most of the project uses the (internally referred to as) *"legacy"* Open3D
 i.e. `open3d::geometry::PointCloud`, the cache and scan to map registration use the
 `open3d::t` Tensor-based API, as it natively implements a coarse-to-fine ICP pipeline
 which is used to provide a more accurate registration result to the final scan-to-map
-registration, which is done in `MappingSystem::registerScanToMap`.
+registration, which is done in
+[`MappingSystem::registerScanToMap`](@ref MappingSystem::registerScanToMap).
 See also
 [MultiScaleICP](https://www.open3d.org/docs/latest/cpp_api/namespaceopen3d_1_1t_1_1pipelines_1_1registration.html#a300caad70b099cb9f5d5ce72a8ff1ecb)
 .
 
 Finally, when the resulting pose exceeds a configurable relative fitness threshold
-(see `ScanToMapRegistrationConfig`), it creates a `PriorFactor<Pose3>` that places an
+(see [`ScanToMapRegistrationConfig`](@ref ScanToMapRegistrationConfig)),
+it creates a `PriorFactor<Pose3>` that places an
 additional constraint on the LiDAR-IMU pose estimate.
 The registration makes use of the IMU-to-LiDAR extrinsic calibration \f$ \iTl \f$.
