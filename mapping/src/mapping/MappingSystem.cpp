@@ -190,9 +190,9 @@ namespace mapping
         // check if motion since last keyframe exceeds thresholds
         // use IMU poses on both sides so the extrinsic rotation does not bias the angle diff
         const gtsam::Pose3 &lastKfImuPose = *states_.getKeyframeImuPoses().rbegin()->second;
-        const double positionDiff = (w_X_propagated.pose().translation() - lastKfImuPose.translation()).norm();
-        const double angleDiff =
-            (lastKfImuPose.rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
+        const double positionDiff = (w_X_propagated.pose().translation() - lastKfImuPose.translation()).norm(),
+                     angleDiff =
+                         (lastKfImuPose.rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
         states_.setCurrentState(w_X_propagated);
 
         // temporal synchronization between LiDAR scans and camera images
@@ -315,7 +315,7 @@ namespace mapping
         pcdRecovery->Transform(world_T_lidar.inverse().matrix());
 
         gtsam::NavState w_X_recovery;
-        const auto recoveredState =
+        const std::optional<gtsam::NavState> recoveredState =
             scanToMapFrontend_.estimateRecoveryState(*pcdRecovery, states_.getCurrentState(), states_);
 
         if (recoveredState)
@@ -329,10 +329,9 @@ namespace mapping
             const auto &timestamps = states_.getKeyframeTimestamps();
             auto itLatest = imuPoses.rbegin();
             auto itPrev = std::next(itLatest);
-            const gtsam::Pose3 &w_T_iLatest = *itLatest->second;
-            const gtsam::Pose3 &w_T_iPrev = *itPrev->second;
-            const double dtInterp = timestamps.at(itLatest->first) - timestamps.at(itPrev->first);
-            const double dtExtrap = states_.tLastScan_ - timestamps.at(itLatest->first);
+            const gtsam::Pose3 &w_T_iLatest = *itLatest->second, &w_T_iPrev = *itPrev->second;
+            const double dtInterp = timestamps.at(itLatest->first) - timestamps.at(itPrev->first),
+                         dtExtrap = states_.tLastScan_ - timestamps.at(itLatest->first);
             // forward twist: from the older to the more recent keyframe
             const gtsam::Vector6 twist = gtsam::Pose3::Logmap(w_T_iPrev.between(w_T_iLatest)) / dtInterp;
             const gtsam::Pose3 w_T_iRecovery = w_T_iLatest.compose(gtsam::Pose3::Expmap(twist * dtExtrap));

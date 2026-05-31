@@ -52,8 +52,7 @@ namespace mapping
                 toRemove.push_back(id);
         }
 
-        const bool hasRemovals = !toRemove.empty();
-        const bool hasAdditions = !toAdd.empty();
+        const bool hasRemovals = !toRemove.empty(), hasAdditions = !toAdd.empty();
 
         if (hasRemovals || hasAdditions)
         {
@@ -174,8 +173,7 @@ namespace mapping
             return std::nullopt;
 
         // rotate predicted world-frame velocity into the ICP-refined IMU orientation
-        const gtsam::Rot3 w_R_icp = icpOut->world_T_imu.rotation();
-        const gtsam::Rot3 w_R_pred = world_X_imu.pose().rotation();
+        const gtsam::Rot3 w_R_icp = icpOut->world_T_imu.rotation(), w_R_pred = world_X_imu.pose().rotation();
         const gtsam::Vector3 w_v_recovered = (w_R_icp * w_R_pred.inverse()) * world_X_imu.v();
 
         return gtsam::NavState{icpOut->world_T_imu, w_v_recovered};
