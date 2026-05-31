@@ -1,4 +1,4 @@
-# Secondary Bundle Adjusment Thread
+# Secondary Bundle Adjustment Thread {#bundle_adjustment}
 
 Initial work revealed that the LiDAR inertial tracking capabilities are insufficient to
 constrain the state ovver larger periods of time that exceed the sliding window by
