@@ -249,6 +249,36 @@ private:
         tfStampedMsg.transform.rotation.w = q.w();
         tfBroadcaster_->sendTransform(tfStampedMsg);
 
+        // publish the sliding window before the keyframe gate so it tracks at the update() rate
+        // and carries the latest predicted pose, not just newly created keyframes
+        // TODO: publish full state as nav_msgs/msg/Odometry
+        nav_msgs::msg::Path slidingWindowPathMsg;
+        slidingWindowPathMsg.header.stamp = this->now();
+        slidingWindowPathMsg.header.frame_id = "map";
+        for (const auto &[idxKf, navStateStamped] : states)
+        {
+            geometry_msgs::msg::PoseStamped poseStampedMsg;
+            const rclcpp::Time poseStamp{startTime_ + rclcpp::Duration::from_seconds(navStateStamped.timestamp)};
+            poseStampedMsg.header.stamp = poseStamp;
+            poseStampedMsg.header.frame_id = "map";
+
+            const gtsam::Pose3 &pose = navStateStamped.state.pose();
+            poseStampedMsg.pose.position.x = pose.translation().x();
+            poseStampedMsg.pose.position.y = pose.translation().y();
+            poseStampedMsg.pose.position.z = pose.translation().z();
+
+            const gtsam::Rot3 &rot = pose.rotation();
+            gtsam::Quaternion q = rot.toQuaternion();
+            poseStampedMsg.pose.orientation.x = q.x();
+            poseStampedMsg.pose.orientation.y = q.y();
+            poseStampedMsg.pose.orientation.z = q.z();
+            poseStampedMsg.pose.orientation.w = q.w();
+            slidingWindowPathMsg.poses.push_back(poseStampedMsg);
+
+            historicalPoses[idxKf] = poseStampedMsg;
+        }
+        pubSlidingWindowPath_->publish(slidingWindowPathMsg);
+
         // skip expensive visualization if no new keyframe was created
         const uint32_t currentKeyframeCount = slam_.getKeyframeCount();
         if (currentKeyframeCount == lastPublishedKeyframeCount_)
@@ -341,40 +371,15 @@ private:
         }
         pubClusters_->publish(clusterMarkersMsg_);
 
-        // sliding window and global trajectory
-        nav_msgs::msg::Path slidingWindowPathMsg, historicalPosesPathMsg;
-        slidingWindowPathMsg.header.stamp = this->now();
-        slidingWindowPathMsg.header.frame_id = "map";
-        historicalPosesPathMsg.header = slidingWindowPathMsg.header;
+        // global trajectory of all keyframe poses accumulated so far
+        nav_msgs::msg::Path historicalPosesPathMsg;
+        historicalPosesPathMsg.header.stamp = this->now();
         historicalPosesPathMsg.header.frame_id = "map";
         historicalPosesPathMsg.poses.reserve(historicalPoses.size());
-        for (const auto &[idxKf, navStateStamped] : states)
-        {
-            geometry_msgs::msg::PoseStamped poseStampedMsg;
-            const rclcpp::Time poseStamp{startTime_ + rclcpp::Duration::from_seconds(navStateStamped.timestamp)};
-            poseStampedMsg.header.stamp = poseStamp;
-            poseStampedMsg.header.frame_id = "map";
-
-            const gtsam::Pose3 &pose = navStateStamped.state.pose();
-            poseStampedMsg.pose.position.x = pose.translation().x();
-            poseStampedMsg.pose.position.y = pose.translation().y();
-            poseStampedMsg.pose.position.z = pose.translation().z();
-
-            const gtsam::Rot3 &rot = pose.rotation();
-            gtsam::Quaternion q = rot.toQuaternion();
-            poseStampedMsg.pose.orientation.x = q.x();
-            poseStampedMsg.pose.orientation.y = q.y();
-            poseStampedMsg.pose.orientation.z = q.z();
-            poseStampedMsg.pose.orientation.w = q.w();
-            slidingWindowPathMsg.poses.push_back(poseStampedMsg);
-
-            historicalPoses[idxKf] = poseStampedMsg;
-        }
         for (auto const &[_, histPose] : historicalPoses)
         {
             historicalPosesPathMsg.poses.push_back(histPose);
         }
-        pubSlidingWindowPath_->publish(slidingWindowPathMsg);
         pubHistoricalPosesPath_->publish(historicalPosesPathMsg);
     }
 
