@@ -137,32 +137,6 @@ namespace mapping
         check(config.isam2_relinearize_threshold, GT, 0.0, "isam2_relinearize_threshold");
     }
 
-    /// @brief Recovery frontend parameters
-    struct RecoveryConfig
-    {
-        double voxel_size = 0.2;           // [m], voxel size to use for recovery reference point cloud
-        size_t reference_window_size = 10; // [keyframes], number of keyframes to use for recovery reference
-        size_t reference_lag = 2;          // keyframe delay to use for recovery reference
-        int icp_iterations = 50;
-        double max_correspondence_distance = 0.05; // [m], for validating point-to-plane ICP correspondences
-    };
-
-    inline void declare_config(RecoveryConfig &config)
-    {
-        using namespace config;
-        name("RecoveryConfig");
-        field(config.voxel_size, "voxel_size", "m");
-        field(config.reference_window_size, "reference_window_size", "keyframes");
-        field(config.reference_lag, "reference_lag", "keyframes");
-        field(config.icp_iterations, "icp_iterations");
-        field(config.max_correspondence_distance, "max_correspondence_distance", "m");
-        check(config.voxel_size, GT, 0.0, "voxel_size");
-        check(config.reference_window_size, GT, 1, "reference_window_size");
-        check(config.reference_lag, GT, 0, "reference_lag");
-        check(config.icp_iterations, GT, 1, "icp_iterations");
-        check(config.max_correspondence_distance, GT, 0.0, "max_correspondence_distance");
-    }
-
     /// @brief Point cloud filtering parameters
     struct PointFilterConfig
     {
@@ -415,7 +389,6 @@ namespace mapping
         CameraFrontendConfig camera_frontend;
         PointFilterConfig point_filter;
         ExtrinsicsConfig extrinsics;
-        RecoveryConfig recovery;
         IntrinsicsConfig intrinsics;
         BundleAdjustmentConfig bundle_adjustment;
     };
@@ -429,7 +402,6 @@ namespace mapping
         field(config.camera_frontend, "camera_frontend");
         field(config.point_filter, "point_filter");
         field(config.extrinsics, "extrinsics");
-        field(config.recovery, "recovery");
         field(config.intrinsics, "intrinsics");
         field(config.bundle_adjustment, "bundle_adjustment");
     }

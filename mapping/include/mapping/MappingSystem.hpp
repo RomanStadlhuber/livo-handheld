@@ -13,7 +13,7 @@
 #include <mapping/frontend/ImuFrontend.hpp>
 #include <mapping/frontend/LidarFrontend.hpp>
 #include <mapping/frontend/CameraFrontend.hpp>
-#include <mapping/frontend/RecoveryFrontend.hpp>
+#include <mapping/frontend/ScanToMapFrontend.hpp>
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/backend/Smoother.hpp>
 
@@ -130,27 +130,16 @@ namespace mapping
         gtsam::NonlinearFactorGraph constructSystemPriors(const uint32_t &idxKeyframe, const gtsam::NavState &xPrior,
                                                           const gtsam::imuBias::ConstantBias &bPrior) const;
 
-        /// @brief Update the registration cache with a new set of candidate submaps and run scan-to-map ICP.
-        /// @details Computes the scan AABB, queries the BA for candidate frozen submaps, updates
-        /// the cache (incremental merge on additions, full rebuild on removals), and runs
-        /// multi-scale ICP against the merged reference cloud.
-        /// @return A PriorFactor on X(idxKeyframe) if ICP converged above the fitness threshold,
-        /// std::nullopt otherwise.
-        std::optional<gtsam::NonlinearFactor::shared_ptr>
-        registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
-                          const gtsam::Pose3 &predictedPose, const uint32_t &idxKeyframe);
-
         // subsystem instances
         Buffers buffers_;
         States states_;
         ImuFrontend imuFrontend_;
         LidarFrontend lidarFrontend_;
         CameraFrontend cameraFrontend_;
+        ScanToMapFrontend scanToMapFrontend_;
         FeatureManager featureManager_;
         Smoother smoother_;
         std::unique_ptr<BundleAdjustment> bundleAdjustment_;
-
-        RegistrationCache registrationCache_;
 
         // configuration and cached extrinsic
         MappingConfig config_;

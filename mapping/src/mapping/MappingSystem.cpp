@@ -4,16 +4,11 @@
 #include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
 
-#include <open3d/t/geometry/PointCloud.h>
-#include <open3d/t/pipelines/registration/Registration.h>
-#include <open3d/t/pipelines/registration/TransformationEstimation.h>
-
 #include <gtsam/slam/PriorFactor.h>
 
 #include <csignal>
 #include <iostream>
 #include <optional>
-#include <set>
 
 SETUP_LOGS(DEBUG, "MappingSystem");
 
@@ -29,6 +24,7 @@ namespace mapping
         config_ = config;
         bundleAdjustment_ = std::make_unique<BundleAdjustment>(config_);
         bundleAdjustment_->startOptimizationWorker();
+        scanToMapFrontend_ = ScanToMapFrontend{*bundleAdjustment_, config_};
         states_.setCollectMarginalizedSubmaps(true);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
@@ -267,8 +263,8 @@ namespace mapping
             return;
         }
 
-        const auto registrationPrior =
-            registerScanToMap(ptrScanBodyFrame, states_.getCurrentState().pose(), idxKeyframe);
+        const auto registrationPrior = scanToMapFrontend_.registerScanToMap(
+            *ptrScanBodyFrame, states_.getCurrentState().pose(), states_, idxKeyframe);
 
         /* Build factors and optimize. The feature manager accumulates marginalization factors
          * from the prior marginalization step and combines them with newly created/updated
@@ -308,161 +304,40 @@ namespace mapping
                                               config_.lidar_frontend.clustering.sampling_voxel_size);
     }
 
-    std::optional<gtsam::NonlinearFactor::shared_ptr>
-    MappingSystem::registerScanToMap(const std::shared_ptr<const open3d::geometry::PointCloud> &scan,
-                                     const gtsam::Pose3 &predictedPose, const uint32_t &idxKeyframe)
-    {
-        const auto &cfgScanToMap = config_.bundle_adjustment.scan_to_map_registration;
-
-        // skip until the BA has produced at least one frozen submap
-        if (bundleAdjustment_->getNumFrozenSubmaps() == 0)
-            return std::nullopt;
-
-        // predicted LiDAR frame pose in the world
-        const gtsam::Pose3 world_T_lidar = predictedPose.compose(states_.getImuToLidarExtrinsic());
-        const open3d::geometry::AxisAlignedBoundingBox scanAabb = scan->GetAxisAlignedBoundingBox();
-        auto candidates = bundleAdjustment_->getGlobalMap(world_T_lidar, scanAabb, cfgScanToMap.max_candidates);
-
-        // compute the set of keyframe indices returned by this search
-        std::set<uint32_t> newIds;
-        for (const auto &sm : candidates)
-            newIds.insert(sm->keyframeIdx);
-
-        // determine additions and removals relative to the current cache
-        std::vector<std::shared_ptr<const FrozenSubmap>> toAdd;
-        std::vector<uint32_t> toRemove;
-        for (const auto &sm : candidates)
-        {
-            if (registrationCache_.submaps.find(sm->keyframeIdx) == registrationCache_.submaps.end())
-                toAdd.push_back(sm);
-        }
-        for (const auto &[id, sm] : registrationCache_.submaps)
-        {
-            if (newIds.find(id) == newIds.end())
-                toRemove.push_back(id);
-        }
-
-        const bool hasRemovals = !toRemove.empty();
-        const bool hasAdditions = !toAdd.empty();
-
-        // check whether registration cache pcd needs to be updated or rebuilt
-        if (hasRemovals || hasAdditions)
-        {
-            // apply removals
-            for (uint32_t id : toRemove)
-                registrationCache_.submaps.erase(id);
-            // apply additions
-            for (const auto &sm : toAdd)
-                registrationCache_.submaps[sm->keyframeIdx] = sm;
-            registrationCache_.dirty = true;
-        }
-
-        if (registrationCache_.submaps.empty())
-            return std::nullopt;
-
-        if (registrationCache_.dirty)
-        {
-            if (hasRemovals || !registrationCache_.pcd)
-            {
-                // full rebuild: merge all cached world-frame clouds from scratch
-                open3d::geometry::PointCloud pcdMerged;
-                for (const auto &[id, sm] : registrationCache_.submaps)
-                    pcdMerged += *sm->pcdWorld;
-                pcdMerged = *pcdMerged.VoxelDownSample(cfgScanToMap.cache_voxel_size);
-                registrationCache_.pcd = std::make_shared<open3d::t::geometry::PointCloud>(
-                    open3d::t::geometry::PointCloud::FromLegacy(pcdMerged, open3d::core::Float64));
-            }
-            else
-            {
-                // incremental: convert only the new clouds to tensor and append to the existing cache
-                open3d::geometry::PointCloud pcdNewLegacy;
-                for (const auto &sm : toAdd)
-                    pcdNewLegacy += *sm->pcdWorld;
-                // convert to tensor API first, then merge
-                const open3d::t::geometry::PointCloud pcdNewTensor =
-                    open3d::t::geometry::PointCloud::FromLegacy(pcdNewLegacy, open3d::core::Float64);
-                registrationCache_.pcd = std::make_shared<open3d::t::geometry::PointCloud>(
-                    (*registrationCache_.pcd + pcdNewTensor).VoxelDownSample(cfgScanToMap.cache_voxel_size));
-            }
-            registrationCache_.dirty = false;
-            LOG(DEBUG, "registration cache rebuilt: " << registrationCache_.submaps.size() << " submaps, "
-                                                      << registrationCache_.pcd->GetPointPositions().GetLength()
-                                                      << " pts");
-        }
-
-        // build per-scale ICP criteria from config vectors
-        const size_t numScales = cfgScanToMap.voxel_sizes.size();
-        std::vector<open3d::t::pipelines::registration::ICPConvergenceCriteria> criteriaList;
-        criteriaList.reserve(numScales);
-        for (size_t i = 0; i < numScales; ++i)
-            criteriaList.emplace_back(1e-6, 1e-6, cfgScanToMap.max_iterations_per_scale[i]);
-
-        // convert scan to tensor; Float64 dtype required by the MultiScaleICP API
-        const open3d::t::geometry::PointCloud pcdScanTensor =
-            open3d::t::geometry::PointCloud::FromLegacy(*scan, open3d::core::Float64);
-        const open3d::t::geometry::PointCloud &pcdTarget = *registrationCache_.pcd;
-
-        // initial guess: predicted LiDAR-to-world transform (source is body frame, target is world frame)
-        // Open3D tensors are row-major (see tests:
-        // https://github.com/isl-org/Open3D/blob/main/cpp/tests/core/Tensor.cpp)
-        //
-        // Eigen matrices are column-major by default:
-        // https://libeigen.gitlab.io/eigen/docs-nightly/group__TopicStorageOrders.html
-        // > If the storage order is not specified, then Eigen defaults to storing the entry in column-major.
-        //
-        // Explicitly use a row-major matrix so data() produces the layout Open3D expects.
-        const Eigen::Matrix<double, 4, 4, Eigen::RowMajor> initGuessMat{world_T_lidar.matrix()};
-        const open3d::core::Tensor initGuess(initGuessMat.data(), {4, 4}, open3d::core::Float64,
-                                             open3d::core::Device("CPU:0"));
-
-        const auto result = open3d::t::pipelines::registration::MultiScaleICP(
-            pcdScanTensor, pcdTarget, cfgScanToMap.voxel_sizes, criteriaList, cfgScanToMap.max_correspondence_distances,
-            initGuess, open3d::t::pipelines::registration::TransformationEstimationPointToPoint());
-
-        LOG(DEBUG, "scan-to-map ICP: fitness=" << result.fitness_ << " rmse=" << result.inlier_rmse_
-                                               << " (threshold=" << cfgScanToMap.fitness_threshold << ")");
-
-        if (result.fitness_ < cfgScanToMap.fitness_threshold)
-        {
-            LOG(DEBUG, "scan-to-map registration rejected, fitness below threshold");
-            return std::nullopt;
-        }
-
-        // extract LiDAR-in-world pose from the ICP result (row-major Open3D tensor to Eigen)
-        const auto transformData = result.transformation_.ToFlatVector<double>();
-        const Eigen::Matrix4d icpMat =
-            Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>>(transformData.data());
-        const gtsam::Pose3 world_T_lidar_icp{gtsam::Rot3(icpMat.block<3, 3>(0, 0)), icpMat.block<3, 1>(0, 3)};
-
-        // map LiDAR pose to IMU frame using the inverse imu-to-lidar calibration
-        const gtsam::Pose3 world_T_imu_icp = world_T_lidar_icp.compose(imu_T_lidar_.inverse());
-
-        // compute 6x6 information matrix for the prior noise model
-        open3d::core::Tensor icpInformationTensor = open3d::t::pipelines::registration::GetInformationMatrix(
-            pcdScanTensor, pcdTarget, cfgScanToMap.max_correspondence_distances.back(), result.transformation_);
-        const auto informationData = icpInformationTensor.ToFlatVector<double>();
-        const Eigen::Matrix<double, 6, 6> icpInformation =
-            Eigen::Map<const Eigen::Matrix<double, 6, 6, Eigen::RowMajor>>(informationData.data());
-
-        LOG_MULTI(DEBUG, "scan-to-map ICP result",
-                  STREAM("T_pred  t=[" << predictedPose.translation().transpose() << "]"
-                                       << "  rpy=[" << predictedPose.rotation().rpy().transpose() << "]"),
-                  STREAM("T_icp   t=[" << world_T_imu_icp.translation().transpose() << "]"
-                                       << "  rpy=[" << world_T_imu_icp.rotation().rpy().transpose() << "]"));
-        // log the full 6x6 ICP information matrix using Eigens IO formatting (defined in helpers.hpp)
-        // https://libeigen.gitlab.io/eigen/docs-3.3/structEigen_1_1IOFormat.html
-        LOG_MULTI(DEBUG, "information matrix", STREAM(icpInformation.format(MTX_FMT)));
-
-        const auto noiseModel = gtsam::noiseModel::Gaussian::Information(icpInformation);
-        return boost::make_shared<gtsam::PriorFactor<gtsam::Pose3>>(X(idxKeyframe), world_T_imu_icp, noiseModel);
-    }
-
     void MappingSystem::recoverState()
     {
         const uint32_t idxKfRecovery = states_.getLatestKeyframeIdx();
 
-        // the initialization state from recovery (pose + velocity)
-        gtsam::NavState w_X_recovery = RecoveryFrontend::estimateRecoveryState(states_, config_);
+        // transform latest keyframe submap from world frame to LiDAR body frame for registration
+        const gtsam::Pose3 world_T_lidar = states_.getCurrentState().pose().compose(imu_T_lidar_);
+        auto pcdRecovery =
+            std::make_shared<open3d::geometry::PointCloud>(*states_.getKeyframeSubmaps().at(idxKfRecovery));
+        pcdRecovery->Transform(world_T_lidar.inverse().matrix());
+
+        gtsam::NavState w_X_recovery;
+        const auto recoveredState =
+            scanToMapFrontend_.estimateRecoveryState(*pcdRecovery, states_.getCurrentState(), states_);
+
+        if (recoveredState)
+        {
+            w_X_recovery = *recoveredState;
+        }
+        else
+        {
+            LOG(ERROR, "scan-to-map recovery failed, falling back to constant-velocity extrapolation");
+            const auto &imuPoses = states_.getKeyframeImuPoses();
+            const auto &timestamps = states_.getKeyframeTimestamps();
+            auto itLatest = imuPoses.rbegin();
+            auto itPrev = std::next(itLatest);
+            const gtsam::Pose3 &w_T_iLatest = *itLatest->second;
+            const gtsam::Pose3 &w_T_iPrev = *itPrev->second;
+            const double dtInterp = timestamps.at(itLatest->first) - timestamps.at(itPrev->first);
+            const double dtExtrap = states_.tLastScan_ - timestamps.at(itLatest->first);
+            // forward twist: from the older to the more recent keyframe
+            const gtsam::Vector6 twist = gtsam::Pose3::Logmap(w_T_iPrev.between(w_T_iLatest)) / dtInterp;
+            const gtsam::Pose3 w_T_iRecovery = w_T_iLatest.compose(gtsam::Pose3::Expmap(twist * dtExtrap));
+            w_X_recovery = gtsam::NavState{w_T_iRecovery, states_.getCurrentState().v()};
+        }
 
         // reset all components
         featureManager_.reset();
@@ -484,7 +359,6 @@ namespace mapping
         // bootstrap new clusters from recovery keyframe submap
         // NOTE: voxelSize=0 uses all keyframe points (good for initialization)
         featureManager_.createNewClusters(states_, idxKfRecovery, /*voxelSize=*/0);
-        // resume tracking
     }
 
     void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)

@@ -67,7 +67,7 @@ add_library(mapping
   src/mapping/frontend/ImuFrontend.cpp
   src/mapping/frontend/LidarFrontend.cpp
   src/mapping/frontend/CameraFrontend.cpp
-  src/mapping/frontend/RecoveryFrontend.cpp
+  src/mapping/frontend/ScanToMapFrontend.cpp
   # backend
   src/mapping/backend/FeatureManager.cpp
   src/mapping/backend/Smoother.cpp
