@@ -22,9 +22,9 @@ The secondary pose graph is loosely coupled and handled by
 pipeline, which optimizes the poses (nodes) using constraints (edges) informed by
 the main LiDAR inertial tracking poses and point-to-plane ICP - in a loosey coupled manner.
 
-> **Note:** to reduce the computational load, the number of submaps accepted into the
-> secondary graph is limited by configurable translation & orientation thresholds
-> see ([`BundleAdjustmentConfig`](@ref BundleAdjustmentConfig)).
+**Note:** to reduce the computational load, the number of submaps accepted into the
+secondary graph is limited by configurable translation & orientation thresholds
+see ([`BundleAdjustmentConfig`](@ref BundleAdjustmentConfig)).
 
 ## The Submap Lifecycle
 
@@ -70,7 +70,7 @@ sufficient overlap between the pointclouds.
 However, to further bound the computational load on the PGO process itself, the number of
 loop closures per submap is bounded to
 [`MAX_PGO_LOOP_CLOSURES`](@ref BundleAdjustment::MAX_PGO_LOOP_CLOSURES), a low number.
-While the odometry edges are set as `certain=true`, loop closure edges are uncertain so
+While the odometry edges are set as `uncertain=false`, loop closure edges are uncertain so
 that the outer PGO loop has the ability to reject spurious associations that would
 otherwise corrupt the system.
 
@@ -103,11 +103,10 @@ This is one inner iteration.
 The outer loop will re-evaluate edges with `uncertain=true` and disable them if they
 distort the system.
 For details on the algorithm that is used to achieve this, refer to
-[(Chou, Zhou and Kotlun, 2015)](https://www.cv-foundation.org/openaccess/content_cvpr_2015/papers/Choi_Robust_Reconstruction_of_2015_CVPR_paper.pdf)
-.
+[(Chou, Zhou and Kotlun, 2015)](https://www.cv-foundation.org/openaccess/content_cvpr_2015/papers/Choi_Robust_Reconstruction_of_2015_CVPR_paper.pdf).
 
 
-## Moving BA to the background
+## Moving BA to the Background
 
 To reduce the computational load on the CPU and make sure there are always cores
 available for tracking, we split the entire project into the "tracking" or "foreground"
@@ -137,8 +136,8 @@ Based on the current pose and overlap of the pointclouds axis-aligned bounding-b
 [`MappingSystem::registrationCache_`](@ref MappingSystem::registrationCache_)
 is built-up, making sure that
 only the submaps with reasonable overlap are used for registration.
-The cache will be marked *dirty* when a new sumbmap enters the current keyframes AABB
-or one that is currently cached leaves it.
+The cache will be marked *dirty* when a new sumbmap enters the current keyframes AABB or
+one that is currently cached leaves it.
 New submaps will be merged into the global map object which is then voxelized.
 However, as there is no easy way to remove submaps from the merged-and-voxelized cloud,
 it has to be cleared and rebuilt from scratch when submaps leave the cache.
