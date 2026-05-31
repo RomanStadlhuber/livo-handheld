@@ -30,7 +30,6 @@ Where \f$r_{j}\f$ is the residual of the \f$ j \f$ _-th_ cluster with respect to
 - @subpage backend_isam2 -- iSAM2 configuration, update cycle, and marginalization
 - @subpage bundle_adjustment -- Loosely coupled secondary pose graph optimization for global scan to map registration
 - @subpage core_structure -- Buffers, state management, and data flow
-- @subpage recovery -- Full state recovery on tracking loss
 
 ## Building the Documentation
 

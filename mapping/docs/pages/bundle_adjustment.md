@@ -20,7 +20,8 @@ graph by [`BundleAdjustment::accumulateSubmap`](@ref BundleAdjustment::accumulat
 The secondary pose graph is loosely coupled and handled by
 [Open3Ds Multiway registration](https://www.open3d.org/docs/release/tutorial/pipelines/multiway_registration.html)
 pipeline, which optimizes the poses (nodes) using constraints (edges) informed by
-the main LiDAR inertial tracking poses and point-to-plane ICP - in a loosey coupled manner.
+the main LiDAR inertial tracking poses and point-to-plane ICP - in a loosey
+coupled manner.
 
 **Note:** to reduce the computational load, the number of submaps accepted into the
 secondary graph is limited by configurable translation & orientation thresholds
@@ -133,7 +134,7 @@ against and provide reasonable pose priors, thus improving overall system accura
 
 Based on the current pose and overlap of the pointclouds axis-aligned bounding-boxes
 (AABBs) an internal
-[`MappingSystem::registrationCache_`](@ref MappingSystem::registrationCache_)
+[`ScanToMapFrontend::registrationCache_`](@ref ScanToMapFrontend::registrationCache_)
 is built-up, making sure that
 only the submaps with reasonable overlap are used for registration.
 The cache will be marked *dirty* when a new sumbmap enters the current keyframes AABB or
@@ -147,7 +148,7 @@ i.e. `open3d::geometry::PointCloud`, the cache and scan to map registration use 
 `open3d::t` Tensor-based API, as it natively implements a coarse-to-fine ICP pipeline
 which is used to provide a more accurate registration result to the final scan-to-map
 registration, which is done in
-[`MappingSystem::registerScanToMap`](@ref MappingSystem::registerScanToMap).
+[`ScanToMapFrontend::registerScanToMap`](@ref ScanToMapFrontend::registerScanToMap).
 See also
 [MultiScaleICP](https://www.open3d.org/docs/latest/cpp_api/namespaceopen3d_1_1t_1_1pipelines_1_1registration.html#a300caad70b099cb9f5d5ce72a8ff1ecb)
 .
@@ -157,3 +158,82 @@ Finally, when the resulting pose exceeds a configurable relative fitness thresho
 it creates a `PriorFactor<Pose3>` that places an
 additional constraint on the LiDAR-IMU pose estimate.
 The registration makes use of the IMU-to-LiDAR extrinsic calibration \f$ \iTl \f$.
+
+
+## Recovering from Tracking Loss
+
+State recovery reuses [`ScanToMapFrontend`](@ref ScanToMapFrontend) to estimate a pose
+by running the same scan-to-map ICP as during normal tracking.
+On top of the ICP-refined pose, the predicted IMU velocity is rotated into the refined
+orientation to produce a full `gtsam::NavState` for resetting the smoother.
+
+
+### Trigger Conditions
+
+`MappingSystem::track()` loses tracking, when `LidarFrontend::trackScanPointsToClusters`
+returns `false`.
+The system transitions to `SystemState::Recovery` and the next call to
+`MappingSystem::update()` executes the recovery case.
+
+
+### Initial Pose Guess & Constant-Velocity Extrapolation Fallback
+
+`MappingSystem::recoverState` transforms the latest keyframe submap from world frame back
+to LiDAR body frame using the IMU-predicted pose, then calls
+[`ScanToMapFrontend::estimateRecoveryState`](@ref ScanToMapFrontend::estimateRecoveryState).
+This runs the same multi-scale ICP against the frozen global map as during normal
+tracking, using the IMU-predicted pose as the initial guess.
+
+When the frozen global map is not yet available,
+[`ScanToMapFrontend::runScanToMapIcp`](@ref ScanToMapFrontend::runScanToMapIcp)
+returns `std::nullopt` and `MappingSystem::recoverState` falls back to a
+constant-velocity pose extrapolation from the last two keyframe IMU poses:
+
+\f[
+  \boldsymbol{\xi} =
+    \frac{1}{\Delta t_{i-2:i-1}} \;
+    \text{Log}\bigl({}^{w}\mtx{T}_{I,i-2}^{-1} \; {}^{w}\mtx{T}_{I,i-1}\bigr)
+\f]
+
+\f[
+  {}^{w}\mtx{T}_{I,i} =
+    {}^{w}\mtx{T}_{I,i-1} \;
+    \text{Exp}\bigl(\boldsymbol{\xi} \cdot \Delta t_{i-1:i}\bigr)
+\f]
+
+The velocity for the fallback `NavState` is taken directly from the IMU-propagated state
+without rotation correction, since no ICP result is available to define the
+correction frame.
+
+
+### Velocity Correction
+
+The pre-tracking velocity \f$ {}^{w}\bvec{v} \f$ from the IMU propagation is
+still expressed in the predicted (failed) body frame. It is rotated into the
+ICP-refined frame:
+
+\f[
+  {}^{w}\bvec{v}_{\text{rec}} =
+    {}^{w}\mtx{R}_{\text{ICP}} \;
+    {}^{w}\mtx{R}_{\text{pred}}^{-1} \;
+    {}^{w}\bvec{v}_{\text{pred}}
+\f]
+
+The final `gtsam::NavState` combines the ICP pose with the corrected velocity.
+
+
+### Recovery Control Flow
+
+1. Tracking lost at keyframe N: system enters `SystemState::Recovery`.
+2. `MappingSystem::recoverState`: transform latest keyframe submap to LiDAR body frame,
+   call `ScanToMapFrontend::estimateRecoveryState`.
+3. On ICP success: use the returned `NavState` as the recovery state.
+4. On ICP failure (no reference map available): fall back to constant-velocity
+   extrapolation from the last two keyframe IMU poses.
+5. Reset `FeatureManager`, `States`, `Buffers`, and `Smoother`: only recovery-keyframe N
+   survives in `States`.
+6. `setPriors(idxKfRecovery = N, w_X_recovery, bPrior)`: anchor the fresh graph at the
+   recovery keyframe.
+7. Reset preintegrator, create new clusters from recovery keyframe submap.
+8. Transition to `SystemState::Tracking`: next `update()` call resumes normal tracking,
+   next keyframe gets index N + 1.
