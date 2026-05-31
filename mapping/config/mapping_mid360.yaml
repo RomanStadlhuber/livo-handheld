@@ -1,5 +1,5 @@
 backend:
-  sliding_window_size: 14 # [keyframes]
+  sliding_window_size: 7 # [keyframes]
   init_time_window: 2.0 # [sec.]
   solver_iterations: 2 
   isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
@@ -30,13 +30,6 @@ camera_frontend:
   sync_tolerance: 0.01 # [sec.], tolerance for syncing images to LiDAR scans
   keepalive_window: 0.6 # [sec.], how long images are kept for sync before being discarded
 
-recovery:
-  voxel_size: 0.2 # [m], voxel size to use for recovery reference point cloud
-  reference_window_size: 10 # [keyframes], number of keyframes to use for recovery reference
-  reference_lag: 2 # keyframe delay to use for recovery reference
-  icp_iterations: 50
-  max_correspondence_distance: 0.05 # [m], max. dist. for point-to-plane ICP correspondences
-
 point_filter:
   min_distance: 2.5 # [m]
   max_distance: 100.0 # [m]
@@ -65,4 +58,25 @@ intrinsics:
       - 0.270368
       - 0.000114465
       - -0.00185591
+
+bundle_adjustment:
+  submap_min_distance: 1.0      # [m], min travel from last accepted submap
+  submap_min_angle: 0.4       # [rad], min rotation from last accepted submap
+  # IMPORTANT: should be larger than frontend voxel size!!
+  icp_max_correspondence_distance: 1.5  # [m]
+  icp_iterations: 3
+  refinement_voxel_size: 0.2    # [m]
+  loop_closure_search_radius: 15.0  # [m], max centroid distance for non-sequential loop closure
+  loop_closure_min_fitness: 0.6
+  convergence_pose_delta_translation: 0.02 # [m]
+  convergence_pose_delta_rotation: 0.01    # [rad]
+  max_align_iterations: 5
+  scan_to_map_registration:
+    aabb_inflation_margin: 0.25  # [m], compensates for odometry drift at submap boundaries
+    max_candidates: 5
+    cache_voxel_size: 0.15       # [m], voxel size for the merged reference map
+    voxel_sizes: [0.4, 0.2, -1.0]                 # [m] per ICP scale, strictly decreasing, -1 = original
+    max_correspondence_distances: [1.0, 0.5, 0.2] # [m] per ICP scale
+    max_iterations_per_scale: [30, 15, 10]
+    fitness_threshold: 0.2       # min inlier ratio to accept registration result
 

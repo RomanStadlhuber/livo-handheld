@@ -4,10 +4,8 @@
 
 namespace mapping
 {
-    uint32_t States::createKeyframeSubmap(
-        const gtsam::Pose3 &world_T_imu,
-        double keyframeTimestamp,
-        std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap)
+    uint32_t States::createKeyframeSubmap(const gtsam::Pose3 &world_T_imu, double keyframeTimestamp,
+                                          std::shared_ptr<open3d::geometry::PointCloud> ptrKeyframeSubmap)
     {
         // Increment keyframe counter
         const uint32_t idxNewKf = keyframeCounter_++;
@@ -38,7 +36,10 @@ namespace mapping
     void States::removeKeyframe(const uint32_t idxKeyframe)
     {
         if (collectMarginalizedSubmaps_)
-            marginalizedSubmaps_.push_back(keyframeSubmaps_[idxKeyframe]);
+        {
+            marginalizedSubmapClouds_[idxKeyframe] = keyframeSubmaps_[idxKeyframe];
+            marginalizedSubmapPoses_[idxKeyframe] = keyframePoses_[idxKeyframe];
+        }
         keyframeSubmaps_.erase(idxKeyframe);
         keyframePoses_.erase(idxKeyframe);
         keyframeImuPoses_.erase(idxKeyframe);
@@ -51,11 +52,12 @@ namespace mapping
          * NOTE: all of the states that could appear as blanket terms for marginalization factors
          * currently the factors conly constrain poses X(k), so velocities and biases aren't needed here
          *
-         * The markov blanket uses the current soomther estimate, removing all states that have already been marginalized.
-         * Otherwise the marginalization factor will try to access those states while there are no more point associations
+         * The markov blanket uses the current soomther estimate, removing all states that have already been
+         * marginalized. Otherwise the marginalization factor will try to access those states while there are no more
+         * point associations
          *
-         * WARNING: this is NOT exact because at the time of marginalization, we don't know if a new constraint will be added,
-         * but it will be very noisy anyway so it should be reasonably safe to ignore it.
+         * WARNING: this is NOT exact because at the time of marginalization, we don't know if a new constraint will be
+         * added, but it will be very noisy anyway so it should be reasonably safe to ignore it.
          */
         gtsam::Values markovBlanket;
         for (uint32_t k = idxMarginalize; k < idxKeyframe; k++)
@@ -78,7 +80,10 @@ namespace mapping
             for (auto &[idx, ptrSubmap] : keyframeSubmaps_)
             {
                 if (idx != idxRecovery)
-                    marginalizedSubmaps_.push_back(ptrSubmap);
+                {
+                    marginalizedSubmapClouds_[idx] = ptrSubmap;
+                    marginalizedSubmapPoses_[idx] = keyframePoses_.at(idx);
+                }
             }
         }
 
@@ -107,10 +112,15 @@ namespace mapping
         smootherEstimate_ = gtsam::Values();
     }
 
-    std::vector<std::shared_ptr<open3d::geometry::PointCloud>> States::getMarginalizedSubmaps()
+    std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
+    States::getMarginalizedSubmaps()
     {
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> submaps;
-        std::swap(submaps, marginalizedSubmaps_);
-        return submaps;
+        std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
+            result;
+        for (auto &[idx, cloud] : marginalizedSubmapClouds_)
+            result[idx] = {marginalizedSubmapPoses_.at(idx), cloud};
+        marginalizedSubmapClouds_.clear();
+        marginalizedSubmapPoses_.clear();
+        return result;
     }
-}
+} // namespace mapping

@@ -182,6 +182,81 @@ Doxygen 1.13+ and CMake are on `PATH`:
   also works in modern Doxygen but `\f$` is preferred for consistency.
 - **`docs/output/` is gitignored** — only source files under `docs/` are tracked.
 
+## Parallelizing Work with TBB
+
+Both GTSAM and Open3D use Intel oneTBB internally for parallel work. GTSAM drives
+the main SLAM tracking loop via the incremental fixed-lag smoother (`Smoother.cpp`),
+while Open3D is used in `BundleAdjustment` for ICP-based intra- and inter-segment
+refinement running in a background thread. Because both libraries draw from the same
+global TBB thread pool at runtime, running them concurrently without any partitioning
+causes oversubscription. Both can attempt to use all available cores simultaneously,
+which starves the tracking thread and breaks real-time pose output.
+
+### TBB task arenas
+
+A `tbb::task_arena` is an isolated scheduling context within the global TBB pool. Each
+arena has a maximum concurrency cap and a priority. When work is dispatched via
+`arena.execute(...)`, TBB limits the number of worker threads serving that arena to its
+cap. When multiple arenas have pending work, it schedules workers preferentially toward
+higher-priority arenas. Arenas are unaware of each other.
+The TBB scheduler is used to schedule thread work by respecting the concurrency and
+priority constraints registered at construction time.
+
+### Partitioning in this codebase
+
+Two arenas are created, one per subsystem, where N is `std::thread::hardware_concurrency()`:
+
+- `frontendArena_` in `Smoother`: N/2 threads, normal priority
+- `backgroundArena_` in `BundleAdjustment`: N/2 threads, low priority The caps sum to N so there is no
+oversubscription. The low priority on the BA arena means TBB workers will always prefer
+pending tracking work over pending BA work when choosing the next task to execute.
+
+The arenas are created as `std::unique_ptr<tbb::task_arena>`, as `task_arena`
+contains internal `std::atomic` members and is not assignable. A typical setup and
+usage pattern:
+
+```cpp
+// src/mapping/backend/Smoother.cpp
+
+// create the TBB arena for GTSAM work (normal priority, half of available cores)
+frontendArena_ = std::make_unique<tbb::task_arena>(nCPUs / 2, 1);
+
+// wrap GTSAM work in the arena executor so threads get picked accordingly
+frontendArena_->execute([&] { smoother_.update(...); });
+```
+
+The BA arena uses the same pattern with `tbb::task_arena::priority::low` as a third
+constructor argument.
+
+### Affected files
+
+- [include/mapping/backend/Smoother.hpp](include/mapping/backend/Smoother.hpp) and [src/mapping/backend/Smoother.cpp](src/mapping/backend/Smoother.cpp):
+  frontend arena, wraps `smoother_.update()` and `smoother_.calculateEstimate()`
+- [include/mapping/BundleAdjustment.hpp](include/mapping/BundleAdjustment.hpp) and [src/mapping/BundleAdjustment.cpp](src/mapping/BundleAdjustment.cpp):
+  background arena, wraps `refineSegment()` and `alignAllSegments()`
+
+### Warning: matching shared-library names and versions
+
+> **NOTE:** Any TBB-related linker warnings mentioning OpenCV are harmless.
+> OpenCV's TBB dependency is not used by this codebase and the two TBB versions
+> coexist without symbol conflicts.
+
+For the arenas to partition a single thread pool, GTSAM and Open3D must resolve to
+the same oneTBB runtime. Open3D bundles its own copy and loads it first via its
+`RPATH`. GTSAM's `libtbb.so.12` dependency then resolves to that already-loaded
+instance through soname deduplication rather than pulling in the system copy. The
+result is one shared oneTBB runtime for both libraries. This can be verified by
+checking that only one `libtbb.so.12.*` path appears in `/proc/<pid>/maps` while
+the node is running.
+
+```bash
+cat /proc/<pid>/maps | grep tbb
+```
+
+The output should show exactly one `libtbb.so.12.*` path. If two distinct paths appear,
+GTSAM and Open3D have loaded separate TBB instances and the arenas no longer partition
+a shared pool.
+
 ## Debugging Instrumentation `ENABLE_DBG_CMP`
 
 To enable logic that computes instrumentation as part of the control flow,

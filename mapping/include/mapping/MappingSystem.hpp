@@ -9,12 +9,15 @@
 #include <mapping/Config.hpp>
 #include <mapping/Buffers.hpp>
 #include <mapping/States.hpp>
+#include <mapping/BundleAdjustment.hpp>
 #include <mapping/frontend/ImuFrontend.hpp>
 #include <mapping/frontend/LidarFrontend.hpp>
 #include <mapping/frontend/CameraFrontend.hpp>
-#include <mapping/frontend/RecoveryFrontend.hpp>
+#include <mapping/frontend/ScanToMapFrontend.hpp>
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/backend/Smoother.hpp>
+
+#include <memory>
 
 #include <gtsam/geometry/Pose3.h>
 
@@ -69,12 +72,18 @@ namespace mapping
         /// @brief Get the current keyframe counter value.
         uint32_t getKeyframeCount() const;
 
-        /// @brief Drain and return submaps that were marginalized since the last call.
-        std::vector<std::shared_ptr<open3d::geometry::PointCloud>> getMarginalizedSubmaps();
-
         /// @brief Enable or disable collection of marginalized submaps.
         /// Disabled by default to avoid unbounded memory growth in headless mode.
         void setCollectMarginalizedSubmaps(bool enable);
+
+        /// @brief Return all frozen submaps from the global map optimizer.
+        std::vector<std::shared_ptr<const FrozenSubmap>> getAllFrozenSubmaps() const;
+
+        /// @brief Return a snapshot of all submaps currently under optimization.
+        /// @details Keyed by keyframe index.
+        /// Each entry holds the current world pose and the immutable body-frame cloud.
+        /// Apply pose to the cloud to obtain world-frame coordinates for visualization.
+        std::map<uint32_t, ActiveSubmap> getAllActiveSubmaps() const;
 
         /// @brief Get the current (possibly optimized) IMU-to-LiDAR extrinsic calibration.
         gtsam::Pose3 getImuToLidarExtrinsic() const { return states_.getImuToLidarExtrinsic(); }
@@ -111,16 +120,15 @@ namespace mapping
         /// NOTE: in the case of system recovery, it still makes sense to use the last available bias estimate,
         /// while the pose and velocity will be recovered by the `RelocalizationFrontend`.
         ///
-        /// USAGE: Use the returned `gtsam::NonlinearFactorGraph priors` with `smoother_.setPriors(idxKeyframe, priors, xPrior, bPrior);`.
+        /// USAGE: Use the returned `gtsam::NonlinearFactorGraph priors` with `smoother_.setPriors(idxKeyframe, priors,
+        /// xPrior, bPrior);`.
         /// @param idxKeyframe Index of the initialization keyframe.
         /// @param xPrior Initial navigation state prior, obtained from static initialization or recovery.
         /// @param bPrior Initial bias estimate, obtained from initialization or,
         /// in case cf recovery, from the last available estimate.
         /// @return Factor graph that fixes the state prior.
-        gtsam::NonlinearFactorGraph constructSystemPriors(
-            const uint32_t &idxKeyframe,
-            const gtsam::NavState &xPrior,
-            const gtsam::imuBias::ConstantBias &bPrior) const;
+        gtsam::NonlinearFactorGraph constructSystemPriors(const uint32_t &idxKeyframe, const gtsam::NavState &xPrior,
+                                                          const gtsam::imuBias::ConstantBias &bPrior) const;
 
         // subsystem instances
         Buffers buffers_;
@@ -128,8 +136,10 @@ namespace mapping
         ImuFrontend imuFrontend_;
         LidarFrontend lidarFrontend_;
         CameraFrontend cameraFrontend_;
+        ScanToMapFrontend scanToMapFrontend_;
         FeatureManager featureManager_;
         Smoother smoother_;
+        std::unique_ptr<BundleAdjustment> bundleAdjustment_;
 
         // configuration and cached extrinsic
         MappingConfig config_;

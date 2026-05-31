@@ -38,6 +38,8 @@ list(APPEND CMAKE_PREFIX_PATH "/install/open3d-devel/lib/cmake")
 find_package(Open3D REQUIRED)
 find_package(open3d_conversions REQUIRED) # for converting to ROS PointCloud2
 find_package(config_utilities REQUIRED)
+set(TBB_DIR "/usr/lib/x86_64-linux-gnu/cmake/TBB" CACHE PATH "" FORCE)
+find_package(TBB REQUIRED CONFIG)
 
 
 # set(CMAKE_BUILD_TYPE Release)
@@ -65,20 +67,22 @@ add_library(mapping
   src/mapping/frontend/ImuFrontend.cpp
   src/mapping/frontend/LidarFrontend.cpp
   src/mapping/frontend/CameraFrontend.cpp
-  src/mapping/frontend/RecoveryFrontend.cpp
+  src/mapping/frontend/ScanToMapFrontend.cpp
   # backend
   src/mapping/backend/FeatureManager.cpp
   src/mapping/backend/Smoother.cpp
+  src/mapping/BundleAdjustment.cpp
 )
 
 target_include_directories(mapping PUBLIC include)
 
 target_link_libraries(mapping
-  Eigen3::Eigen 
+  Eigen3::Eigen
   ${OpenCV_LIBS}
   Open3D::Open3D
-  gtsam 
-  gtsam_unstable 
+  gtsam
+  gtsam_unstable
+  TBB::tbb
   config_utilities::config_utilities
 )
 

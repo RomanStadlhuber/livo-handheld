@@ -4,8 +4,11 @@
 #include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
 
+#include <gtsam/slam/PriorFactor.h>
+
 #include <csignal>
 #include <iostream>
+#include <optional>
 
 SETUP_LOGS(DEBUG, "MappingSystem");
 
@@ -19,6 +22,10 @@ namespace mapping
     void MappingSystem::setConfig(const MappingConfig &config)
     {
         config_ = config;
+        bundleAdjustment_ = std::make_unique<BundleAdjustment>(config_);
+        bundleAdjustment_->startOptimizationWorker();
+        scanToMapFrontend_ = ScanToMapFrontend{*bundleAdjustment_, config_};
+        states_.setCollectMarginalizedSubmaps(true);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
@@ -183,9 +190,9 @@ namespace mapping
         // check if motion since last keyframe exceeds thresholds
         // use IMU poses on both sides so the extrinsic rotation does not bias the angle diff
         const gtsam::Pose3 &lastKfImuPose = *states_.getKeyframeImuPoses().rbegin()->second;
-        const double positionDiff = (w_X_propagated.pose().translation() - lastKfImuPose.translation()).norm();
-        const double angleDiff =
-            (lastKfImuPose.rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
+        const double positionDiff = (w_X_propagated.pose().translation() - lastKfImuPose.translation()).norm(),
+                     angleDiff =
+                         (lastKfImuPose.rotation().between(w_X_propagated.pose().rotation())).axisAngle().second;
         states_.setCurrentState(w_X_propagated);
 
         // temporal synchronization between LiDAR scans and camera images
@@ -220,6 +227,10 @@ namespace mapping
         // NOTE: undistorted-scan buffer needs to be cleared manually since it is required for accumulating & coloring
         buffers_.getScanBuffer().clear();
 
+        // snapshot the scan in LiDAR body frame before createKeyframeSubmap transforms it to world frame in-place
+        // for registerScanToMap we need the pointcloud to be in the LiDAR frame
+        const auto ptrScanBodyFrame = std::make_shared<open3d::geometry::PointCloud>(*ptrNewSubmapVoxelized);
+
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe =
             states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
@@ -230,6 +241,11 @@ namespace mapping
          * and states_ (removes marginalized keyframes, optionally archives submaps).
          */
         marginalizeKeyframesOutsideSlidingWindow(idxKeyframe);
+
+        // drain newly marginalized submaps into the BA pipeline
+        auto newlyMarginalized = states_.getMarginalizedSubmaps();
+        for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
+            bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
         const bool isTracking =
@@ -247,13 +263,19 @@ namespace mapping
             return;
         }
 
+        const auto registrationPrior = scanToMapFrontend_.registerScanToMap(
+            *ptrScanBodyFrame, states_.getCurrentState().pose(), states_, idxKeyframe);
+
         /* Build factors and optimize. The feature manager accumulates marginalization factors
          * from the prior marginalization step and combines them with newly created/updated
          * tracking factors. std::exchange is used internally to clear the factor buffers.
          */
         // modifies featureManager_: creates/updates/removes LiDAR factors, clears internal factor buffers
-        auto const &[featureFactors, factorsToRemove] =
+        auto [featureFactors, factorsToRemove] =
             featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
+
+        if (registrationPrior) // add registration prior if it has a value
+            featureFactors.add(*registrationPrior);
 
         gtsam::CombinedImuFactor imuFactor = imuFrontend_.createPreintegrationFactor(idxKeyframe - 1, idxKeyframe);
 
@@ -286,8 +308,35 @@ namespace mapping
     {
         const uint32_t idxKfRecovery = states_.getLatestKeyframeIdx();
 
-        // the initialization state from recovery (pose + velocity)
-        gtsam::NavState w_X_recovery = RecoveryFrontend::estimateRecoveryState(states_, config_);
+        // transform latest keyframe submap from world frame to LiDAR body frame for registration
+        const gtsam::Pose3 world_T_lidar = states_.getCurrentState().pose().compose(imu_T_lidar_);
+        auto pcdRecovery =
+            std::make_shared<open3d::geometry::PointCloud>(*states_.getKeyframeSubmaps().at(idxKfRecovery));
+        pcdRecovery->Transform(world_T_lidar.inverse().matrix());
+
+        gtsam::NavState w_X_recovery;
+        const std::optional<gtsam::NavState> recoveredState =
+            scanToMapFrontend_.estimateRecoveryState(*pcdRecovery, states_.getCurrentState(), states_);
+
+        if (recoveredState)
+        {
+            w_X_recovery = *recoveredState;
+        }
+        else
+        {
+            LOG(ERROR, "scan-to-map recovery failed, falling back to constant-velocity extrapolation");
+            const auto &imuPoses = states_.getKeyframeImuPoses();
+            const auto &timestamps = states_.getKeyframeTimestamps();
+            auto itLatest = imuPoses.rbegin();
+            auto itPrev = std::next(itLatest);
+            const gtsam::Pose3 &w_T_iLatest = *itLatest->second, &w_T_iPrev = *itPrev->second;
+            const double dtInterp = timestamps.at(itLatest->first) - timestamps.at(itPrev->first),
+                         dtExtrap = states_.tLastScan_ - timestamps.at(itLatest->first);
+            // forward twist: from the older to the more recent keyframe
+            const gtsam::Vector6 twist = gtsam::Pose3::Logmap(w_T_iPrev.between(w_T_iLatest)) / dtInterp;
+            const gtsam::Pose3 w_T_iRecovery = w_T_iLatest.compose(gtsam::Pose3::Expmap(twist * dtExtrap));
+            w_X_recovery = gtsam::NavState{w_T_iRecovery, states_.getCurrentState().v()};
+        }
 
         // reset all components
         featureManager_.reset();
@@ -309,7 +358,6 @@ namespace mapping
         // bootstrap new clusters from recovery keyframe submap
         // NOTE: voxelSize=0 uses all keyframe points (good for initialization)
         featureManager_.createNewClusters(states_, idxKfRecovery, /*voxelSize=*/0);
-        // resume tracking
     }
 
     void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)
@@ -378,6 +426,13 @@ namespace mapping
                 LOG_STAMPED(WARN, states_.tLastScan_, "could not retrieve state for keyframe " << idxKf);
             }
         }
+        // inject latest predicted state when no keyframe has been selected yet,
+        // this essentially allows upstream to consume poses at the rate of update()/track()/getStates()
+        // (states_.tLastImu_ is set after successful preintegration)
+        auto const &[idxLatestKF, tLatestKF] = *(states_.getKeyframeTimestamps().rbegin());
+        if (states_.tLastImu_ > tLatestKF)
+            states[idxLatestKF + 1] = NavStateStamped{states_.getCurrentState(), states_.tLastImu_};
+
         return states;
     }
 
@@ -408,13 +463,14 @@ namespace mapping
 
     uint32_t MappingSystem::getKeyframeCount() const { return states_.getKeyframeCount(); }
 
-    std::vector<std::shared_ptr<open3d::geometry::PointCloud>> MappingSystem::getMarginalizedSubmaps()
+    std::vector<std::shared_ptr<const FrozenSubmap>> MappingSystem::getAllFrozenSubmaps() const
     {
-        auto submaps = states_.getMarginalizedSubmaps();
-        if (config_.camera_frontend.colorize_scans)
-            for (auto &pcd : submaps)
-                removeUncoloredPoints(pcd);
-        return submaps;
+        return bundleAdjustment_->getAllFrozenSubmaps();
+    }
+
+    std::map<uint32_t, ActiveSubmap> MappingSystem::getAllActiveSubmaps() const
+    {
+        return bundleAdjustment_->getAllActiveSubmaps();
     }
 
     void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }

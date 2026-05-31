@@ -31,6 +31,9 @@
 /// @defgroup factors Factors
 /// @brief GTSAM custom factors for graph optimization.
 
+/// @defgroup global_map Global Map Optimization
+/// @brief Background optimization of marginalized submaps via segment-based pose graph refinement.
+
 /// @defgroup core Core
 /// @brief Shared types, configuration, buffers, and state management.
 

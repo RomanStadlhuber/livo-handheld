@@ -10,11 +10,16 @@
 #include <tuple>
 #include <memory>
 #include <utility>
+#include <queue>
+#include <mutex>
+#include <limits>
 #include <Eigen/Dense>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/navigation/NavState.h>
 #include <gtsam/inference/Symbol.h>
+#include <open3d/geometry/BoundingVolume.h>
 #include <open3d/geometry/PointCloud.h>
+#include <open3d/t/geometry/PointCloud.h>
 #include <opencv2/opencv.hpp>
 
 using gtsam::symbol_shorthand::B;
@@ -63,8 +68,7 @@ namespace mapping
         std::shared_ptr<CameraData> syncedCameraData;
     };
 
-    template <typename T>
-    using InputBuffer = std::map<double, std::shared_ptr<T>>;
+    template <typename T> using InputBuffer = std::map<double, std::shared_ptr<T>>;
 
     /// @ingroup types
     /// @brief Buffered scan data for keyframe creation
@@ -151,5 +155,72 @@ namespace mapping
 
     /// @brief The "default color", inidcating that a point was not colorized from the camera image.
     const Eigen::Vector3d NO_COLOR{Eigen::Vector3d::Zero()};
+
+    /// @ingroup types
+    /// @brief Thread-safe queue for inter-thread communication
+    template <typename T> class SafeQueue
+    {
+    public:
+        void push(T item)
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            queue_.push(std::move(item));
+        }
+
+        /// @brief Non-blocking pop attempt
+        /// @return false if queue is empty, true and populates item if successful
+        bool try_pop(T &item)
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (queue_.empty())
+                return false;
+            item = std::move(queue_.front());
+            queue_.pop();
+            return true;
+        }
+
+    private:
+        std::queue<T> queue_;
+        mutable std::mutex mutex_;
+    };
+
+    /// @ingroup types
+    /// @brief Snapshot of a pending submap currently under global optimization.
+    /// @details The point cloud is stored in body frame.
+    /// Apply pose to the cloud to obtain world-frame coordinates.
+    /// Keyed by keyframe index in the map returned by getAllActiveSubmaps().
+    struct ActiveSubmap
+    {
+        gtsam::Pose3 pose;                                       // current world pose, updated each optimization cycle
+        std::shared_ptr<const open3d::geometry::PointCloud> pcd; // body-frame cloud
+    };
+
+    /// @ingroup types
+    /// @brief Frozen, immutable view of a converged submap for scan-to-map registration.
+    /// @details The legacy point cloud is world-frame, produced by applying the final optimized
+    /// pose to the body-frame cloud at freeze time.
+    struct FrozenSubmap
+    {
+        uint32_t keyframeIdx;
+        gtsam::Pose3 pose; // world pose at freeze time
+        /// @brief Axis-aligned bounding box, computed by Open3D and used for scan-to-map candidate search.
+        open3d::geometry::AxisAlignedBoundingBox aabb;
+        std::shared_ptr<const open3d::geometry::PointCloud> pcdWorld; // world-frame cloud
+        std::shared_ptr<const open3d::geometry::PointCloud> pcdBody;  // body-frame cloud, kept for ICP
+    };
+
+    /// @ingroup types
+    /// @brief Cache of frozen submaps used as the reference map for scan-to-map registration.
+    /// @details Keyed by keyframe index for stable identity across BA updates.
+    /// The merged tensor cloud is rebuilt when dirty is true.
+    /// On add-only updates the new clouds are merged in incrementally.
+    /// On any removal the cloud is rebuilt from scratch from all current entries.
+    struct RegistrationCache
+    {
+        std::map<uint32_t, std::shared_ptr<const FrozenSubmap>> submaps;
+        bool dirty{false};
+        // merged, voxelized world-frame reference cloud used for ICP
+        std::shared_ptr<open3d::t::geometry::PointCloud> pcd;
+    };
 } // namespace mapping
 #endif // MAPPING_TYPES_HPP_

@@ -27,6 +27,12 @@ namespace mapping
         bootstrapped_ = false;
         temporalCalibrationEnabled_ = config.extrinsics.temporal_calibration_enabled;
         extrinsicCalibrationEnabled_ = config.extrinsics.extrinsic_calibration_enabled;
+
+        const int totalCpus = static_cast<int>(std::thread::hardware_concurrency());
+        const int baCpus = std::max(1, totalCpus / 2);
+        const int frontendCpus = std::max(1, totalCpus - baCpus);
+        frontendArena_ = std::make_unique<tbb::task_arena>(frontendCpus, 1);
+        LOG(INFO, "frontend arena: " << frontendCpus << "/" << totalCpus << " threads, normal priority");
     }
 
     void Smoother::setPriors(const uint32_t &idxKeyframe, const gtsam::NonlinearFactorGraph &priors,
@@ -115,7 +121,8 @@ namespace mapping
         const double dt_before = temporalCalibrationEnabled_ ? states.getTemporalOffset() : 0.0;
         const gtsam::Pose3 E_before = extrinsicCalibrationEnabled_ ? states.getImuToLidarExtrinsic() : gtsam::Pose3();
         // update estimator
-        smoother_.update(newAndUpdatedFactors, newValues, newSmootherIndices, factorsToRemove);
+        frontendArena_->execute(
+            [&] { smoother_.update(newAndUpdatedFactors, newValues, newSmootherIndices, factorsToRemove); });
         const gtsam::FactorIndices &newFactorIndices = smoother_.getISAM2Result().newFactorsIndices;
         /**
          * feed the indices of the newly added (or updated) factors back to the FeatureManager
@@ -137,11 +144,15 @@ namespace mapping
          * - https://github.com/borglab/gtsam/blob/develop/gtsam/nonlinear/IncrementalFixedLagSmoother.cpp#L128
          * - https://groups.google.com/g/gtsam-users/c/Cz2RoY3dN14/m/3Ka6clsdBgAJ
          */
-        for (std::size_t updateIters = 1; updateIters < config.backend.solver_iterations; updateIters++)
-            smoother_.update();
+        frontendArena_->execute(
+            [&]
+            {
+                for (std::size_t updateIters = 1; updateIters < config.backend.solver_iterations; updateIters++)
+                    smoother_.update();
+            });
         // calculate the estimate and update the shared state container
         // currently this is just matching legacy behavior
-        states.setSmootherEstimate(smoother_.calculateEstimate());
+        frontendArena_->execute([&] { states.setSmootherEstimate(smoother_.calculateEstimate()); });
         states.setCurrentState(gtsam::NavState(states.getSmootherEstimate().at(X(idxKeyframe)).cast<gtsam::Pose3>(),
                                                states.getSmootherEstimate().at(V(idxKeyframe)).cast<gtsam::Vector3>()));
         states.setCurrentBias(states.getSmootherEstimate().at(B(idxKeyframe)).cast<gtsam::imuBias::ConstantBias>());

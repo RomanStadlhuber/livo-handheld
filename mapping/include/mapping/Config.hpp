@@ -137,32 +137,6 @@ namespace mapping
         check(config.isam2_relinearize_threshold, GT, 0.0, "isam2_relinearize_threshold");
     }
 
-    /// @brief Recovery frontend parameters
-    struct RecoveryConfig
-    {
-        double voxel_size = 0.2;           // [m], voxel size to use for recovery reference point cloud
-        size_t reference_window_size = 10; // [keyframes], number of keyframes to use for recovery reference
-        size_t reference_lag = 2;          // keyframe delay to use for recovery reference
-        int icp_iterations = 50;
-        double max_correspondence_distance = 0.05; // [m], for validating point-to-plane ICP correspondences
-    };
-
-    inline void declare_config(RecoveryConfig &config)
-    {
-        using namespace config;
-        name("RecoveryConfig");
-        field(config.voxel_size, "voxel_size", "m");
-        field(config.reference_window_size, "reference_window_size", "keyframes");
-        field(config.reference_lag, "reference_lag", "keyframes");
-        field(config.icp_iterations, "icp_iterations");
-        field(config.max_correspondence_distance, "max_correspondence_distance", "m");
-        check(config.voxel_size, GT, 0.0, "voxel_size");
-        check(config.reference_window_size, GT, 1, "reference_window_size");
-        check(config.reference_lag, GT, 0, "reference_lag");
-        check(config.icp_iterations, GT, 1, "icp_iterations");
-        check(config.max_correspondence_distance, GT, 0.0, "max_correspondence_distance");
-    }
-
     /// @brief Point cloud filtering parameters
     struct PointFilterConfig
     {
@@ -212,8 +186,7 @@ namespace mapping
         {
             // eigen quaternion uses (w, x, y, z) constructor order
             Eigen::Quaterniond quat(rotation(3), rotation(0), rotation(1), rotation(2));
-            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()),
-                                gtsam::Point3(translation));
+            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()), gtsam::Point3(translation));
         }
     };
 
@@ -245,8 +218,7 @@ namespace mapping
         gtsam::Pose3 toPose3() const
         {
             Eigen::Quaterniond quat(rotation(3), rotation(0), rotation(1), rotation(2));
-            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()),
-                                gtsam::Point3(translation));
+            return gtsam::Pose3(gtsam::Rot3(quat.normalized().toRotationMatrix()), gtsam::Point3(translation));
         }
     };
 
@@ -333,6 +305,82 @@ namespace mapping
         field(config.camera, "camera");
     }
 
+    /// @brief Parameters for scan-to-map registration using the frozen global map.
+    struct ScanToMapRegistrationConfig
+    {
+        // [m], inflates the query AABB before submap candidate search, compensates for odometry drift at boundaries
+        double aabb_inflation_margin = 0.25;
+        size_t max_candidates = 5;      // max frozen submaps returned per search
+        double cache_voxel_size = 0.15; // [m], voxel size for the merged reference map
+        // voxel sizes per ICP scale, strictly decreasing, last entry may be -1 for original resolution
+        std::vector<double> voxel_sizes = {0.4, 0.2, -1.0};
+        // max correspondence distance per ICP scale
+        std::vector<double> max_correspondence_distances = {1.0, 0.5, 0.2};
+        // max ICP iterations per scale
+        std::vector<int> max_iterations_per_scale = {30, 15, 10};
+        double fitness_threshold = 0.3; // min inlier ratio to accept the registration result
+    };
+
+    inline void declare_config(ScanToMapRegistrationConfig &config)
+    {
+        using namespace config;
+        name("ScanToMapRegistrationConfig");
+        field(config.aabb_inflation_margin, "aabb_inflation_margin", "m");
+        field(config.max_candidates, "max_candidates");
+        field(config.cache_voxel_size, "cache_voxel_size", "m");
+        field(config.voxel_sizes, "voxel_sizes");
+        field(config.max_correspondence_distances, "max_correspondence_distances");
+        field(config.max_iterations_per_scale, "max_iterations_per_scale");
+        field(config.fitness_threshold, "fitness_threshold");
+        check(config.aabb_inflation_margin, GE, 0.0, "aabb_inflation_margin");
+        check(config.max_candidates, GT, 0, "max_candidates");
+        check(config.cache_voxel_size, GT, 0.0, "cache_voxel_size");
+        check(config.fitness_threshold, GT, 0.0, "fitness_threshold");
+    }
+
+    /// @brief Bundle adjustment parameters for submap-level pose graph optimization
+    struct BundleAdjustmentConfig
+    {
+        double submap_min_distance = 5.0; // [m], min travel from last accepted submap before accepting a new one
+        double submap_min_angle = 0.785;  // [rad], min rotation (~45 deg) from last accepted submap
+        double icp_max_correspondence_distance = 1.5;     // [m], for pairwise ICP alignment
+        int icp_iterations = 50;                          // max iterations for ICP convergence
+        double refinement_voxel_size = 0.2;               // [m], voxel size applied to each accepted submap
+        double loop_closure_search_radius = 15.0;         // [m], max pose distance for non-sequential loop closure
+        double loop_closure_min_fitness = 0.3;            // min ICP inlier ratio to accept a loop closure edge
+        double convergence_pose_delta_translation = 0.05; // [m], freeze submap when PGO translation delta is below this
+        double convergence_pose_delta_rotation = 0.01;    // [rad], freeze submap when PGO rotation delta is below this
+        int max_align_iterations = 5;                     // hard cap on PGO passes before forced freeze
+        ScanToMapRegistrationConfig scan_to_map_registration;
+    };
+
+    inline void declare_config(BundleAdjustmentConfig &config)
+    {
+        using namespace config;
+        name("BundleAdjustmentConfig");
+        field(config.submap_min_distance, "submap_min_distance", "m");
+        field(config.submap_min_angle, "submap_min_angle", "rad");
+        field(config.icp_max_correspondence_distance, "icp_max_correspondence_distance", "m");
+        field(config.icp_iterations, "icp_iterations");
+        field(config.refinement_voxel_size, "refinement_voxel_size", "m");
+        field(config.loop_closure_search_radius, "loop_closure_search_radius", "m");
+        field(config.loop_closure_min_fitness, "loop_closure_min_fitness");
+        field(config.convergence_pose_delta_translation, "convergence_pose_delta_translation", "m");
+        field(config.convergence_pose_delta_rotation, "convergence_pose_delta_rotation", "rad");
+        field(config.max_align_iterations, "max_align_iterations");
+        field(config.scan_to_map_registration, "scan_to_map_registration");
+        check(config.submap_min_distance, GT, 0.0, "submap_min_distance");
+        check(config.submap_min_angle, GT, 0.0, "submap_min_angle");
+        check(config.icp_max_correspondence_distance, GT, 0.0, "icp_max_correspondence_distance");
+        check(config.icp_iterations, GT, 0, "icp_iterations");
+        check(config.refinement_voxel_size, GT, 0.0, "refinement_voxel_size");
+        check(config.loop_closure_search_radius, GT, 0.0, "loop_closure_search_radius");
+        check(config.loop_closure_min_fitness, GT, 0.0, "loop_closure_min_fitness");
+        check(config.convergence_pose_delta_translation, GT, 0.0, "convergence_pose_delta_translation");
+        check(config.convergence_pose_delta_rotation, GT, 0.0, "convergence_pose_delta_rotation");
+        check(config.max_align_iterations, GT, 0, "max_align_iterations");
+    }
+
     /// @brief Main mapping system configuration
     struct MappingConfig
     {
@@ -341,8 +389,8 @@ namespace mapping
         CameraFrontendConfig camera_frontend;
         PointFilterConfig point_filter;
         ExtrinsicsConfig extrinsics;
-        RecoveryConfig recovery;
         IntrinsicsConfig intrinsics;
+        BundleAdjustmentConfig bundle_adjustment;
     };
 
     inline void declare_config(MappingConfig &config)
@@ -354,8 +402,8 @@ namespace mapping
         field(config.camera_frontend, "camera_frontend");
         field(config.point_filter, "point_filter");
         field(config.extrinsics, "extrinsics");
-        field(config.recovery, "recovery");
         field(config.intrinsics, "intrinsics");
+        field(config.bundle_adjustment, "bundle_adjustment");
     }
 
 } // namespace mapping
