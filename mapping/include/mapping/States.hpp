@@ -118,6 +118,12 @@ namespace mapping
         std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
         getMarginalizedSubmaps();
 
+        /// -- adaptive voxelization mechanics ---
+
+        /// @brief Average of the processed keyframe submap median range values.
+        /// @detail For a reference, see "GenZ-LIO" by [(Lee et. al, 2026)](https://arxiv.org/abs/2603.16273).
+        const double getMedianRangeAverage();
+
     private:
         /// @brief SYsetm lifecycle state
         SystemState systemState_ = SystemState::Initializing;
@@ -127,6 +133,7 @@ namespace mapping
         mutable std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframeImuPoses_;
+        mutable std::map<uint32_t, double> keyframeMedianRanges_;
         mutable std::map<uint32_t, double> keyframeTimestamps_;
         /// @brief whether to keep marginalized submap PCDs for visualization interfaces.
         bool collectMarginalizedSubmaps_ = false;

@@ -17,6 +17,16 @@ namespace mapping
         keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_lidar);
         keyframeImuPoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_imu);
         keyframeTimestamps_[idxNewKf] = keyframeTimestamp;
+        /// --- adaptive voxelization mechanics: compute processed cloud median range --- std::vector<double> ranges;
+        const std::size_t N{ptrKeyframeSubmap->points_.size()};
+        std::vector<double> ranges;
+        ranges.reserve(N);
+        for (const Eigen::Vector3d &pt : ptrKeyframeSubmap->points_)
+            ranges.push_back(pt.norm());
+        std::sort(ranges.begin(), ranges.end()); // sort ascending
+        // compute ranges median
+        const double medianRange = N % 2 == 0 ? (ranges[N / 2] + ranges[N / 2 + 1]) * 0.5 : ranges[N / 2];
+        keyframeMedianRanges_[idxNewKf] = medianRange;
         return idxNewKf;
     }
 
@@ -43,6 +53,7 @@ namespace mapping
         keyframeSubmaps_.erase(idxKeyframe);
         keyframePoses_.erase(idxKeyframe);
         keyframeImuPoses_.erase(idxKeyframe);
+        keyframeMedianRanges_.erase(idxKeyframe);
         keyframeTimestamps_.erase(idxKeyframe);
     }
 
@@ -122,5 +133,19 @@ namespace mapping
         marginalizedSubmapClouds_.clear();
         marginalizedSubmapPoses_.clear();
         return result;
+    }
+
+    const double States::getMedianRangeAverage()
+    {
+        const double
+            // sliding window size
+            W{static_cast<double>(keyframeMedianRanges_.size())},
+            // sum(sliding window mean ranges) / W
+            // TODO: maybe just use a for loop? constructing the lambda looks way too verbose..
+            movingAvg{std::accumulate(keyframeMedianRanges_.begin(), keyframeMedianRanges_.end(), /*init=*/0.0,
+                                      (const std::pair<uint32_t, double> &kvA, const std::pair<uint32_t, double> &kvB){
+                                          kvA->second + kvB->second}) / // NOTE: elements are <idx, range> pairs!
+                      W};
+        return movingAvg;
     }
 } // namespace mapping
