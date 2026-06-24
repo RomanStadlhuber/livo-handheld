@@ -122,7 +122,7 @@ namespace mapping
 
         /// @brief Average of the processed keyframe submap median range values.
         /// @detail For a reference, see "GenZ-LIO" by [(Lee et. al, 2026)](https://arxiv.org/abs/2603.16273).
-        const double getMedianRangeAverage();
+        double getMedianRangeAverage();
 
     private:
         /// @brief SYsetm lifecycle state

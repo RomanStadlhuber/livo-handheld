@@ -236,7 +236,7 @@ namespace mapping
             states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
         LOG_STAMPED(INFO, states_.tLastScan_,
                     "identified keyframe, creating submap ["
-                        << idxKeyframe << "], average median range: " << states_.getMedianRangeAverage());
+                        << idxKeyframe << "], moving average median scan range: " << states_.getMedianRangeAverage());
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
          * so that the smoother update won't reference dissociated variables.
          * Modifies featureManager_ (creates marginalization factors, removes associations)

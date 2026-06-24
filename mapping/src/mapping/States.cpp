@@ -135,17 +135,14 @@ namespace mapping
         return result;
     }
 
-    const double States::getMedianRangeAverage()
+    double States::getMedianRangeAverage()
     {
-        const double
-            // sliding window size
-            W{static_cast<double>(keyframeMedianRanges_.size())},
-            // sum(sliding window mean ranges) / W
-            // TODO: maybe just use a for loop? constructing the lambda looks way too verbose..
-            movingAvg{std::accumulate(keyframeMedianRanges_.begin(), keyframeMedianRanges_.end(), /*init=*/0.0,
-                                      (const std::pair<uint32_t, double> &kvA, const std::pair<uint32_t, double> &kvB){
-                                          kvA->second + kvB->second}) / // NOTE: elements are <idx, range> pairs!
-                      W};
+        // sliding window size
+        const double W{static_cast<double>(keyframeMedianRanges_.size())};
+        double movingAvg{0};
+        for (auto const [_, medianRange] : keyframeMedianRanges_)
+            movingAvg += medianRange;
+        movingAvg /= W;
         return movingAvg;
     }
 } // namespace mapping
