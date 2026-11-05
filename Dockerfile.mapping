@@ -13,7 +13,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
     apt-get install -y -q build-essential libc++1 git \
     software-properties-common libboost-all-dev libtbb-dev wget curl gdb
 RUN apt-get update && apt-get install -y --no-install-recommends gnupg neovim byobu mesa-utils \
-    ipython3
+    ipython3 python3-pip
 RUN pip install pre-commit
 # install GTSAM pre-built
 # see also: https://gtsam.org/get_started/
@@ -27,7 +27,7 @@ RUN cd /install/Livox-SDK2 && mkdir build && cd build && \
     cmake .. && make -j 8 && make install
 # build & install config_utilities
 RUN cd /install/config_utilities/config_utilities && mkdir build && \
-    cd build && cmake .. && make -j 8 && make install
+    cd build && cmake .. -DBUILD_TESTING=OFF && make -j 8 && make install
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
