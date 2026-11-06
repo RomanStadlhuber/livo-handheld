@@ -17,6 +17,16 @@ namespace mapping
         keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_lidar);
         keyframeImuPoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_imu);
         keyframeTimestamps_[idxNewKf] = keyframeTimestamp;
+        /// --- adaptive voxelization mechanics: compute processed cloud median range --- std::vector<double> ranges;
+        const std::size_t N{ptrKeyframeSubmap->points_.size()};
+        std::vector<double> ranges;
+        ranges.reserve(N);
+        for (const Eigen::Vector3d &pt : ptrKeyframeSubmap->points_)
+            ranges.push_back(pt.norm());
+        std::sort(ranges.begin(), ranges.end()); // sort ascending
+        // compute ranges median
+        const double medianRange = N % 2 == 0 ? (ranges[N / 2] + ranges[N / 2 + 1]) * 0.5 : ranges[N / 2];
+        keyframeMedianRanges_[idxNewKf] = medianRange;
         return idxNewKf;
     }
 
@@ -43,6 +53,7 @@ namespace mapping
         keyframeSubmaps_.erase(idxKeyframe);
         keyframePoses_.erase(idxKeyframe);
         keyframeImuPoses_.erase(idxKeyframe);
+        keyframeMedianRanges_.erase(idxKeyframe);
         keyframeTimestamps_.erase(idxKeyframe);
     }
 
@@ -122,5 +133,16 @@ namespace mapping
         marginalizedSubmapClouds_.clear();
         marginalizedSubmapPoses_.clear();
         return result;
+    }
+
+    double States::getMedianRangeAverage()
+    {
+        // sliding window size
+        const double W{static_cast<double>(keyframeMedianRanges_.size())};
+        double movingAvg{0};
+        for (auto const [_, medianRange] : keyframeMedianRanges_)
+            movingAvg += medianRange;
+        movingAvg /= W;
+        return movingAvg;
     }
 } // namespace mapping

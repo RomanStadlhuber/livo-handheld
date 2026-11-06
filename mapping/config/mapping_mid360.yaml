@@ -10,6 +10,14 @@ lidar_frontend:
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
   normal_consistency_threshold: 0.8 # [0-1], accepting new points based updated normal consistency
+  # hyperparameters for adaptive voxelization setpoint function,
+  # according to "GenZ-LIO" by Lee et. al, https://arxiv.org/abs/2603.16273
+  adaptive_voxelization:
+      min_pts: 2000 # min KF points count, N_min in the paper
+      max_pts: 20000 # max KF points count, N_max in the paper
+      range_saturation: 50 # [m], is \tau_{\bar{m}} in the paper
+      gain_scaling_p: 0.5 # in (0; 1], \lambda_{p} in the paper
+      gain_scaling_d: 0.5 # in (0; 1], \lambda_{d} in the paper
   planarity_check:
     linearity: 0.3
     planarity: 0.3

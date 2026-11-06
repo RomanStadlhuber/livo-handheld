@@ -392,8 +392,6 @@ namespace mapping
                                                                                              icpResult.transformation_);
                     poseGraph.edges_.emplace_back(ni.pgoIdx, nj.pgoIdx, icpResult.transformation_, infoMatrix,
                                                   /*uncertain=*/true);
-                    LOG(DEBUG, "loop edge kf" << ni.keyframeIdx << "->kf" << nj.keyframeIdx
-                                              << " fitness=" << icpResult.fitness_);
                     // counter to bound max. number of loop closures per node
                     numLoopClosures++;
                 }
