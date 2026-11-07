@@ -17,7 +17,7 @@ namespace mapping
         keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_lidar);
         keyframeImuPoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_imu);
         keyframeTimestamps_[idxNewKf] = keyframeTimestamp;
-        /// --- adaptive voxelization mechanics: compute processed cloud median range --- std::vector<double> ranges;
+        /// --- adaptive voxelization mechanics: compute processed cloud median range ---
         const std::size_t N{ptrKeyframeSubmap->points_.size()};
         std::vector<double> ranges;
         ranges.reserve(N);
