@@ -16,8 +16,17 @@ lidar_frontend:
       min_pts: 2000 # min KF points count, N_min in the paper
       max_pts: 20000 # max KF points count, N_max in the paper
       range_saturation: 50 # [m], is \tau_{\bar{m}} in the paper
-      gain_scaling_p: 0.5 # in (0; 1], \lambda_{p} in the paper
-      gain_scaling_d: 0.5 # in (0; 1], \lambda_{d} in the paper
+      # scaling saturation factors for the P and D terms of the controller
+      # these determine how quickly the adaptive gain terms saturate
+      # a smaller value will saturate (and thus scale) that gain faster
+      pts_saturation_p: 0.1 # in (0; 1], \lambda_{p} in the paper
+      pts_saturation_d: 0.2 # in (0; 1], \lambda_{d} in the paper
+      # min and max voxel size to bound the effect of the controller
+      min_voxel_size: 0.025
+      max_voxel_size: 1.5
+
+
+
   planarity_check:
     linearity: 0.3
     planarity: 0.3
