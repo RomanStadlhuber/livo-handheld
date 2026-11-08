@@ -44,6 +44,8 @@ namespace mapping
             static_cast<float>(intr.pinhole_parameters.fx), static_cast<float>(intr.pinhole_parameters.fy),
             static_cast<float>(intr.pinhole_parameters.cx), static_cast<float>(intr.pinhole_parameters.cy),
             std::vector<float>(intr.distortion_coefficients.begin(), intr.distortion_coefficients.end()));
+        adaptiveVoxelizer_.reset(config.lidar_frontend.voxel_size);
+        states_.setVoxelSize(config.lidar_frontend.voxel_size);
     }
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
@@ -134,13 +136,12 @@ namespace mapping
         {
             open3d::geometry::PointCloud pcdScan =
                 Scan2PCD(it->second, config_.point_filter.min_distance, config_.point_filter.max_distance);
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan =
-                pcdScan.VoxelDownSample(config_.lidar_frontend.voxel_size);
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(states_.getVoxelSize());
             ptrPcdScan->Transform(w_T_l0.matrix());
             newSubmap += *ptrPcdScan;
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
-            newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
+            newSubmap.VoxelDownSample(states_.getVoxelSize());
 
         // modifies states_: stores keyframe submap, pose, timestamp, increments keyframe counter
         const uint32_t idxNewKF = states_.createKeyframeSubmap(w_T_i0, 0.0, ptrNewSubmapVoxelized);
@@ -242,56 +243,7 @@ namespace mapping
         // - warmup period of at least N keyframes (e.g. 5)
         // - both on init and reset, the current voxel size "state" needs to be set to the config value!
         if (idxKeyframe > 1)
-        {
-            const double voxelizerMedianRangeAvg{states_.getMedianRangeAverage()};
-            LOG_STAMPED(INFO, states_.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe);
-            // N_des = N_min + (N_max - N_min) * \rho(m_t)
-            const double voxelizerSetpointRangeInterpolation{adaptiveVoxelizerInterpolation(
-                voxelizerMedianRangeAvg, config_.lidar_frontend.adaptive_voxelization.range_saturation)},
-                N_des{config_.lidar_frontend.adaptive_voxelization.min_pts +
-                      (config_.lidar_frontend.adaptive_voxelization.max_pts -
-                       config_.lidar_frontend.adaptive_voxelization.min_pts) *
-                          voxelizerSetpointRangeInterpolation},
-                N_temp{static_cast<double>(states_.getKeyframeSubmaps()[idxKeyframe]->points_.size())},
-                // proportional error term
-                errP{N_des - N_temp},
-                dt{states_.getKeyframeTimestamps()[idxKeyframe] - states_.getKeyframeTimestamps()[idxKeyframe - 1]},
-                // derivative error term
-                errD{(errP - states_.voxelizerSetPointNError_) / dt},
-                voxelizerMedianRangeScaler{
-                    std::min(voxelizerMedianRangeAvg, config_.lidar_frontend.adaptive_voxelization.range_saturation) /
-                    config_.lidar_frontend.adaptive_voxelization.range_saturation},
-                pSaturatedN_des{config_.lidar_frontend.adaptive_voxelization.pts_saturation_p * N_des},
-                voxelizerErrorScalerP{std::min(std::abs(errP), pSaturatedN_des) / pSaturatedN_des},
-                dSaturatedN_des{config_.lidar_frontend.adaptive_voxelization.pts_saturation_d * N_des},
-                voxelizerErrorScalerD{std::min(std::abs(errD), dSaturatedN_des / dt) / (dSaturatedN_des / dt)},
-                voxelizerGainScalerP{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerP)},
-                voxelizerGainScalerD{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerD)},
-                // TODO: need to add these to the config
-                KPmin{5e-6}, KPmax{5e-5}, KDmin{5e-8}, KDmax{5e-7},
-                voxelizerGainP{KPmin + (KPmax - KPmin) * voxelizerGainScalerP},
-                voxelizerGainD{KDmin + (KDmax - KDmin) * voxelizerGainScalerD},
-                deltaVoxelSize{-voxelizerGainP * errP - voxelizerGainD * errD};
-            // update (and clamp) target voxel size
-            states_.voxelizerCurrVoxelsize_ += deltaVoxelSize;
-            states_.voxelizerCurrVoxelsize_ =
-                std::clamp(states_.voxelizerCurrVoxelsize_, config_.lidar_frontend.adaptive_voxelization.min_voxel_size,
-                           config_.lidar_frontend.adaptive_voxelization.min_voxel_size);
-            LOG_MULTI_STAMPED(INFO, states_.tLastScan_,
-                              STREAM("Averaged median scan range (\\bar{m}_{t}) = " << voxelizerMedianRangeAvg),
-                              STREAM("Adaptive Voxelizer scaling terms:"),
-                              STREAM("\t- \\rho(m) = " << voxelizerSetpointRangeInterpolation),
-                              STREAM("\t- N_des = " << N_des), STREAM("\t- N_temp = " << N_temp),
-                              STREAM("\t- \\phi_{m} = " << voxelizerMedianRangeScaler),
-                              STREAM("\t- \\Phi_{P} = " << voxelizerErrorScalerP),
-                              STREAM("\t- \\Phi_{D} = " << voxelizerErrorScalerD),
-                              STREAM("\t- \\Gamma_{P} = " << voxelizerGainScalerP),
-                              STREAM("\t- \\Gamma_{D} = " << voxelizerGainScalerD),
-                              STREAM("Adaptive Voxelizer Output:" << states_.voxelizerCurrVoxelsize_),
-                              STREAM("\t - K_{P} = " << voxelizerGainP), STREAM("\t - K_{P} = " << voxelizerGainP),
-                              STREAM("\t - \\delta{d} =" << deltaVoxelSize),
-                              STREAM("\t - clamp(d) = " << states_.voxelizerCurrVoxelsize_));
-        }
+            states_.setVoxelSize(adaptiveVoxelizer_.update(idxKeyframe, states_, config_));
 
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
          * so that the smoother update won't reference dissociated variables.
@@ -416,6 +368,8 @@ namespace mapping
         // bootstrap new clusters from recovery keyframe submap
         // NOTE: voxelSize=0 uses all keyframe points (good for initialization)
         featureManager_.createNewClusters(states_, idxKfRecovery, /*voxelSize=*/0);
+        // reset adaptive voxel size controller
+        adaptiveVoxelizer_.reset(states_.getVoxelSize());
     }
 
     void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)

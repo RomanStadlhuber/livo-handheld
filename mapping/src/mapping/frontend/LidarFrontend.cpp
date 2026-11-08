@@ -227,4 +227,60 @@ namespace mapping
 #endif
         return idxKeyframe < config.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
     }
+
+    void AdaptiveVoxelsizeController::reset(const double currentVoxelsize)
+    {
+        currVoxelsize_ = currentVoxelsize;
+        setPointNError_ = 0.0;
+        active_ = true;
+    }
+
+    double AdaptiveVoxelsizeController::update(const uint32_t idxKeyframe, States &states, MappingConfig &config)
+    {
+        if (!active_)
+            return config.lidar_frontend.voxel_size;
+        const double voxelizerMedianRangeAvg{states.getMedianRangeAverage()};
+        LOG_STAMPED(INFO, states.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe);
+        // N_des = N_min + (N_max - N_min) * \rho(m_t)
+        const double voxelizerSetpointRangeInterpolation{adaptiveVoxelizerInterpolation(
+            voxelizerMedianRangeAvg, config.lidar_frontend.adaptive_voxelization.range_saturation)},
+            N_des{config.lidar_frontend.adaptive_voxelization.min_pts +
+                  (config.lidar_frontend.adaptive_voxelization.max_pts -
+                   config.lidar_frontend.adaptive_voxelization.min_pts) *
+                      voxelizerSetpointRangeInterpolation},
+            N_temp{static_cast<double>(states.getKeyframeSubmaps()[idxKeyframe]->points_.size())},
+            // proportional error term
+            errP{N_des - N_temp},
+            dt{states.getKeyframeTimestamps()[idxKeyframe] - states.getKeyframeTimestamps()[idxKeyframe - 1]},
+            // derivative error term
+            errD{(errP - setPointNError_) / dt},
+            voxelizerMedianRangeScaler{
+                std::min(voxelizerMedianRangeAvg, config.lidar_frontend.adaptive_voxelization.range_saturation) /
+                config.lidar_frontend.adaptive_voxelization.range_saturation},
+            pSaturatedN_des{config.lidar_frontend.adaptive_voxelization.pts_saturation_p * N_des},
+            voxelizerErrorScalerP{std::min(std::abs(errP), pSaturatedN_des) / pSaturatedN_des},
+            dSaturatedN_des{config.lidar_frontend.adaptive_voxelization.pts_saturation_d * N_des},
+            voxelizerErrorScalerD{std::min(std::abs(errD), dSaturatedN_des / dt) / (dSaturatedN_des / dt)},
+            voxelizerGainScalerP{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerP)},
+            voxelizerGainScalerD{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerD)},
+            // TODO: need to add these to the config
+            KPmin{5e-6}, KPmax{5e-5}, KDmin{5e-8}, KDmax{5e-7},
+            voxelizerGainP{KPmin + (KPmax - KPmin) * voxelizerGainScalerP},
+            voxelizerGainD{KDmin + (KDmax - KDmin) * voxelizerGainScalerD},
+            deltaVoxelSize{-voxelizerGainP * errP - voxelizerGainD * errD};
+        // update (and clamp) target voxel size
+        currVoxelsize_ += deltaVoxelSize;
+        currVoxelsize_ = std::clamp(currVoxelsize_, config.lidar_frontend.adaptive_voxelization.min_voxel_size,
+                                    config.lidar_frontend.adaptive_voxelization.min_voxel_size);
+        LOG_MULTI_STAMPED(
+            DEBUG, states.tLastScan_, STREAM("Averaged median scan range (\\bar{m}_{t}) = " << voxelizerMedianRangeAvg),
+            STREAM("Adaptive Voxelizer scaling terms:"),
+            STREAM("\t- \\rho(m) = " << voxelizerSetpointRangeInterpolation), STREAM("\t- N_des = " << N_des),
+            STREAM("\t- N_temp = " << N_temp), STREAM("\t- \\phi_{m} = " << voxelizerMedianRangeScaler),
+            STREAM("\t- \\Phi_{P} = " << voxelizerErrorScalerP), STREAM("\t- \\Phi_{D} = " << voxelizerErrorScalerD),
+            STREAM("\t- \\Gamma_{P} = " << voxelizerGainScalerP), STREAM("\t- \\Gamma_{D} = " << voxelizerGainScalerD),
+            STREAM("Adaptive Voxelizer Output:" << currVoxelsize_), STREAM("\t - K_{P} = " << voxelizerGainP),
+            STREAM("\t - K_{P} = " << voxelizerGainP), STREAM("\t - \\delta{d} =" << deltaVoxelSize));
+        return currVoxelsize_;
+    }
 } // namespace mapping

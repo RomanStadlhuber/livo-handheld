@@ -124,6 +124,9 @@ namespace mapping
         /// @detail For a reference, see "GenZ-LIO" by [(Lee et. al, 2026)](https://arxiv.org/abs/2603.16273).
         double getMedianRangeAverage();
 
+        void setVoxelSize(const double &voxelSize) { lidarFrontendVoxelSize_ = voxelSize; };
+        double getVoxelSize() const { return lidarFrontendVoxelSize_; };
+
     private:
         /// @brief SYsetm lifecycle state
         SystemState systemState_ = SystemState::Initializing;
@@ -148,15 +151,8 @@ namespace mapping
         double temporalOffset_{0.0};        // temporal offset [s]
         /// @brief Latest estimate of the smoother after updates are completed.
         gtsam::Values smootherEstimate_;
-
-    public: // --- Adaptive Voxel Size PD-Controller (kept public for scratchpad logic ---
-        /// @brief adaptive voxel controller states
-        /// **Note:** although the setpoint is a point count, for arithmetic it's beneficial
-        /// keeping it a double for controller computation
-        bool voxelizerActive_{false}; // controller should only start after a warmup
-        double voxelizerSetpointN_{0.0}, voxelizerCurrVoxelsize_{0.0}, voxelizerMedianRangeScaler_{0.0},
-            voxelizerErrorScalerP_{0.0}, voxelizerErrorScalerD_{0.0},
-            voxelizerSetPointNError_{0.0}; // error must remain in state for D term
+        // voxel size adjusted by realtime control used by the LiDAR frontend
+        double lidarFrontendVoxelSize_;
     };
 } // namespace mapping
 

@@ -123,9 +123,7 @@ namespace mapping
         smootherEstimate_ = gtsam::Values();
 
         // reset adaptive voxel size controller "voxelizer"
-        voxelizerActive_ = false;
         keyframeMedianRanges_.clear();
-        voxelizerMedianRangeScaler_ = voxelizerErrorScalerP_ = voxelizerErrorScalerD_ = 0.0;
     }
 
     std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>
