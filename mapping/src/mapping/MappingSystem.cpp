@@ -244,10 +244,7 @@ namespace mapping
         if (idxKeyframe > 1)
         {
             const double voxelizerMedianRangeAvg{states_.getMedianRangeAverage()};
-            LOG_STAMPED(INFO, states_.tLastScan_,
-                        "identified keyframe, creating submap ["
-                            << idxKeyframe
-                            << "], moving average median scan range: " << states_.getMedianRangeAverage());
+            LOG_STAMPED(INFO, states_.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe);
             // N_des = N_min + (N_max - N_min) * \rho(m_t)
             const double N_des{
                 config_.lidar_frontend.adaptiveVoxelization.min_pts +
@@ -280,6 +277,17 @@ namespace mapping
             states_.voxelizerCurrVoxelsize_ =
                 std::clamp(states_.voxelizerCurrVoxelsize_, config_.lidar_frontend.adaptiveVoxelization.min_voxel_size,
                            config_.lidar_frontend.adaptiveVoxelization.min_voxel_size);
+            LOG_MULTI_STAMPED(INFO, states_.tLastScan_,
+                              STREAM("Averaged median scan range (\\bar{m}_{t}) = " << voxelizerMedianRangeAvg),
+                              STREAM("Adaptive Voxelizer scaling terms:"),
+                              STREAM("\t- \\phi_{m} = " << voxelizerMedianRangeScaler),
+                              STREAM("\t- \\Phi_{P} = " << voxelizerErrorScalerP),
+                              STREAM("\t- \\Phi_{D} = " << voxelizerErrorScalerD),
+                              STREAM("\t- \\Gamma_{P} = " << voxelizerGainScalerP),
+                              STREAM("\t- \\Gamma_{D} = " << voxelizerGainScalerD),
+                              STREAM("Adaptive Voxelizer Output:"), STREAM("\t - K_{P} = " << voxelizerGainP),
+                              STREAM("\t - K_{P} = " << voxelizerGainP), STREAM("\t - \\delta{d} =" << deltaVoxelSize),
+                              STREAM("\t - clamp(d) = " << states_.voxelizerCurrVoxelsize_));
         }
 
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
