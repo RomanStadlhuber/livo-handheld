@@ -1,5 +1,6 @@
 /// @file
 /// @ingroup system
+#include <algorithm>
 #include <mapping/MappingSystem.hpp>
 #include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
@@ -234,9 +235,53 @@ namespace mapping
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe =
             states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
-        LOG_STAMPED(INFO, states_.tLastScan_,
-                    "identified keyframe, creating submap ["
-                        << idxKeyframe << "], moving average median scan range: " << states_.getMedianRangeAverage());
+
+        // Scratchpad for the adaptive voxelization PD-controller logic until I decide where to move it in the codebase
+        // (i.e. whether it goes into States, LidarFrontend or its own module)
+        // TODO: before using the controller
+        // - warmup period of at least N keyframes (e.g. 5)
+        // - both on init and reset, the current voxel size "state" needs to be set to the config value!
+        if (idxKeyframe > 1)
+        {
+            const double voxelizerMedianRangeAvg{states_.getMedianRangeAverage()};
+            LOG_STAMPED(INFO, states_.tLastScan_,
+                        "identified keyframe, creating submap ["
+                            << idxKeyframe
+                            << "], moving average median scan range: " << states_.getMedianRangeAverage());
+            // N_des = N_min + (N_max - N_min) * \rho(m_t)
+            const double N_des{
+                config_.lidar_frontend.adaptiveVoxelization.min_pts +
+                (config_.lidar_frontend.adaptiveVoxelization.max_pts -
+                 config_.lidar_frontend.adaptiveVoxelization.min_pts) *
+                    adaptiveVoxelizerInterpolation(voxelizerMedianRangeAvg,
+                                                   config_.lidar_frontend.adaptiveVoxelization.range_saturation)},
+                N_temp{static_cast<double>(states_.getKeyframeSubmaps()[idxKeyframe]->points_.size())},
+                // proportional error term
+                errP{N_des - N_temp},
+                dt{states_.getKeyframeTimestamps()[idxKeyframe] - states_.getKeyframeTimestamps()[idxKeyframe - 1]},
+                // derivative error term
+                errD{(errP - states_.voxelizerSetPointNError_) / dt},
+                voxelizerMedianRangeScaler{
+                    std::min(voxelizerMedianRangeAvg, config_.lidar_frontend.adaptiveVoxelization.range_saturation) /
+                    config_.lidar_frontend.adaptiveVoxelization.range_saturation},
+                pSaturatedN_des{config_.lidar_frontend.adaptiveVoxelization.pts_saturation_p * N_des},
+                voxelizerErrorScalerP{std::min(errP, pSaturatedN_des) / pSaturatedN_des},
+                dSaturatedN_des{config_.lidar_frontend.adaptiveVoxelization.pts_saturation_d * N_des},
+                voxelizerErrorScalerD{std::min(errD, dSaturatedN_des / dt) / (dSaturatedN_des / dt)},
+                voxelizerGainScalerP{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerP)},
+                voxelizerGainScalerD{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerD)},
+                // TODO: need to add these to the config
+                KPmin{5e-6}, KPmax{5e-5}, KDmin{5e-8}, KDmax{5e-7},
+                voxelizerGainP{KPmin + (KPmax - KPmin) * voxelizerGainScalerP},
+                voxelizerGainD{KDmin + (KDmax - KDmin) * voxelizerGainScalerD},
+                deltaVoxelSize{-voxelizerGainP * errP - voxelizerGainD * errD};
+            // update (and clamp) target voxel size
+            states_.voxelizerCurrVoxelsize_ += deltaVoxelSize;
+            states_.voxelizerCurrVoxelsize_ =
+                std::clamp(states_.voxelizerCurrVoxelsize_, config_.lidar_frontend.adaptiveVoxelization.min_voxel_size,
+                           config_.lidar_frontend.adaptiveVoxelization.min_voxel_size);
+        }
+
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
          * so that the smoother update won't reference dissociated variables.
          * Modifies featureManager_ (creates marginalization factors, removes associations)

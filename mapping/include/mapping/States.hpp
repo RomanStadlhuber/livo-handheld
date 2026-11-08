@@ -133,7 +133,7 @@ namespace mapping
         mutable std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframeImuPoses_;
-        mutable std::map<uint32_t, double> keyframeMedianRanges_;
+        mutable std::map<uint32_t, double> keyframeMedianRanges_; // used for adaptive voxel size controller
         mutable std::map<uint32_t, double> keyframeTimestamps_;
         /// @brief whether to keep marginalized submap PCDs for visualization interfaces.
         bool collectMarginalizedSubmaps_ = false;
@@ -148,6 +148,15 @@ namespace mapping
         double temporalOffset_{0.0};        // temporal offset [s]
         /// @brief Latest estimate of the smoother after updates are completed.
         gtsam::Values smootherEstimate_;
+
+    public: // --- Adaptive Voxel Size PD-Controller (kept public for scratchpad logic ---
+        /// @brief adaptive voxel controller states
+        /// **Note:** although the setpoint is a point count, for arithmetic it's beneficial
+        /// keeping it a double for controller computation
+        bool voxelizerActive_{false}; // controller should only start after a warmup
+        double voxelizerSetpointN_{0.0}, voxelizerCurrVoxelsize_{0.0}, voxelizerMedianRangeScaler_{0.0},
+            voxelizerErrorScalerP_{0.0}, voxelizerErrorScalerD_{0.0},
+            voxelizerSetPointNError_{0.0}; // error must remain in state for D term
     };
 } // namespace mapping
 
