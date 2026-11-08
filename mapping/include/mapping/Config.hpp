@@ -126,7 +126,7 @@ namespace mapping
         PlanarityCheckConfig planarity_check;
         ClusteringConfig clustering;
         KeyframeConfig keyframe;
-        AdaptiveVoxelizationConfig adaptiveVoxelization;
+        AdaptiveVoxelizationConfig adaptive_voxelization;
     };
 
     inline void declare_config(LidarFrontendConfig &config)
@@ -140,7 +140,7 @@ namespace mapping
         field(config.planarity_check, "planarity_check");
         field(config.clustering, "clustering");
         field(config.keyframe, "keyframe");
-        field(config.adaptiveVoxelization, "adaptive_voxelization");
+        field(config.adaptive_voxelization, "adaptive_voxelization");
         check(config.voxel_size, GT, 0.0, "voxel_size");
         check(config.knn_radius, GT, 0.0, "knn_radius");
         check(config.knn_neighbors, GT, 0, "knn_neighbors");
