@@ -246,12 +246,12 @@ namespace mapping
             const double voxelizerMedianRangeAvg{states_.getMedianRangeAverage()};
             LOG_STAMPED(INFO, states_.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe);
             // N_des = N_min + (N_max - N_min) * \rho(m_t)
-            const double N_des{
-                config_.lidar_frontend.adaptiveVoxelization.min_pts +
-                (config_.lidar_frontend.adaptiveVoxelization.max_pts -
-                 config_.lidar_frontend.adaptiveVoxelization.min_pts) *
-                    adaptiveVoxelizerInterpolation(voxelizerMedianRangeAvg,
-                                                   config_.lidar_frontend.adaptiveVoxelization.range_saturation)},
+            const double voxelizerSetpointRangeInterpolation{adaptiveVoxelizerInterpolation(
+                voxelizerMedianRangeAvg, config_.lidar_frontend.adaptiveVoxelization.range_saturation)},
+                N_des{config_.lidar_frontend.adaptiveVoxelization.min_pts +
+                      (config_.lidar_frontend.adaptiveVoxelization.max_pts -
+                       config_.lidar_frontend.adaptiveVoxelization.min_pts) *
+                          voxelizerSetpointRangeInterpolation},
                 N_temp{static_cast<double>(states_.getKeyframeSubmaps()[idxKeyframe]->points_.size())},
                 // proportional error term
                 errP{N_des - N_temp},
@@ -262,9 +262,9 @@ namespace mapping
                     std::min(voxelizerMedianRangeAvg, config_.lidar_frontend.adaptiveVoxelization.range_saturation) /
                     config_.lidar_frontend.adaptiveVoxelization.range_saturation},
                 pSaturatedN_des{config_.lidar_frontend.adaptiveVoxelization.pts_saturation_p * N_des},
-                voxelizerErrorScalerP{std::min(errP, pSaturatedN_des) / pSaturatedN_des},
+                voxelizerErrorScalerP{std::min(std::abs(errP), pSaturatedN_des) / pSaturatedN_des},
                 dSaturatedN_des{config_.lidar_frontend.adaptiveVoxelization.pts_saturation_d * N_des},
-                voxelizerErrorScalerD{std::min(errD, dSaturatedN_des / dt) / (dSaturatedN_des / dt)},
+                voxelizerErrorScalerD{std::min(std::abs(errD), dSaturatedN_des / dt) / (dSaturatedN_des / dt)},
                 voxelizerGainScalerP{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerP)},
                 voxelizerGainScalerD{std::sqrt(voxelizerMedianRangeScaler * voxelizerErrorScalerD)},
                 // TODO: need to add these to the config
@@ -280,13 +280,16 @@ namespace mapping
             LOG_MULTI_STAMPED(INFO, states_.tLastScan_,
                               STREAM("Averaged median scan range (\\bar{m}_{t}) = " << voxelizerMedianRangeAvg),
                               STREAM("Adaptive Voxelizer scaling terms:"),
+                              STREAM("\t- \\rho(m) = " << voxelizerSetpointRangeInterpolation),
+                              STREAM("\t- N_des = " << N_des), STREAM("\t- N_temp = " << N_temp),
                               STREAM("\t- \\phi_{m} = " << voxelizerMedianRangeScaler),
                               STREAM("\t- \\Phi_{P} = " << voxelizerErrorScalerP),
                               STREAM("\t- \\Phi_{D} = " << voxelizerErrorScalerD),
                               STREAM("\t- \\Gamma_{P} = " << voxelizerGainScalerP),
                               STREAM("\t- \\Gamma_{D} = " << voxelizerGainScalerD),
-                              STREAM("Adaptive Voxelizer Output:"), STREAM("\t - K_{P} = " << voxelizerGainP),
-                              STREAM("\t - K_{P} = " << voxelizerGainP), STREAM("\t - \\delta{d} =" << deltaVoxelSize),
+                              STREAM("Adaptive Voxelizer Output:" << states_.voxelizerCurrVoxelsize_),
+                              STREAM("\t - K_{P} = " << voxelizerGainP), STREAM("\t - K_{P} = " << voxelizerGainP),
+                              STREAM("\t - \\delta{d} =" << deltaVoxelSize),
                               STREAM("\t - clamp(d) = " << states_.voxelizerCurrVoxelsize_));
         }
 
