@@ -14,8 +14,8 @@ lidar_frontend:
   # according to "GenZ-LIO" by Lee et. al, https://arxiv.org/abs/2603.16273
   adaptive_voxelization:
       min_pts: 2000 # min KF points count, N_min in the paper
-      max_pts: 20000 # max KF points count, N_max in the paper
-      range_saturation: 50 # [m], is \tau_{\bar{m}} in the paper
+      max_pts: 5000 # max KF points count, N_max in the paper
+      range_saturation: 30 # [m], is \tau_{\bar{m}} in the paper
       # scaling saturation factors for the P and D terms of the controller
       # these determine how quickly the adaptive gain terms saturate
       # a smaller value will saturate (and thus scale) that gain faster
