@@ -240,7 +240,6 @@ namespace mapping
         if (!active_)
             return config.lidar_frontend.voxel_size;
         const double voxelizerMedianRangeAvg{states.getMedianRangeAverage()};
-        LOG_STAMPED(INFO, states.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe);
         // N_des = N_min + (N_max - N_min) * \rho(m_t)
         const double voxelizerSetpointRangeInterpolation{adaptiveVoxelizerInterpolation(
             voxelizerMedianRangeAvg, config.lidar_frontend.adaptive_voxelization.range_saturation)},
@@ -271,7 +270,7 @@ namespace mapping
         // update (and clamp) target voxel size
         currVoxelsize_ += deltaVoxelSize;
         currVoxelsize_ = std::clamp(currVoxelsize_, config.lidar_frontend.adaptive_voxelization.min_voxel_size,
-                                    config.lidar_frontend.adaptive_voxelization.min_voxel_size);
+                                    config.lidar_frontend.adaptive_voxelization.max_voxel_size);
         LOG_MULTI_STAMPED(
             DEBUG, states.tLastScan_, STREAM("Averaged median scan range (\\bar{m}_{t}) = " << voxelizerMedianRangeAvg),
             STREAM("Adaptive Voxelizer scaling terms:"),
