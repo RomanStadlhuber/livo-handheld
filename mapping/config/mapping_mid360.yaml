@@ -55,7 +55,7 @@ point_filter:
 
 extrinsics:
   temporal_calibration_enabled: false
-  extrinsic_calibration_enabled: false
+  extrinsic_calibration_enabled: true
   imu_T_lidar: # initial guess for (or constant) extrinsic IMU-LiDAR calibration
     translation: [-0.011, -0.02329, 0.04412] # [m]
     rotation: [0, 0, 0, 1] # hamilton quaternion (x, y, z, w)

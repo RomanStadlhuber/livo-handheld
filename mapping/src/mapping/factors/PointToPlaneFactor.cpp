@@ -8,10 +8,9 @@
 namespace mapping
 {
 
-    gtsam::KeyVector PointToPlaneFactor::buildFullKeys(
-        const gtsam::KeyVector &poseKeys,
-        boost::optional<gtsam::Key> dtKey,
-        boost::optional<gtsam::Key> extrinsicKey)
+    gtsam::KeyVector PointToPlaneFactor::buildFullKeys(const gtsam::KeyVector &poseKeys,
+                                                       boost::optional<gtsam::Key> dtKey,
+                                                       boost::optional<gtsam::Key> extrinsicKey)
     {
         gtsam::KeyVector allKeys = poseKeys;
         if (dtKey)
@@ -21,58 +20,34 @@ namespace mapping
         return allKeys;
     }
 
-    PointToPlaneFactor::PointToPlaneFactor(
-        const gtsam::KeyVector &keys,
-        const gtsam::Pose3 &imu_T_lidar,
-        const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
-        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-        const gtsam::SharedNoiseModel &noiseModel,
-        const uint32_t &clusterId)
-        : NoiseModelFactor(noiseModel, keys),
-          imu_T_lidar_(imu_T_lidar),
-          lidar_points_(lidar_points),
-          planeNormal_(planeNormal),
-          planeCenter_(planeCenter),
-          adaptiveNoiseModel_(noiseModel),
-          clusterId_(clusterId),
-          numPoseKeys_(keys.size()),
-          dtKey_(boost::none),
-          extrinsicKey_(boost::none)
+    PointToPlaneFactor::PointToPlaneFactor(const gtsam::KeyVector &keys, const gtsam::Pose3 &imu_T_lidar,
+                                           const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
+                                           const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                                           const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                                           const gtsam::SharedNoiseModel &noiseModel, const uint32_t &clusterId)
+        : NoiseModelFactor(noiseModel, keys), imu_T_lidar_(imu_T_lidar), lidar_points_(lidar_points),
+          planeNormal_(planeNormal), planeCenter_(planeCenter), adaptiveNoiseModel_(noiseModel), clusterId_(clusterId),
+          numPoseKeys_(keys.size()), dtKey_(boost::none), extrinsicKey_(boost::none)
     {
     }
 
     PointToPlaneFactor::PointToPlaneFactor(
-        const gtsam::KeyVector &poseKeys,
-        const gtsam::Pose3 &imu_T_lidar,
-        const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
-        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-        const gtsam::SharedNoiseModel &noiseModel,
-        const uint32_t &clusterId,
-        boost::optional<gtsam::Key> dtKey,
-        boost::optional<gtsam::Key> extrinsicKey,
+        const gtsam::KeyVector &poseKeys, const gtsam::Pose3 &imu_T_lidar,
+        const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points, const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+        const std::shared_ptr<Eigen::Vector3d> &planeCenter, const gtsam::SharedNoiseModel &noiseModel,
+        const uint32_t &clusterId, boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey,
         const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists)
-        : NoiseModelFactor(noiseModel, buildFullKeys(poseKeys, dtKey, extrinsicKey)),
-          imu_T_lidar_(imu_T_lidar),
-          lidar_points_(lidar_points),
-          planeNormal_(planeNormal),
-          planeCenter_(planeCenter),
-          adaptiveNoiseModel_(noiseModel),
-          clusterId_(clusterId),
-          numPoseKeys_(poseKeys.size()),
-          dtKey_(dtKey),
-          extrinsicKey_(extrinsicKey),
-          keyframeTwists_(keyframeTwists)
+        : NoiseModelFactor(noiseModel, buildFullKeys(poseKeys, dtKey, extrinsicKey)), imu_T_lidar_(imu_T_lidar),
+          lidar_points_(lidar_points), planeNormal_(planeNormal), planeCenter_(planeCenter),
+          adaptiveNoiseModel_(noiseModel), clusterId_(clusterId), numPoseKeys_(poseKeys.size()), dtKey_(dtKey),
+          extrinsicKey_(extrinsicKey), keyframeTwists_(keyframeTwists)
     {
     }
 
-    void PointToPlaneFactor::add(
-        const gtsam::Key &key,
-        const Eigen::Vector3d &lidar_point,
-        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-        const gtsam::SharedNoiseModel &noiseModel)
+    void PointToPlaneFactor::add(const gtsam::Key &key, const Eigen::Vector3d &lidar_point,
+                                 const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                                 const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                                 const gtsam::SharedNoiseModel &noiseModel)
     {
         // Insert pose key before calibration keys
         this->keys_.insert(this->keys_.begin() + numPoseKeys_, key);
@@ -81,23 +56,19 @@ namespace mapping
         updatePlaneParameters(planeNormal, planeCenter, noiseModel);
     }
 
-    void PointToPlaneFactor::add(
-        const gtsam::Key &key,
-        const Eigen::Vector3d &lidar_point,
-        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-        const gtsam::SharedNoiseModel &noiseModel,
-        const std::pair<Eigen::Vector3d, Eigen::Vector3d> &twist)
+    void PointToPlaneFactor::add(const gtsam::Key &key, const Eigen::Vector3d &lidar_point,
+                                 const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                                 const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                                 const gtsam::SharedNoiseModel &noiseModel,
+                                 const std::pair<Eigen::Vector3d, Eigen::Vector3d> &twist)
     {
         add(key, lidar_point, planeNormal, planeCenter, noiseModel);
         keyframeTwists_[key] = twist;
     }
 
-    void PointToPlaneFactor::remove(
-        const gtsam::Key &key,
-        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-        const gtsam::SharedNoiseModel &noiseModel)
+    void PointToPlaneFactor::remove(const gtsam::Key &key, const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                                    const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                                    const gtsam::SharedNoiseModel &noiseModel)
     {
         // erase variable key connection (only search among pose keys)
         auto beginIt = keys().begin();
@@ -117,19 +88,17 @@ namespace mapping
         updatePlaneParameters(planeNormal, planeCenter, noiseModel);
     }
 
-    void PointToPlaneFactor::updatePlaneParameters(
-        const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-        const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-        const gtsam::SharedNoiseModel &noiseModel)
+    void PointToPlaneFactor::updatePlaneParameters(const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                                                   const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                                                   const gtsam::SharedNoiseModel &noiseModel)
     {
         planeNormal_ = planeNormal;
         planeCenter_ = planeCenter;
         adaptiveNoiseModel_ = noiseModel;
     }
 
-    gtsam::Vector PointToPlaneFactor::unwhitenedError(
-        const gtsam::Values &x,
-        boost::optional<std::vector<gtsam::Matrix> &> H) const
+    gtsam::Vector PointToPlaneFactor::unwhitenedError(const gtsam::Values &x,
+                                                      boost::optional<std::vector<gtsam::Matrix> &> H) const
     {
         // reference x and H to silence compiler warnings (usused variables)
         x.size();
@@ -155,7 +124,8 @@ namespace mapping
         return boost::make_shared<gtsam::JacobianFactor>(terms, b);
     }
 
-    std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> PointToPlaneFactor::computeErrorAndJacobians(const gtsam::Values &values) const
+    std::pair<gtsam::Vector, std::vector<gtsam::Matrix>>
+    PointToPlaneFactor::computeErrorAndJacobians(const gtsam::Values &values) const
     {
         const double meanFactor = 1.0 / static_cast<double>(lidar_points_.size());
         std::vector<gtsam::Matrix> Hs;
@@ -176,12 +146,9 @@ namespace mapping
         gtsam::Vector errorVec = gtsam::Vector::Zero(1);
 
         // --- Read calibration values once (before pose loop) ---
-        const gtsam::Pose3 imu_T_lidar = extrinsicKey_ && values.exists(*extrinsicKey_)
-                                             ? values.at<gtsam::Pose3>(*extrinsicKey_)
-                                             : imu_T_lidar_;
-        const double dt = dtKey_ && values.exists(*dtKey_)
-                              ? values.at<gtsam::Vector1>(*dtKey_)(0)
-                              : 0.0;
+        const gtsam::Pose3 imu_T_lidar =
+            extrinsicKey_ && values.exists(*extrinsicKey_) ? values.at<gtsam::Pose3>(*extrinsicKey_) : imu_T_lidar_;
+        const double dt = dtKey_ && values.exists(*dtKey_) ? values.at<gtsam::Vector1>(*dtKey_)(0) : 0.0;
 
         // accumulators for calibration Jacobians (summed across all keyframes)
         gtsam::Matrix H_dt_accum = gtsam::Matrix::Zero(1, 1);
@@ -206,25 +173,19 @@ namespace mapping
             if (dtKey_ && keyframeTwists_.count(key))
             {
                 const auto &[omega_k, v_k] = keyframeTwists_.at(key);
-                w_T_imu_ext = w_T_imu * gtsam::Pose3(
-                                            gtsam::Rot3::Expmap(omega_k * dt),
-                                            v_k * dt);
+                w_T_imu_ext = w_T_imu * gtsam::Pose3(gtsam::Rot3::Expmap(omega_k * dt), v_k * dt);
             }
 
             // accumulator for Jacobian terms
             gtsam::Matrix16 Hx = gtsam::Matrix16::Zero();
             // Compute error and Jacobian for this keyframes point.
             // Transform point from lidar frame to world frame
-            const gtsam::Point3
-                l_p(lidar_point),
-                w_p = w_T_imu_ext.compose(imu_T_lidar).transformFrom(l_p);
+            const gtsam::Point3 l_p(lidar_point), w_p = w_T_imu_ext.compose(imu_T_lidar).transformFrom(l_p);
             const double r_i = planeNormal_->dot(w_p - *planeCenter_);
             // Point-to-plane distance (signed)
             errorVec(0) += std::pow(r_i, 2);
             const Eigen::Matrix<double, 1, 3> nT = planeNormal_->transpose();
-            const Eigen::Matrix3d
-                i_R_l = imu_T_lidar.rotation().matrix(),
-                w_R_i = w_T_imu_ext.rotation().matrix();
+            const Eigen::Matrix3d i_R_l = imu_T_lidar.rotation().matrix(), w_R_i = w_T_imu_ext.rotation().matrix();
             const gtsam::Point3 i_t_l = imu_T_lidar.translation();
             Hx.head<3>() = 2 * meanFactor * r_i * -nT * w_R_i * gtsam::skewSymmetric(i_R_l * l_p + i_t_l);
             Hx.tail<3>() = 2 * meanFactor * r_i * nT * w_R_i;
@@ -233,11 +194,10 @@ namespace mapping
             if (dtKey_ && keyframeTwists_.count(key))
             {
                 const auto &[omega_k, v_k] = keyframeTwists_.at(key);
-                const Eigen::Matrix3d
-                    omega_skew_k = gtsam::skewSymmetric(omega_k),
-                    // short-hand expression for body rate in world frame
-                    // d(w_R_i)d(t) = w_R_i * omega_skew
-                    // this should be in the jacobian derivation docs
+                const Eigen::Matrix3d omega_skew_k = gtsam::skewSymmetric(omega_k),
+                                      // short-hand expression for body rate in world frame
+                                      // d(w_R_i)d(t) = w_R_i * omega_skew
+                                      // this should be in the jacobian derivation docs
                     ohm = w_R_i * omega_skew_k;
                 // velocity of the LiDAR point in the world frame from temporal extrapolation
                 // this should b e in the jacobian derivation docs
@@ -245,11 +205,11 @@ namespace mapping
                 H_dt_accum += 2 * meanFactor * r_i * nT * phi;
             }
             // IMU-to-LiDAR extrinsic calibration jacobian
-            if(extrinsicKey_)
+            if (extrinsicKey_)
             {
                 const Eigen::Matrix3d w_R_l = w_R_i * i_R_l;
-                H_ext_accum.block<1, 3>(0, 0) += 2* meanFactor * r_i * nT * w_R_l * gtsam::skewSymmetric(l_p);
-                H_ext_accum.block<1, 3>(0, 3) += 2* meanFactor * r_i * nT * w_R_l;
+                H_ext_accum.block<1, 3>(0, 0) -= 2 * meanFactor * r_i * nT * w_R_l * gtsam::skewSymmetric(l_p);
+                H_ext_accum.block<1, 3>(0, 3) += 2 * meanFactor * r_i * nT * w_R_l;
             }
         }
         errorVec *= meanFactor;
@@ -265,10 +225,9 @@ namespace mapping
 
     gtsam::NonlinearFactor::shared_ptr PointToPlaneFactor::clone() const
     {
-        return boost::make_shared<PointToPlaneFactor>(
-            gtsam::KeyVector(keys().begin(), keys().begin() + numPoseKeys_),
-            imu_T_lidar_, lidar_points_, planeNormal_, planeCenter_,
-            noiseModel(), clusterId_, dtKey_, extrinsicKey_, keyframeTwists_);
+        return boost::make_shared<PointToPlaneFactor>(gtsam::KeyVector(keys().begin(), keys().begin() + numPoseKeys_),
+                                                      imu_T_lidar_, lidar_points_, planeNormal_, planeCenter_,
+                                                      noiseModel(), clusterId_, dtKey_, extrinsicKey_, keyframeTwists_);
     }
 
     void PointToPlaneFactor::print(const std::string &s, const gtsam::KeyFormatter &keyFormatter) const
@@ -286,9 +245,9 @@ namespace mapping
         adaptiveNoiseModel_->print("");
     }
 
-    gtsam::LinearContainerFactor::shared_ptr PointToPlaneFactor::createMarginalizationFactor(
-        const gtsam::Values &values,
-        const gtsam::Key &keyToMarginalize) const
+    gtsam::LinearContainerFactor::shared_ptr
+    PointToPlaneFactor::createMarginalizationFactor(const gtsam::Values &values,
+                                                    const gtsam::Key &keyToMarginalize) const
     {
         // NOTE: keyToMarginalize is always a pose key X(k). Calibration Jacobian
         // entries (for T(0)/E(0)) in Hs are simply ignored here — only the

@@ -222,7 +222,7 @@ The partial derivatives with respect to the two blocks of \f$ \xi_{\text{ext}} \
 
 \f[
   \frac{\partial\, {}^{I}\bvec{p}_k}{\partial\, \delta\boldsymbol{\phi}}
-    = \iRl \, \skewOf{{}^{L}\bvec{p}_k},
+    = - \iRl \, \skewOf{{}^{L}\bvec{p}_k},
   \qquad
   \frac{\partial\, {}^{I}\bvec{p}_k}{\partial\, \delta\boldsymbol{\rho}}
     = \mtx{I}_3
@@ -232,8 +232,8 @@ which, propagated to the world frame via \f$ \wRi_k \f$, give
 
 \f[
   \frac{\partial\, {}^{w}\bvec{p}_k}{\partial\, \delta\boldsymbol{\phi}}
-    = \wRi_k \iRl \, \skewOf{{}^{L}\bvec{p}_k}
-    = \wRl_k \, \skewOf{{}^{L}\bvec{p}_k},
+    = - \wRi_k \iRl \, \skewOf{{}^{L}\bvec{p}_k}
+    = - \wRl_k \, \skewOf{{}^{L}\bvec{p}_k},
   \qquad
   \frac{\partial\, {}^{w}\bvec{p}_k}{\partial\, \delta\boldsymbol{\rho}}
     = \wRl_k
