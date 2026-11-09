@@ -238,12 +238,8 @@ namespace mapping
             states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
         LOG_STAMPED(INFO, states_.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe << "]");
 
-        // Scratchpad for the adaptive voxelization PD-controller logic until I decide where to move it in the codebase
-        // (i.e. whether it goes into States, LidarFrontend or its own module)
-        // TODO: before using the controller
-        // - warmup period of at least N keyframes (e.g. 5)
-        // - both on init and reset, the current voxel size "state" needs to be set to the config value!
-        if (idxKeyframe > 10)
+        // update the adaptive voxel size controller after the warmup period has expired
+        if (idxKeyframe > 5)
             states_.setVoxelSize(adaptiveVoxelizer_.update(idxKeyframe, states_, config_));
 
         /* Marginalize keyframes outside the sliding window BEFORE tracking,

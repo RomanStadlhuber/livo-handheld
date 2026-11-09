@@ -22,10 +22,12 @@ lidar_frontend:
       pts_saturation_p: 0.1 # in (0; 1], \lambda_{p} in the paper
       pts_saturation_d: 0.2 # in (0; 1], \lambda_{d} in the paper
       # min and max voxel size to bound the effect of the controller
-      min_voxel_size: 0.025
+      min_voxel_size: 0.5
       max_voxel_size: 1.5
-
-
+      kp_min: 5e-6
+      kp_max: 5e-5
+      kd_min: 5e-8
+      kd_max: 5e-7
 
   planarity_check:
     linearity: 0.3
