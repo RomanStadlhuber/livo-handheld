@@ -17,7 +17,7 @@ namespace mapping
         keyframePoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_lidar);
         keyframeImuPoses_[idxNewKf] = std::make_shared<gtsam::Pose3>(world_T_imu);
         keyframeTimestamps_[idxNewKf] = keyframeTimestamp;
-        /// --- adaptive voxelization mechanics: compute processed cloud median range --- std::vector<double> ranges;
+        /// --- adaptive voxelization mechanics: compute processed cloud median range ---
         const std::size_t N{ptrKeyframeSubmap->points_.size()};
         std::vector<double> ranges;
         ranges.reserve(N);
@@ -121,6 +121,9 @@ namespace mapping
 
         // clear stale smoother estimate (graph was reset)
         smootherEstimate_ = gtsam::Values();
+
+        // reset adaptive voxel size controller "voxelizer"
+        keyframeMedianRanges_.clear();
     }
 
     std::map<uint32_t, std::pair<std::shared_ptr<gtsam::Pose3>, std::shared_ptr<open3d::geometry::PointCloud>>>

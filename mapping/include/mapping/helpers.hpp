@@ -185,6 +185,15 @@ namespace mapping
         ptrPcd->colors_.resize(writeIdx);
     }
 
+    /// ---------------  Adaptive Voxelization PD Controller ---------------------
+
+    /// @brief Eq. (2) in [Lee et. al, 2026](https://arxiv.org/html/2603.16273)
+    inline double adaptiveVoxelizerInterpolation(const double &medianRangeAverage, const double &rangeSaturation,
+                                                 const double &pow = 2)
+    {
+        return 1.0 - std::pow(1 - std::min(medianRangeAverage, rangeSaturation) / rangeSaturation, pow);
+    }
+
 } // namespace mapping
 
 #endif // MAPPING_HELPERS_HPP_

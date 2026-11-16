@@ -14,10 +14,21 @@ lidar_frontend:
   # according to "GenZ-LIO" by Lee et. al, https://arxiv.org/abs/2603.16273
   adaptive_voxelization:
       min_pts: 2000 # min KF points count, N_min in the paper
-      max_pts: 20000 # max KF points count, N_max in the paper
-      range_saturation: 50 # [m], is \tau_{\bar{m}} in the paper
-      gain_scaling_p: 0.5 # in (0; 1], \lambda_{p} in the paper
-      gain_scaling_d: 0.5 # in (0; 1], \lambda_{d} in the paper
+      max_pts: 5000 # max KF points count, N_max in the paper
+      range_saturation: 30 # [m], is \tau_{\bar{m}} in the paper
+      # scaling saturation factors for the P and D terms of the controller
+      # these determine how quickly the adaptive gain terms saturate
+      # a smaller value will saturate (and thus scale) that gain faster
+      pts_saturation_p: 0.1 # in (0; 1], \lambda_{p} in the paper
+      pts_saturation_d: 0.2 # in (0; 1], \lambda_{d} in the paper
+      # min and max voxel size to bound the effect of the controller
+      min_voxel_size: 0.5
+      max_voxel_size: 1.5
+      kp_min: 5e-6
+      kp_max: 5e-5
+      kd_min: 5e-8
+      kd_max: 5e-7
+
   planarity_check:
     linearity: 0.3
     planarity: 0.3
@@ -44,7 +55,7 @@ point_filter:
 
 extrinsics:
   temporal_calibration_enabled: false
-  extrinsic_calibration_enabled: false
+  extrinsic_calibration_enabled: true
   imu_T_lidar: # initial guess for (or constant) extrinsic IMU-LiDAR calibration
     translation: [-0.011, -0.02329, 0.04412] # [m]
     rotation: [0, 0, 0, 1] # hamilton quaternion (x, y, z, w)

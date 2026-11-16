@@ -135,6 +135,7 @@ namespace mapping
         States states_;
         ImuFrontend imuFrontend_;
         LidarFrontend lidarFrontend_;
+        AdaptiveVoxelsizeController adaptiveVoxelizer_;
         CameraFrontend cameraFrontend_;
         ScanToMapFrontend scanToMapFrontend_;
         FeatureManager featureManager_;

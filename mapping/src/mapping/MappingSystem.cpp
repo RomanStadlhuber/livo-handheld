@@ -1,5 +1,6 @@
 /// @file
 /// @ingroup system
+#include <algorithm>
 #include <mapping/MappingSystem.hpp>
 #include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
@@ -43,6 +44,8 @@ namespace mapping
             static_cast<float>(intr.pinhole_parameters.fx), static_cast<float>(intr.pinhole_parameters.fy),
             static_cast<float>(intr.pinhole_parameters.cx), static_cast<float>(intr.pinhole_parameters.cy),
             std::vector<float>(intr.distortion_coefficients.begin(), intr.distortion_coefficients.end()));
+        adaptiveVoxelizer_.reset(config.lidar_frontend.voxel_size);
+        states_.setVoxelSize(config.lidar_frontend.voxel_size);
     }
 
     void MappingSystem::feedImu(const std::shared_ptr<ImuData> &imu_data, double timestamp)
@@ -133,13 +136,12 @@ namespace mapping
         {
             open3d::geometry::PointCloud pcdScan =
                 Scan2PCD(it->second, config_.point_filter.min_distance, config_.point_filter.max_distance);
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan =
-                pcdScan.VoxelDownSample(config_.lidar_frontend.voxel_size);
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(states_.getVoxelSize());
             ptrPcdScan->Transform(w_T_l0.matrix());
             newSubmap += *ptrPcdScan;
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
-            newSubmap.VoxelDownSample(config_.lidar_frontend.voxel_size);
+            newSubmap.VoxelDownSample(states_.getVoxelSize());
 
         // modifies states_: stores keyframe submap, pose, timestamp, increments keyframe counter
         const uint32_t idxNewKF = states_.createKeyframeSubmap(w_T_i0, 0.0, ptrNewSubmapVoxelized);
@@ -234,9 +236,12 @@ namespace mapping
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe =
             states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
-        LOG_STAMPED(INFO, states_.tLastScan_,
-                    "identified keyframe, creating submap ["
-                        << idxKeyframe << "], moving average median scan range: " << states_.getMedianRangeAverage());
+        LOG_STAMPED(INFO, states_.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe << "]");
+
+        // update the adaptive voxel size controller after the warmup period has expired
+        if (idxKeyframe > 5)
+            states_.setVoxelSize(adaptiveVoxelizer_.update(idxKeyframe, states_, config_));
+
         /* Marginalize keyframes outside the sliding window BEFORE tracking,
          * so that the smoother update won't reference dissociated variables.
          * Modifies featureManager_ (creates marginalization factors, removes associations)
@@ -360,6 +365,8 @@ namespace mapping
         // bootstrap new clusters from recovery keyframe submap
         // NOTE: voxelSize=0 uses all keyframe points (good for initialization)
         featureManager_.createNewClusters(states_, idxKfRecovery, /*voxelSize=*/0);
+        // reset adaptive voxel size controller
+        adaptiveVoxelizer_.reset(states_.getVoxelSize());
     }
 
     void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)

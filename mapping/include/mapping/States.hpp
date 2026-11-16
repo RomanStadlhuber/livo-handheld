@@ -124,6 +124,9 @@ namespace mapping
         /// @detail For a reference, see "GenZ-LIO" by [(Lee et. al, 2026)](https://arxiv.org/abs/2603.16273).
         double getMedianRangeAverage();
 
+        void setVoxelSize(const double &voxelSize) { lidarFrontendVoxelSize_ = voxelSize; };
+        double getVoxelSize() const { return lidarFrontendVoxelSize_; };
+
     private:
         /// @brief SYsetm lifecycle state
         SystemState systemState_ = SystemState::Initializing;
@@ -133,7 +136,7 @@ namespace mapping
         mutable std::map<uint32_t, std::shared_ptr<open3d::geometry::PointCloud>> keyframeSubmaps_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframePoses_;
         mutable std::map<uint32_t, std::shared_ptr<gtsam::Pose3>> keyframeImuPoses_;
-        mutable std::map<uint32_t, double> keyframeMedianRanges_;
+        mutable std::map<uint32_t, double> keyframeMedianRanges_; // used for adaptive voxel size controller
         mutable std::map<uint32_t, double> keyframeTimestamps_;
         /// @brief whether to keep marginalized submap PCDs for visualization interfaces.
         bool collectMarginalizedSubmaps_ = false;
@@ -148,6 +151,8 @@ namespace mapping
         double temporalOffset_{0.0};        // temporal offset [s]
         /// @brief Latest estimate of the smoother after updates are completed.
         gtsam::Values smootherEstimate_;
+        // voxel size adjusted by realtime control used by the LiDAR frontend
+        double lidarFrontendVoxelSize_;
     };
 } // namespace mapping
 

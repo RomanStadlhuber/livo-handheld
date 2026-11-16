@@ -67,6 +67,42 @@ namespace mapping
         check(config.normal_consistency_threshold, LT, 1.0, "normal_consistency_threshold");
     }
 
+    /// @brief Config for the adaptive-gain `voxel_size` PD controller implemented in
+    /// ["GenZ-LIO" (Lee et. al. 2026)](https://arxiv.org/abs/2603.16273)
+    /// @details Some defaults are used from the paper while others make sense in this project.
+    struct AdaptiveVoxelizationConfig
+    {
+        /// @brief N_min, N_max, in the paper.
+        std::size_t min_pts = 1000, max_pts = 5000; // num pts
+        /// @brief \tau_{m} in the paper.
+        double range_saturation = 40; // [m]
+        /// @brief \lambda_{p}, \lambda_{d} in the paper.
+        double pts_saturation_p = 0.1, pts_saturation_d = 0.2;
+        /// @brief d_{\text{min}}, d_{\text{max}} in the paper.
+        double min_voxel_size = 0.025, max_voxel_size = 1.75;
+        /// @brief Controller gain boundaries
+        double kp_min = 5e-6, kp_max = 5e-5, kd_min = 5e-8, kd_max = 5e-7;
+    };
+
+    inline void declare_config(AdaptiveVoxelizationConfig &config)
+    {
+        using namespace config;
+        name("AdaptiveVoxelizationConfig");
+        field(config.min_pts, "min_pts");
+        field(config.max_pts, "max_pts");
+        field(config.range_saturation, "range_saturation");
+        field(config.pts_saturation_p, "pts_saturation_p");
+        field(config.pts_saturation_d, "pts_saturation_d");
+        field(config.min_voxel_size, "min_voxel_size");
+        field(config.max_voxel_size, "max_voxel_size");
+        field(config.kp_min, "kp_min");
+        field(config.kp_max, "kp_max");
+        field(config.kd_min, "kd_min");
+        field(config.kd_max, "kd_max");
+        check(config.pts_saturation_p, GT, 0.0, "pts_saturation_p");
+        check(config.pts_saturation_p, LE, 1.0, "pts_saturation_d");
+    }
+
     /// @brief Keyframe creation thresholds
     struct KeyframeConfig
     {
@@ -96,6 +132,7 @@ namespace mapping
         PlanarityCheckConfig planarity_check;
         ClusteringConfig clustering;
         KeyframeConfig keyframe;
+        AdaptiveVoxelizationConfig adaptive_voxelization;
     };
 
     inline void declare_config(LidarFrontendConfig &config)
@@ -109,6 +146,7 @@ namespace mapping
         field(config.planarity_check, "planarity_check");
         field(config.clustering, "clustering");
         field(config.keyframe, "keyframe");
+        field(config.adaptive_voxelization, "adaptive_voxelization");
         check(config.voxel_size, GT, 0.0, "voxel_size");
         check(config.knn_radius, GT, 0.0, "knn_radius");
         check(config.knn_neighbors, GT, 0, "knn_neighbors");
