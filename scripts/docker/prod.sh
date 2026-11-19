@@ -1,5 +1,6 @@
 #! /bin/bash
-docker build --network=host --target deploy -t livo:deploy .
+# keep the running container if the build fails
+docker build --network=host --target deploy -t livo:deploy . || exit 1
 # remove container if it already exists
 docker container rm --force livo-prod
 # NOTE: restart policy needs to be "always"
