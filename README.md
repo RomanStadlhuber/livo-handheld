@@ -46,7 +46,7 @@ It is important to **use the 64bit** version to maintain [compatibility with the
 
 You also need to
 
-- Configure the **LiDAR ethernet network to use a static IP** `196.168.1.2` 
+- Configure the **LiDAR ethernet network to use a static IP** `192.168.1.2`
 - Configure that same ethernet network to be a **priority above the WiFi** network
 - Configure **automounting of USB flash drives**
   - for desktop-based OS, this is done automatically after the first insertion of the drive
@@ -57,15 +57,20 @@ You also need to
 
 I have basically followed [Host a Wi-Fi hotspot with a Raspberry Pi](https://www.raspberrypi.com/tutorials/host-a-hotel-wifi-hotspot/).
 
-And the hotspot that I have used is [TP-Link WN823N](https://www.tp-link.com/de/home-networking/adapter/tl-wn823n/) which is based on the `rtl8xxxu` chipset that is conveniently **supported out of the box on debian based systems**.
+The hotspot runs on the built-in interface `wlan0`.
 
 ```bash
-wifi hotspot ssid <hotspot name> password <hotspot password> ifname wlan0
+sudo nmcli device wifi hotspot ssid <hotspot name> password <hotspot password> ifname wlan0
 ```
 
-#### Manually installing the `rtl8192eu` Chipset Driver
+#### Second WiFi interface (USB dongle)
 
-Some more info can be found on this [StackOverflow Thread](https://askubuntu.com/a/1212939)
+A [TP-Link TL-WN823N](https://www.tp-link.com/de/home-networking/adapter/tl-wn823n/) USB dongle (`wlan1`) connects the Pi to a regular WiFi network while `wlan0` hosts the hotspot.
+Its chip is the Realtek `RTL8192EU`, which the in-kernel `rtl8xxxu` driver **supports out of the box** (firmware from the preinstalled `firmware-realtek` package).
+No extra driver is needed.
+
+> **NOTE:** do not install the out-of-tree `rtl8192eu` DKMS driver.
+> It does not build on recent kernels (e.g. `6.12.115`) and makes `apt full-upgrade` fail.
 
 ### Setup DNS Hijacking
 
@@ -97,7 +102,7 @@ sudo nmcli device reapply wlan0
 Then configure `dnsmasq`, install it with
 
 ```bash
-sudo apt-update && apt-install -yq dnsmasq
+sudo apt update && sudo apt install -yq dnsmasq
 ```
 
 and create (or modify) a file named `/etc/dnsmasq.conf` with the below content
@@ -105,7 +110,7 @@ and create (or modify) a file named `/etc/dnsmasq.conf` with the below content
 ```conf
 interface=wlan0
 dhcp-range=192.168.4.10,192.168.4.100,12h
-address=/#/192.168.4.
+address=/#/192.168.4.1
 ```
 
 which tells the DNS to lease IPs in the range of `*.10` to `*.100` for 12 hours each (adapt accordingly).
