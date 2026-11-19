@@ -44,9 +44,10 @@ RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git && \
 # build & install livox SDK
 RUN cd /install/Livox-SDK2 && mkdir build && cd build && \
     cmake .. && make -j 8 && make install
-# build & install config_utilities
+# build & install config_utilities (upstream requires Boost filesystem & system since 2025-09)
+RUN apt-get update && apt-get install -y -q libboost-filesystem-dev libboost-system-dev
 RUN cd /install/config_utilities/config_utilities && mkdir build && \
-    cd build && cmake .. && make -j 8 && make install
+    cd build && cmake .. -DBUILD_TESTING=OFF && make -j 8 && make install
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
