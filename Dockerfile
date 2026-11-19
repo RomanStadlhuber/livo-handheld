@@ -37,17 +37,13 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
 ### NOTE: build will performed for both when livox driver is loaded as well!
 ### ./build.sh invokes colcon build again!
 ## colcon build --event-handlers=console_direct+
-### Install Livox SDK & ROS driver + config_utilities
+### Install Livox SDK & ROS driver
+# NOTE: config_utilities (needed only by the mapping package) is installed in Dockerfile.mapping
 WORKDIR /install
-RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git && \
-    git clone https://github.com/MIT-SPARK/config_utilities.git
+RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git
 # build & install livox SDK
 RUN cd /install/Livox-SDK2 && mkdir build && cd build && \
     cmake .. && make -j 8 && make install
-# build & install config_utilities (upstream requires Boost filesystem & system since 2025-09)
-RUN apt-get update && apt-get install -y -q libboost-filesystem-dev libboost-system-dev
-RUN cd /install/config_utilities/config_utilities && mkdir build && \
-    cd build && cmake .. -DBUILD_TESTING=OFF && make -j 8 && make install
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/Livox-SDK/livox_ros_driver2.git
 # NOTE: PCL is required as a dependency by the livox ROS driver!
