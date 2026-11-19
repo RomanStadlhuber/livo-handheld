@@ -52,14 +52,16 @@ You also need to
   - for desktop-based OS, this is done automatically after the first insertion of the drive
   - your drive **must be listed** under `/media/${USER}/<drive-name>`, only that way the webapp will find it!
   - reboot once, leaving the flash drive plugged in and make sure it is still accessible
-- Cap the kernel write-back buffer (see below)
+- Format the flash drive as **exFAT** and cap the kernel write-back buffer (see below)
 
-### Cap the kernel write-back buffer
+### USB recording: exFAT + write-back cap
 
-By default, the kernel keeps hundreds of MB of unwritten recording data in RAM.
-A FAT32 stick is mounted with the `flush` option, so closing each 1 GB bag split must first write all of it to the stick.
-This stalled the recorder for 7–14 s per split and dropped all topics in that time.
-With a fixed cap, the kernel writes continuously and the gap at a split falls to under 1 s.
+Both are needed, else the recorder drops **all topics for several seconds at every 1 GB bag split**:
+
+- **exFAT, not FAT32:** Linux mounts FAT32 with `flush`, so each split blocks until all buffered data is on the stick. exFAT still works on Windows.
+- **Write-back cap:** by default, the kernel buffers hundreds of MB in RAM. The cap makes it write continuously.
+
+Measured gap at a split: 6.8 s (FAT32) → 0.65 s (FAT32 + cap) → none (exFAT + cap).
 
 ```bash
 printf "vm.dirty_background_bytes = 33554432\nvm.dirty_bytes = 134217728\n" | sudo tee /etc/sysctl.d/90-livo-writeback.conf
