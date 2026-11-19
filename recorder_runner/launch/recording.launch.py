@@ -69,6 +69,8 @@ def generate_launch_description() -> LaunchDescription:
                     "width": 640,  # 1456,
                     "height": 480,  # 1088,
                     "format": format_param,
+                    # fix the frame time to 100 ms (10 Hz), else auto-exposure lowers the rate in dim light
+                    "FrameDurationLimits": [100000, 100000],
                 }
             ],
             extra_arguments=[{"use_intra_process_comms": True}],
