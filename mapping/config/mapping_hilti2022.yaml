@@ -1,0 +1,108 @@
+# HILTI SLAM Challenge 2022 (handheld Phasma: Hesai PandarXT-32 + Bosch BMI085 IMU)
+# based on mapping_hilti.yaml (2023), with the 2022 extrinsics from
+# calibration/calibration_files/lidar_calibration.yaml
+backend:
+  sliding_window_size: 14 # [keyframes]
+  init_time_window: 2.0 # [sec.]
+  solver_iterations: 2
+  isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
+
+lidar_frontend:
+  voxel_size: 0.5 # [m]
+  undistort: false # generic LiDAR time offsets currently not supported
+  knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
+  knn_neighbors: 5
+  normal_consistency_threshold: 0.85 # [0-1], accepting new points based updated normal consistency
+  # hyperparameters for adaptive voxelization setpoint function,
+  # according to "GenZ-LIO" by Lee et. al, https://arxiv.org/abs/2603.16273
+  # NOTE: values copied from mapping_mid360.yaml, not yet tuned for HILTI
+  adaptive_voxelization:
+      min_pts: 2000 # min KF points count, N_min in the paper
+      max_pts: 5000 # max KF points count, N_max in the paper
+      range_saturation: 30 # [m], is \tau_{\bar{m}} in the paper
+      # scaling saturation factors for the P and D terms of the controller
+      # these determine how quickly the adaptive gain terms saturate
+      # a smaller value will saturate (and thus scale) that gain faster
+      pts_saturation_p: 0.1 # in (0; 1], \lambda_{p} in the paper
+      pts_saturation_d: 0.2 # in (0; 1], \lambda_{d} in the paper
+      # min and max voxel size to bound the effect of the controller
+      min_voxel_size: 0.5
+      max_voxel_size: 1.5
+      kp_min: 5e-6
+      kp_max: 5e-5
+      kd_min: 5e-8
+      kd_max: 5e-7
+  planarity_check:
+    linearity: 0.3
+    planarity: 0.3
+  clustering:
+    min_points: 5
+    max_points: 20
+    max_plane_thickness: 0.004 # [m]^2, NOTE: needs to be squared, residuals & thickness values are too
+    sampling_voxel_size: 2.5 # [m], voxel size to use for cluster supplementation (0 = all)
+    insert_lag: 0 # keyframe delay to use when inserting new clusters from keyframes
+  keyframe:
+    thresh_distance: 0.2 # [m]
+    thresh_angle: 0.1745 # [rad]
+    # IMPORTANT:
+    # during testing on the HILTI SLAM datasets, sometimes keyframes are selected based on
+    # elapsed no. of scans, but no preintegration factor can be created to constrain the velocity
+    # an IndeterminantLinearSystemException will likely arise on variable v<N> because of this
+    thresh_elapsed_scans: 6
+
+camera_frontend:
+  color_space: RGB # can be RGB or BGR (both 8-bit)
+  colorize_scans: false # if enabled, will colorize points within the image
+  sync_tolerance: 0.01 # [sec.], tolerance for syncing images to LiDAR scans
+  keepalive_window: 0.6 # [sec.], how long images are kept for sync before being discarded
+
+point_filter:
+  min_distance: 2.5 # [m]
+  max_distance: 100.0 # [m]
+
+extrinsics:
+  temporal_calibration_enabled: false
+  extrinsic_calibration_enabled: false
+  imu_T_lidar: # initial guess for (or constant) extrinsic IMU-LiDAR calibration
+    translation: [-0.001, -0.00855, 0.055] # [m]
+    rotation: [0.7071068, -0.7071068, 0.0, 0.0] # hamilton quaternion (x, y, z, w)
+  imu_t_lidar: 0.0 # initial guess for (or constant) temporal IMU-LiDAR offset, not given for 2022
+  imu_T_camera: # currently unused
+    translation: [0, 0, 0]
+    rotation: [0, 0, 0, 1] # (x, y, z, w)
+    
+intrinsics:
+  camera:
+    model: "PinholeRadTan" # or "PinholeEquidistant", but not supported yet
+    pinhole_parameters: # 640x480
+      fx: 807.406
+      fy: 806.768
+      cx: 327.545
+      cy: 233.247
+    distortion_coefficients:
+      - -0.501859
+      - 0.270368
+      - 0.000114465
+      - -0.00185591
+
+bundle_adjustment:
+  submap_min_distance: 0.6      # [m], min travel from last accepted submap
+  submap_min_angle: 0.25       # [rad], min rotation from last accepted submap
+  # IMPORTANT: should be larger than frontend voxel size!!
+  icp_max_correspondence_distance: 1.0  # [m]
+  icp_iterations: 6
+  refinement_voxel_size: 0.2    # [m]
+  loop_closure_search_radius: 15.0  # [m], max centroid distance for non-sequential loop closure
+  loop_closure_min_fitness: 0.6
+  convergence_pose_delta_translation: 0.02 # [m]
+  convergence_pose_delta_rotation: 0.01    # [rad]
+  max_align_iterations: 20
+  scan_to_map_registration:
+    aabb_inflation_margin: 0.25  # [m], compensates for odometry drift at submap boundaries
+    max_candidates: 5
+    cache_voxel_size: 0.15       # [m], voxel size for the merged reference map
+    voxel_sizes: [0.4, 0.2, -1.0]                 # [m] per ICP scale, strictly decreasing, -1 = original
+    max_correspondence_distances: [1.0, 0.5, 0.2] # [m] per ICP scale
+    max_iterations_per_scale: [30, 15, 10]
+    fitness_threshold: 0.1       # min inlier ratio to accept registration result
+
