@@ -71,6 +71,8 @@ def generate_launch_description() -> LaunchDescription:
                     "format": format_param,
                     # fix the frame time to 100 ms (10 Hz), else auto-exposure lowers the rate in dim light
                     "FrameDurationLimits": [100000, 100000],
+                    # short exposure mode: max 30 ms exposure, raises gain instead (less motion blur)
+                    "AeExposureMode": 1,
                 }
             ],
             extra_arguments=[{"use_intra_process_comms": True}],
