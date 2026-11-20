@@ -15,6 +15,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
 RUN apt-get update && apt-get install -y --no-install-recommends gnupg neovim byobu mesa-utils \
     ipython3 python3-pip
 RUN pip install pre-commit
+# the repo is bind-mounted from the host (owned by the host user), let root run git & pre-commit in it
+RUN git config --global --add safe.directory /ros2_ws/src/livo
 # install GTSAM pre-built
 # see also: https://gtsam.org/get_started/
 RUN add-apt-repository ppa:borglab/gtsam-release-4.2

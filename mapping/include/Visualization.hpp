@@ -31,19 +31,14 @@ namespace mapping
             refreshWindow();
         }
 
-        void addSubmap(
-            const uint32_t keyframeId,
-            const Eigen::Matrix4d &pose,
-            const std::shared_ptr<open3d::geometry::PointCloud> &pcdSubmap);
+        void addSubmap(const uint32_t keyframeId, const Eigen::Matrix4d &pose,
+                       const std::shared_ptr<open3d::geometry::PointCloud> &pcdSubmap);
 
-        void updateSubmap(
-            const uint32_t keyframeId,
-            const Eigen::Matrix4d &pose
-            // NOTE: pointcloud should be updated from mapping system via smart pointer
+        void updateSubmap(const uint32_t keyframeId, const Eigen::Matrix4d &pose
+                          // NOTE: pointcloud should be updated from mapping system via smart pointer
         );
 
-        void removeSubmap(
-            const uint32_t keyframeId);
+        void removeSubmap(const uint32_t keyframeId);
 
         void refreshWindow();
 

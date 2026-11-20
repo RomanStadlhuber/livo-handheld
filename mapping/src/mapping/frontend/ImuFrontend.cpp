@@ -7,7 +7,7 @@ namespace mapping
 {
     ImuFrontend::ImuFrontend()
     {
-         auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
+        auto params = gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU();
         // noise values from:
         // https://github.com/RomanStadlhuber/mid360_docker/blob/main/mid360_runner/config/mapping_mid360.yaml#L13
         constexpr double
@@ -15,8 +15,7 @@ namespace mapping
             accelerometerNoise = 0.05,
             gyroscopeNoise = 0.005,
             // bias random walk noise
-            accelBiasRandomWalk = 0.0005,
-            gyroBiasRandomWalk = 0.00005;
+            accelBiasRandomWalk = 0.0005, gyroBiasRandomWalk = 0.00005;
         // sensor readout noise
         params->accelerometerCovariance = gtsam::I_3x3 * std::pow(accelerometerNoise, 2);
         params->gyroscopeCovariance = gtsam::I_3x3 * std::pow(gyroscopeNoise, 2);
@@ -31,10 +30,8 @@ namespace mapping
         preintegrator_ = gtsam::PreintegratedCombinedMeasurements(params, priorImuBias);
     }
 
-    void ImuFrontend::initializeFromStatic(
-        const double &accVariance,
-        const double &gyroVariance,
-        const Eigen::Vector3d &gyroBiasMean)
+    void ImuFrontend::initializeFromStatic(const double &accVariance, const double &gyroVariance,
+                                           const Eigen::Vector3d &gyroBiasMean)
     {
         if (isInitialized_)
             throw std::runtime_error("::: [ERROR] Tried to initialize (static) IMU frontend twice. :::");
@@ -48,7 +45,8 @@ namespace mapping
     gtsam::NavState ImuFrontend::preintegrateIMU(const States &states, Buffers &buffers)
     {
         if (!isInitialized_)
-            throw std::runtime_error("::: [ERROR] Tried to preintegrate IMU measurements without initializing the IMU frontend. :::");
+            throw std::runtime_error(
+                "::: [ERROR] Tried to preintegrate IMU measurements without initializing the IMU frontend. :::");
         // Lock the buffers for accessing values
         std::unique_lock<std::mutex> lockImuBuffer(buffers.getMtxImuBuffer());
         std::map<double, std::shared_ptr<ImuData>> &imuBuffer = buffers.getImuBuffer();
@@ -64,7 +62,8 @@ namespace mapping
         for (auto imuIt = imuBuffer.begin(); imuIt != imuBuffer.end(); ++imuIt)
         {
             const auto [timestamp, u] = *imuIt;
-            const double dt = imuIt == imuBuffer.begin() ? timestamp - states.tLastImu_ : timestamp - std::prev(imuIt)->first;
+            const double dt =
+                imuIt == imuBuffer.begin() ? timestamp - states.tLastImu_ : timestamp - std::prev(imuIt)->first;
             // Integrate measurement
             preintegrator_.integrateMeasurement(u->acceleration, u->angular_velocity, dt);
         }
@@ -74,9 +73,8 @@ namespace mapping
         imuBuffer.clear();
         lockImuBuffer.unlock();
 
-        const gtsam::NavState w_X_propagated = preintegrator_.predict(
-            states.getPreintegrationRefState(),
-            states.getCurrentBias());
+        const gtsam::NavState w_X_propagated =
+            preintegrator_.predict(states.getPreintegrationRefState(), states.getCurrentBias());
         return w_X_propagated;
     }
 
@@ -93,7 +91,8 @@ namespace mapping
 
         // Undistort incoming scans w.r.t. the last keyframe pose & buffer them for new keyframe creation
         // Delta pose to last submap at preintegrated state / last IMU time
-        gtsam::Pose3 kf_T_prop = states.lastKeyframePose().between(states.getCurrentState().pose().compose(states.getImuToLidarExtrinsic()));
+        gtsam::Pose3 kf_T_prop =
+            states.lastKeyframePose().between(states.getCurrentState().pose().compose(states.getImuToLidarExtrinsic()));
 
         const double tLastKeyframe = states.lastKeyframeTimestamp();
         // time delta between last keyframe and new preintegration
@@ -125,11 +124,10 @@ namespace mapping
             gtsam::Pose3 lastScan_T_currScan = deltaPoseLastScanToKeyframe.between(kf_T_scan);
             const double dtScanToLastScan = tScan - tLastScan;
             // velocity between subsequent scans (deltaPose / deltaTime)
-            const gtsam::Vector3
-                scanAngVel = gtsam::Rot3::Logmap(lastScan_T_currScan.rotation()) / dtScanToLastScan,
-                scanLinVel = lastScan_T_currScan.translation() / dtScanToLastScan;
+            const gtsam::Vector3 scanAngVel = gtsam::Rot3::Logmap(lastScan_T_currScan.rotation()) / dtScanToLastScan,
+                                 scanLinVel = lastScan_T_currScan.translation() / dtScanToLastScan;
             // undistort scan, if enabled
-            if(config.lidar_frontend.undistort)
+            if (config.lidar_frontend.undistort)
                 for (std::size_t i = 0; i < scan->points.size(); ++i)
                 {
                     const Eigen::Vector3d pt = scan->points[i];
@@ -146,8 +144,10 @@ namespace mapping
              * Convert scan to pointcloud, voxelize and buffer with relative pose to last keyframe
              * NOTE: the undistorted scan pointcloud is not yet transformed as this
              */
-            open3d::geometry::PointCloud pcdScan = Scan2PCD(scan, config.point_filter.min_distance, config.point_filter.max_distance);
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized = pcdScan.VoxelDownSample(config.lidar_frontend.voxel_size);
+            open3d::geometry::PointCloud pcdScan =
+                Scan2PCD(scan, config.point_filter.min_distance, config.point_filter.max_distance);
+            std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScanVoxelized =
+                pcdScan.VoxelDownSample(config.lidar_frontend.voxel_size);
 
             // Buffer undistorted scan, carrying the camera association forward
             buffers.bufferScan(kf_T_scan, ptrPcdScanVoxelized, scan->syncedCameraData);
@@ -161,4 +161,4 @@ namespace mapping
         lidarBuffer.clear();
         lockLidarBuffer.unlock();
     }
-}
+} // namespace mapping
