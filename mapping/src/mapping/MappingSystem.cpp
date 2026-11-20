@@ -127,9 +127,6 @@ namespace mapping
         w_R_i0.col(2) = zAxis;
         w_R_i0.transposeInPlace();
 
-        gtsam::Pose3 w_T_i0{gtsam::Rot3(w_R_i0), gtsam::Point3(0, 0, 0)};
-        gtsam::Pose3 w_T_l0 = w_T_i0.compose(imu_T_lidar_);
-
         // create initial submap from all buffered lidar scans
         open3d::geometry::PointCloud newSubmap;
         for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
@@ -137,12 +134,12 @@ namespace mapping
             open3d::geometry::PointCloud pcdScan =
                 Scan2PCD(it->second, config_.point_filter.min_distance, config_.point_filter.max_distance);
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(states_.getVoxelSize());
-            ptrPcdScan->Transform(w_T_l0.matrix());
             newSubmap += *ptrPcdScan;
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
             newSubmap.VoxelDownSample(states_.getVoxelSize());
 
+        gtsam::Pose3 w_T_i0{gtsam::Rot3(w_R_i0), gtsam::Point3(0, 0, 0)};
         // modifies states_: stores keyframe submap, pose, timestamp, increments keyframe counter
         const uint32_t idxNewKF = states_.createKeyframeSubmap(w_T_i0, 0.0, ptrNewSubmapVoxelized);
         // modifies featureManager_: creates premature clusters for each point in the keyframe
