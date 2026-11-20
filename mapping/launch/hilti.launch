@@ -1,9 +1,11 @@
 <launch>
+    <!-- mapper config file, e.g. mapping_hilti2022.yaml for the HILTI SLAM challenge 2022 -->
+    <arg name="mapper_config" default="/ros2_ws/src/livo/mapping/config/mapping_hilti.yaml" />
     <!-- SLAM -->
     <node pkg="mapping" exec="mapper" name="mapper_node" output="screen">
         <param name="use_sim_time" value="true" />
-        <param name="mapper_config" value="/ros2_ws/src/livo/mapping/config/mapping_hilti.yaml" />
-        <!-- configuration for HILTI SLAM challenge 2023 dataset format -->
+        <param name="mapper_config" value="$(var mapper_config)" />
+        <!-- topics are the same for the HILTI SLAM challenge 2022 and 2023 dataset format -->
         <param name="topic_imu" value="/alphasense/imu" />
         <param name="scaling_imu" value="1.0" />
         <param name="topic_lidar" value="/hesai/pandar" />
