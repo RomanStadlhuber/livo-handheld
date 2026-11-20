@@ -2,32 +2,19 @@
 
 namespace mapping
 {
-    void CameraFrontend::setColorSpace(mapping::CameraColorSpace colorSpace)
-    {
-        colorSpace_ = colorSpace;
-    }
+    void CameraFrontend::setColorSpace(mapping::CameraColorSpace colorSpace) { colorSpace_ = colorSpace; }
 
-    void CameraFrontend::setCalibration(
-        mapping::CameraCalibrationType calibrationType,
-        float fx,
-        float fy,
-        float cx,
-        float cy,
-        std::vector<float> distortionCoefficients)
+    void CameraFrontend::setCalibration(mapping::CameraCalibrationType calibrationType, float fx, float fy, float cx,
+                                        float cy, std::vector<float> distortionCoefficients)
     {
         calibrationType_ = calibrationType;
-        K_ = (cv::Mat_<double>(3, 3) <<
-            fx, 0,  cx,
-            0,  fy, cy,
-            0,  0,  1);
+        K_ = (cv::Mat_<double>(3, 3) << fx, 0, cx, 0, fy, cy, 0, 0, 1);
         distCoeffs_ = cv::Mat(distortionCoefficients, /*copyData=*/true);
         hasCalibration_ = true;
     }
 
-    void CameraFrontend::colorizeInPlace(
-        std::shared_ptr<open3d::geometry::PointCloud> ptrPcd,
-        Eigen::Isometry3d camera_T_lidar,
-        const CameraData &cameraData)
+    void CameraFrontend::colorizeInPlace(std::shared_ptr<open3d::geometry::PointCloud> ptrPcd,
+                                         Eigen::Isometry3d camera_T_lidar, const CameraData &cameraData)
     {
         // convert color space if it doesn't match the frontend's configured color space
         cv::Mat img;
@@ -69,7 +56,7 @@ namespace mapping
 
         // project to image plane (points are already in camera frame, so rvec/tvec are identity)
         std::vector<cv::Point2d> projected;
-        cv::projectPoints(pointsCam, /*rvec=*/ vec0, /*tvec=*/ vec0, K_, distCoeffs_, projected);
+        cv::projectPoints(pointsCam, /*rvec=*/vec0, /*tvec=*/vec0, K_, distCoeffs_, projected);
 
         // sample pixel color for each point within image bounds
         for (int j = 0; j < static_cast<int>(projected.size()); ++j)
@@ -83,10 +70,8 @@ namespace mapping
         }
     }
 
-    void CameraFrontend::colorizeSubmapInPlace(
-        const States &states,
-        Buffers &buffers,
-        std::shared_ptr<open3d::geometry::PointCloud> ptrPcd)
+    void CameraFrontend::colorizeSubmapInPlace(const States &states, Buffers &buffers,
+                                               std::shared_ptr<open3d::geometry::PointCloud> ptrPcd)
     {
         // find the most recent synced image across all buffered scans
         /** NOTE: using an image from an earlier scan introduces a small geometric error since
@@ -105,19 +90,15 @@ namespace mapping
         if (syncedImage == nullptr)
             return;
 
-        // build extrinsics between LiDAR and camera 
-        const Eigen::Isometry3d
-            imu_T_camera = Eigen::Isometry3d(states.getImuToCameraExtrinsic().matrix()),
-            imu_T_lidar = Eigen::Isometry3d(states.getImuToLidarExtrinsic().matrix()),
-            camera_T_lidar = imu_T_camera.inverse() * imu_T_lidar;
+        // build extrinsics between LiDAR and camera
+        const Eigen::Isometry3d imu_T_camera = Eigen::Isometry3d(states.getImuToCameraExtrinsic().matrix()),
+                                imu_T_lidar = Eigen::Isometry3d(states.getImuToLidarExtrinsic().matrix()),
+                                camera_T_lidar = imu_T_camera.inverse() * imu_T_lidar;
 
         colorizeInPlace(ptrPcd, camera_T_lidar, *syncedImage);
     }
 
-    void CameraFrontend::syncCameraToLiDAR(
-        const States &states,
-        Buffers &buffers,
-        const MappingConfig &config)
+    void CameraFrontend::syncCameraToLiDAR(const States &states, Buffers &buffers, const MappingConfig &config)
     {
         auto &lidarBuffer = buffers.getLidarBuffer();
         auto &cameraBuffer = buffers.getCameraBuffer();
@@ -183,4 +164,4 @@ namespace mapping
                 lidarData->syncedCameraData = bestImg;
         }
     }
-}
+} // namespace mapping

@@ -34,25 +34,18 @@ namespace mapping
         /// @param planeCenter Plane center in the world frame
         /// @param noiseModel Point-to-plane noise model
         /// @param clusterId Identifier for the cluster associated with this factor, used for lookup to replace/delete.
-        PointToPlaneFactor(
-            const gtsam::KeyVector &keys,
-            const gtsam::Pose3 &imu_T_lidar,
-            const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
-            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-            const gtsam::SharedNoiseModel &noiseModel,
-            const uint32_t &clusterId);
+        PointToPlaneFactor(const gtsam::KeyVector &keys, const gtsam::Pose3 &imu_T_lidar,
+                           const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
+                           const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                           const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                           const gtsam::SharedNoiseModel &noiseModel, const uint32_t &clusterId);
 
         /// @brief Extended constructor with optional calibration keys for temporal and extrinsic calibration.
         PointToPlaneFactor(
-            const gtsam::KeyVector &poseKeys,
-            const gtsam::Pose3 &imu_T_lidar,
+            const gtsam::KeyVector &poseKeys, const gtsam::Pose3 &imu_T_lidar,
             const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
-            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-            const gtsam::SharedNoiseModel &noiseModel,
-            const uint32_t &clusterId,
-            boost::optional<gtsam::Key> dtKey,
+            const std::shared_ptr<Eigen::Vector3d> &planeNormal, const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+            const gtsam::SharedNoiseModel &noiseModel, const uint32_t &clusterId, boost::optional<gtsam::Key> dtKey,
             boost::optional<gtsam::Key> extrinsicKey,
             const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists = {});
 
@@ -60,10 +53,8 @@ namespace mapping
         /// @param values Current estimates of all variables in the factor graph
         /// @param H Optional Jacobians w.r.t. each pose (one matrix per key)
         /// @return Error vector with one element per point measurement
-        gtsam::Vector unwhitenedError(
-            const gtsam::Values &values,
-            boost::optional<std::vector<gtsam::Matrix> &> H = boost::none) const override;
-
+        gtsam::Vector unwhitenedError(const gtsam::Values &values,
+                                      boost::optional<std::vector<gtsam::Matrix> &> H = boost::none) const override;
 
         /// @brief Linearize the point-to-plane residual into a JacobianFactor.
         ///
@@ -85,40 +76,30 @@ namespace mapping
         gtsam::NonlinearFactor::shared_ptr clone() const override;
 
         ///@brief Add a new keyframe to the cluster factor.
-        void add(
-            const gtsam::Key &key,
-            const Eigen::Vector3d &lidar_point,
-            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-            const gtsam::SharedNoiseModel &noiseModel);
+        void add(const gtsam::Key &key, const Eigen::Vector3d &lidar_point,
+                 const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                 const std::shared_ptr<Eigen::Vector3d> &planeCenter, const gtsam::SharedNoiseModel &noiseModel);
 
         /// @brief Add a new keyframe with an associated twist for temporal calibration.
-        void add(
-            const gtsam::Key &key,
-            const Eigen::Vector3d &lidar_point,
-            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-            const gtsam::SharedNoiseModel &noiseModel,
-            const std::pair<Eigen::Vector3d, Eigen::Vector3d> &twist);
+        void add(const gtsam::Key &key, const Eigen::Vector3d &lidar_point,
+                 const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                 const std::shared_ptr<Eigen::Vector3d> &planeCenter, const gtsam::SharedNoiseModel &noiseModel,
+                 const std::pair<Eigen::Vector3d, Eigen::Vector3d> &twist);
 
         ///@brief Remove a keyframe from the cluster factor.
-        void remove(
-            const gtsam::Key &key,
-            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-            const gtsam::SharedNoiseModel &noiseModel);
-
+        void remove(const gtsam::Key &key, const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                    const std::shared_ptr<Eigen::Vector3d> &planeCenter, const gtsam::SharedNoiseModel &noiseModel);
 
         /// @brief Keys did not change, but new estiamtes lead to updated plane parameters.
-        void updatePlaneParameters(
-            const std::shared_ptr<Eigen::Vector3d> &planeNormal,
-            const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-            const gtsam::SharedNoiseModel &noiseModel);
+        void updatePlaneParameters(const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                                   const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                                   const gtsam::SharedNoiseModel &noiseModel);
 
         /// @brief Diagnostic usage for evaluating error. Use for debugging.
         double evaluateErrorDiagnostic(const gtsam::Values &values) const;
 
-        void print(const std::string &s = "", const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
+        void print(const std::string &s = "",
+                   const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
 
         // trigger, cannot (and should not) be undone
         void markInvalid() const { isInvalid_ = true; }
@@ -129,18 +110,15 @@ namespace mapping
         /// as that will be created by the backend on its own. But it is meant to provide a prior
         /// given the fact that with the explicit marginalization where the latest key is removed,
         /// there would be no other constraint than the IMU preintegration which is too weak.
-        gtsam::LinearContainerFactor::shared_ptr createMarginalizationFactor(
-            const gtsam::Values& values,
-            const gtsam::Key &keyToMarginalize
-        ) const;
+        gtsam::LinearContainerFactor::shared_ptr createMarginalizationFactor(const gtsam::Values &values,
+                                                                             const gtsam::Key &keyToMarginalize) const;
 
     private:
-        std::pair<gtsam::Vector, std::vector<gtsam::Matrix>> computeErrorAndJacobians(const gtsam::Values &values) const;
+        std::pair<gtsam::Vector, std::vector<gtsam::Matrix>>
+        computeErrorAndJacobians(const gtsam::Values &values) const;
 
-        static gtsam::KeyVector buildFullKeys(
-            const gtsam::KeyVector &poseKeys,
-            boost::optional<gtsam::Key> dtKey,
-            boost::optional<gtsam::Key> extrinsicKey);
+        static gtsam::KeyVector buildFullKeys(const gtsam::KeyVector &poseKeys, boost::optional<gtsam::Key> dtKey,
+                                              boost::optional<gtsam::Key> extrinsicKey);
 
     private:
         gtsam::Pose3 imu_T_lidar_;
@@ -156,9 +134,9 @@ namespace mapping
         const uint32_t clusterId_;
 
     private:
-        size_t numPoseKeys_;                        // boundary: keys_[0..numPoseKeys_) are pose keys
-        boost::optional<gtsam::Key> dtKey_;         // T(0) when temporal calibration enabled
-        boost::optional<gtsam::Key> extrinsicKey_;  // E(0) when extrinsic calibration enabled
+        size_t numPoseKeys_;                       // boundary: keys_[0..numPoseKeys_) are pose keys
+        boost::optional<gtsam::Key> dtKey_;        // T(0) when temporal calibration enabled
+        boost::optional<gtsam::Key> extrinsicKey_; // E(0) when extrinsic calibration enabled
         /// @brief Per-keyframe precomputed twist for temporal extrapolation.
         /// twist = Logmap(delta_T_preintegration) / dt_since_last_keyframe.
         /// Stored as (angular_velocity, linear_velocity) in IMU frame.
