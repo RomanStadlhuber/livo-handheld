@@ -8,7 +8,7 @@ backend:
   isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
 
 lidar_frontend:
-  voxel_size: 0.5 # [m]
+  voxel_size: 0.25 # [m]
   undistort: false # generic LiDAR time offsets currently not supported
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
@@ -26,7 +26,7 @@ lidar_frontend:
       pts_saturation_p: 0.1 # in (0; 1], \lambda_{p} in the paper
       pts_saturation_d: 0.2 # in (0; 1], \lambda_{d} in the paper
       # min and max voxel size to bound the effect of the controller
-      min_voxel_size: 0.5
+      min_voxel_size: 0.025
       max_voxel_size: 1.5
       kp_min: 5e-6
       kp_max: 5e-5
@@ -57,7 +57,7 @@ camera_frontend:
   keepalive_window: 0.6 # [sec.], how long images are kept for sync before being discarded
 
 point_filter:
-  min_distance: 2.5 # [m]
+  min_distance: 0.5 # [m]
   max_distance: 100.0 # [m]
 
 extrinsics:
