@@ -37,6 +37,10 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/install/open3d-devel/lib
 ```
 
 - bag reader mode: `$ ./build/mapper --config <path/to/config.yaml> --bag <path/to/bag>`
+  - optional: `--topic-imu <topic>` (default `/livox/imu`), `--topic-lidar <topic>` (default `/livox/lidar`),
+    `--scaling-imu <factor>` (default `9.81`, Livox IMU reports in `[g]`), see `--help`
+  - the LiDAR message type (Livox `CustomMsg` or `sensor_msgs/PointCloud2`) is detected from the bag
+  - e.g. HILTI 2022: `--topic-imu /alphasense/imu --topic-lidar /hesai/pandar --scaling-imu 1.0`
 - node: currently via `ros2 launch mapping mapper_node.launch` (includes RViz)
 
 ### Configuration
