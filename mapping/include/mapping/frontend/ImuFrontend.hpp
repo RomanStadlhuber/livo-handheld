@@ -28,9 +28,12 @@ namespace mapping
         /// all non-zero readings represent sensor noise.
         /// @param accVariance Variance of the accelerometer noise over the static period.
         /// @param gyroVariance Variance of the gyroscope noise over the static period.
-        /// @param gyroBiasMean Mean of the gyroscope measurements, used as initial bias estimate
+        /// @param initialBias Initial bias estimate from the static period (accelerometer and gyroscope).
         void initializeFromStatic(const double &accVariance, const double &gyroVariance,
-                                  const Eigen::Vector3d &gyroBiasMean);
+                                  const gtsam::imuBias::ConstantBias &initialBias);
+
+        /// @brief Gravity magnitude [m/s^2] that the preintegrator assumes in the navigation frame.
+        double getGravityMagnitude() const { return preintegrator_.params()->n_gravity.norm(); }
 
         /// @brief Lock the IMU buffer and preintegrate all measurements within it.
         /// @param states The current system states, used for preintegrator reset and bias updates.

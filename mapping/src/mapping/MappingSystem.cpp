@@ -161,9 +161,20 @@ namespace mapping
         accVariance /= (numImuSamples - 1.0);
         gyroVariance /= (numImuSamples - 1.0);
 
+        /* At rest, the accelerometer measures only gravity, so any difference between the measured and the
+         * assumed gravity magnitude is accelerometer bias. Only the part along gravity is observable here,
+         * the remaining (horizontal) part is absorbed into the initial roll & pitch.
+         * Without this, a magnitude error (e.g. |a| = 9.66 on the HILTI 2022 IMU) is integrated as a
+         * constant vertical acceleration and the trajectory drifts up or down.
+         */
+        const double gravityMagnitude = imuFrontend_.getGravityMagnitude();
+        const Eigen::Vector3d accBiasMean = accMean - gravityMagnitude * accMean.normalized();
+        LOG(INFO, "static init: |acc| = " << accMean.norm() << " m/s^2, assumed gravity = " << gravityMagnitude
+                                          << " m/s^2, initial accelerometer bias = " << accBiasMean.transpose());
+        gtsam::imuBias::ConstantBias priorImuBias{accBiasMean, gyroBiasMean};
         // modifies imuFrontend_: calibrates preintegrator noise and resets with computed bias
-        imuFrontend_.initializeFromStatic(accVariance, gyroVariance, gyroBiasMean);
-        gtsam::imuBias::ConstantBias priorImuBias{Eigen::Vector3d::Zero(), gyroBiasMean};
+        imuFrontend_.initializeFromStatic(accVariance, gyroVariance, priorImuBias);
+        states_.setCurrentBias(priorImuBias);
         gtsam::NavState x0{w_T_i0, gtsam::Vector3::Zero()};
         // build prior factors for the first keyframe
         gtsam::NonlinearFactorGraph priors = constructSystemPriors(idxNewKF, x0, priorImuBias);
@@ -399,8 +410,15 @@ namespace mapping
         priorPoseSigma << 0.0175, 0.0175, 0.0873, 0.1, 0.1, 0.1; // rpy xyz
         priors.addPrior(X(idxKeyframe), xPrior.pose(), gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
         priors.addPrior(V(idxKeyframe), xPrior.velocity(), gtsam::noiseModel::Isotropic::Sigma(3, 1e-2));
+        /* Bias order is [acc | gyro]. The accelerometer bias is only partly observable during static init
+         * (along gravity), so its prior must leave room for the remaining offset (BMI085 zero-g offset is
+         * in the order of 0.1-0.2 m/s^2). The gyro bias is well observed at rest, so its prior stays tight.
+         */
+        constexpr double biasPriorSigmaAcc = 0.05, biasPriorSigmaGyro = 1e-3; // [m/s^2], [rad/s]
+        gtsam::Vector6 biasPriorSigma;
+        biasPriorSigma << gtsam::Vector3::Constant(biasPriorSigmaAcc), gtsam::Vector3::Constant(biasPriorSigmaGyro);
         const gtsam::noiseModel::Diagonal::shared_ptr biasPriorNoise =
-            gtsam::noiseModel::Diagonal::Sigmas(1e-3 * gtsam::Vector6::Ones());
+            gtsam::noiseModel::Diagonal::Sigmas(biasPriorSigma);
         priors.addPrior(B(idxKeyframe), bPrior, biasPriorNoise);
         return priors;
     }
