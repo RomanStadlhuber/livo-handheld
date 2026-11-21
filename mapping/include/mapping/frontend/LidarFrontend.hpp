@@ -79,7 +79,7 @@ namespace mapping
         /// @brief adaptive voxel controller states
         /// **Note:** although the setpoint is a point count, for arithmetic it's beneficial
         /// keeping it a double for controller computation
-        ControllerState state_;
+        ControllerState state_{inactive};
         double currVoxelsize_{0.0}, setPointNError_{0.0}; // error must remain in state for D term
     };
 } // namespace mapping

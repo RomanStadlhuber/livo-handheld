@@ -297,5 +297,7 @@ namespace mapping
                 STREAM("\t - K_{D} = " << voxelizerGainD), STREAM("\t - \\delta{d} =" << deltaVoxelSize));
             return currVoxelsize_;
         }
+        // fix compiler warning:
+        return config.lidar_frontend.voxel_size;
     }
 } // namespace mapping
