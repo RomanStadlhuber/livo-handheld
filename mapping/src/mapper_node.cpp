@@ -15,6 +15,7 @@
 
 // Mapping
 #include <mapping/MappingSystem.hpp>
+#include <mapping/benchmarking/TrajectoryRecorder.hpp>
 
 // publishing the state
 #include <tf2_ros/transform_broadcaster.h>
@@ -528,6 +529,8 @@ struct BagOptions
     std::string topicLidar = "/livox/lidar";
     /// @brief Scaling applied to raw accelerometer readings (Livox reports in `[g]`, so default is 9.81).
     double scalingImu = 9.81;
+    /// @brief If set, write the keyframe trajectory to this file in TUM format (absolute bag timestamps).
+    std::string trajectoryOut;
 };
 
 /// @brief Strip a leading slash, so that e.g. `livox/lidar` and `/livox/lidar` match the same bag topic.
@@ -638,6 +641,15 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
         return (rclcpp::Time(stamp) - start_time).seconds();
     };
 
+    // the smoother only optimizes at keyframes, so the trajectory is recorded once per new keyframe
+    mapping::TrajectoryRecorder trajectoryRecorder;
+    uint32_t numRecordedKeyframes = 0;
+    auto recordTrajectory = [&]()
+    {
+        numRecordedKeyframes = slam.getKeyframeCount();
+        trajectoryRecorder.update(slam.getStates(), numRecordedKeyframes);
+    };
+
     size_t numImuMsgs = 0, numLidarMsgs = 0, numSkippedLidarMsgs = 0;
     double tLastMsg = 0.0;
     const auto tWallStart = std::chrono::steady_clock::now();
@@ -680,8 +692,12 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
                 slam.feedLidar(lidarData, tLastMsg);
                 slam.update();
                 ++numLidarMsgs;
+                if (!options.trajectoryOut.empty() && slam.getKeyframeCount() != numRecordedKeyframes)
+                    recordTrajectory();
             }
         }
+        if (!options.trajectoryOut.empty())
+            recordTrajectory();
     }
     catch (const std::exception &e)
     {
@@ -697,6 +713,18 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
               << numSkippedLidarMsgs << " skipped), " << slam.getKeyframeCount() << " keyframes, " << tLastMsg
               << " s of data in " << wallSeconds << " s wall-clock ("
               << (wallSeconds > 0.0 ? tLastMsg / wallSeconds : 0.0) << "x real-time)" << std::endl;
+    // also written after an error or Ctrl+C, the partial trajectory is still useful for evaluation
+    if (!options.trajectoryOut.empty() && has_start_time)
+    {
+        if (trajectoryRecorder.writeTum(options.trajectoryOut, start_time.seconds()))
+            std::cout << "Wrote " << trajectoryRecorder.size() << " keyframe poses (TUM) to " << options.trajectoryOut
+                      << std::endl;
+        else
+        {
+            std::cerr << "Error: failed to write trajectory to '" << options.trajectoryOut << "'" << std::endl;
+            failed = true;
+        }
+    }
     if (failed)
         return 1;
     if (g_shutdown_requested)
@@ -723,6 +751,8 @@ void printUsage(const char *argv0)
               << "                          the type is detected from the bag (default: /livox/lidar)\n"
               << "  --scaling-imu <factor>  scale applied to accelerometer readings,\n"
               << "                          9.81 for [g] (Livox), 1.0 for [m/s^2] (default: 9.81)\n"
+              << "  --trajectory-out <file> write keyframe poses (IMU frame) as TUM file with absolute\n"
+              << "                          bag timestamps, e.g. for evo (default: off)\n"
               << "  -h, --help              show this message" << std::endl;
 }
 
@@ -745,7 +775,7 @@ int main(int argc, char **argv)
             return 0;
         }
         const bool takesValue = arg == "--config" || arg == "--bag" || arg == "--topic-imu" || arg == "--topic-lidar" ||
-                                arg == "--scaling-imu";
+                                arg == "--scaling-imu" || arg == "--trajectory-out";
         if (!takesValue)
             continue; // e.g. ROS arguments
         if (i + 1 >= argc)
@@ -763,7 +793,7 @@ int main(int argc, char **argv)
             rclcpp::shutdown();
             return 1;
         }
-        if (arg == "--topic-imu" || arg == "--topic-lidar" || arg == "--scaling-imu")
+        if (arg == "--topic-imu" || arg == "--topic-lidar" || arg == "--scaling-imu" || arg == "--trajectory-out")
             bagOnlyOptionGiven = true;
         if (arg == "--config")
             config_path = value;
@@ -776,6 +806,8 @@ int main(int argc, char **argv)
             bagOptions.topicImu = value;
         else if (arg == "--topic-lidar")
             bagOptions.topicLidar = value;
+        else if (arg == "--trajectory-out")
+            bagOptions.trajectoryOut = value;
         else if (arg == "--scaling-imu")
         {
             try
@@ -804,8 +836,8 @@ int main(int argc, char **argv)
     }
 
     if (!use_bag && bagOnlyOptionGiven)
-        std::cerr << "Warning: --topic-imu, --topic-lidar and --scaling-imu only apply to --bag mode, the ROS node "
-                     "uses the ROS parameters topic_imu, topic_lidar and scaling_imu"
+        std::cerr << "Warning: --topic-imu, --topic-lidar, --scaling-imu and --trajectory-out only apply to --bag "
+                     "mode, the ROS node uses the ROS parameters topic_imu, topic_lidar and scaling_imu"
                   << std::endl;
 
     int exitCode = 0;
