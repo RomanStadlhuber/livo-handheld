@@ -77,12 +77,14 @@ namespace mapping
         void setCollectMarginalizedSubmaps(bool enable);
 
         /// @brief Return all frozen submaps from the global map optimizer.
+        /// @details Empty when bundle adjustment is disabled.
         std::vector<std::shared_ptr<const FrozenSubmap>> getAllFrozenSubmaps() const;
 
         /// @brief Return a snapshot of all submaps currently under optimization.
         /// @details Keyed by keyframe index.
         /// Each entry holds the current world pose and the immutable body-frame cloud.
         /// Apply pose to the cloud to obtain world-frame coordinates for visualization.
+        /// Empty when bundle adjustment is disabled.
         std::map<uint32_t, ActiveSubmap> getAllActiveSubmaps() const;
 
         /// @brief Get the current (possibly optimized) IMU-to-LiDAR extrinsic calibration.

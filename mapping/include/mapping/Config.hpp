@@ -379,6 +379,9 @@ namespace mapping
     /// @brief Bundle adjustment parameters for submap-level pose graph optimization
     struct BundleAdjustmentConfig
     {
+        // run the secondary BA thread and scan-to-map registration against its global map,
+        // disabled by default (i.e. when the key is absent) so that only the sliding-window odometry runs
+        bool enabled = false;
         double submap_min_distance = 5.0; // [m], min travel from last accepted submap before accepting a new one
         double submap_min_angle = 0.785;  // [rad], min rotation (~45 deg) from last accepted submap
         double icp_max_correspondence_distance = 1.5;     // [m], for pairwise ICP alignment
@@ -396,6 +399,7 @@ namespace mapping
     {
         using namespace config;
         name("BundleAdjustmentConfig");
+        field(config.enabled, "enabled");
         field(config.submap_min_distance, "submap_min_distance", "m");
         field(config.submap_min_angle, "submap_min_angle", "rad");
         field(config.icp_max_correspondence_distance, "icp_max_correspondence_distance", "m");

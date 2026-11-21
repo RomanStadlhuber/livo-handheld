@@ -23,10 +23,20 @@ namespace mapping
     void MappingSystem::setConfig(const MappingConfig &config)
     {
         config_ = config;
-        bundleAdjustment_ = std::make_unique<BundleAdjustment>(config_);
-        bundleAdjustment_->startOptimizationWorker();
-        scanToMapFrontend_ = ScanToMapFrontend{*bundleAdjustment_, config_};
-        states_.setCollectMarginalizedSubmaps(true);
+        // tear down a previously configured BA (if any) before creating a new one,
+        // the scan-to-map frontend holds a raw pointer to it, the BA destructor stops and joins its worker thread
+        scanToMapFrontend_ = ScanToMapFrontend{};
+        bundleAdjustment_.reset();
+        if (config_.bundle_adjustment.enabled)
+        {
+            bundleAdjustment_ = std::make_unique<BundleAdjustment>(config_);
+            bundleAdjustment_->startOptimizationWorker();
+            scanToMapFrontend_ = ScanToMapFrontend{*bundleAdjustment_, config_};
+        }
+        else
+            LOG(DEBUG, "bundle adjustment disabled, scan-to-map registration is skipped");
+        // marginalized submaps are only consumed by BA, collecting them without BA would grow memory unbounded
+        states_.setCollectMarginalizedSubmaps(config_.bundle_adjustment.enabled);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
@@ -238,8 +248,9 @@ namespace mapping
         buffers_.getScanBuffer().clear();
 
         // snapshot the scan in LiDAR body frame before createKeyframeSubmap transforms it to world frame in-place
-        // for registerScanToMap we need the pointcloud to be in the LiDAR frame
-        const auto ptrScanBodyFrame = std::make_shared<open3d::geometry::PointCloud>(*ptrNewSubmapVoxelized);
+        // for registerScanToMap we need the pointcloud to be in the LiDAR frame (only used with BA enabled)
+        const auto ptrScanBodyFrame =
+            bundleAdjustment_ ? std::make_shared<open3d::geometry::PointCloud>(*ptrNewSubmapVoxelized) : nullptr;
 
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe =
@@ -258,9 +269,11 @@ namespace mapping
         marginalizeKeyframesOutsideSlidingWindow(idxKeyframe);
 
         // drain newly marginalized submaps into the BA pipeline
+        // NOTE: always drain (empty when collection is disabled) so nothing piles up without BA
         auto newlyMarginalized = states_.getMarginalizedSubmaps();
-        for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
-            bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
+        if (bundleAdjustment_)
+            for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
+                bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
         const bool isTracking =
@@ -278,8 +291,10 @@ namespace mapping
             return;
         }
 
-        const auto registrationPrior = scanToMapFrontend_.registerScanToMap(
-            *ptrScanBodyFrame, states_.getCurrentState().pose(), states_, idxKeyframe);
+        const auto registrationPrior =
+            bundleAdjustment_ ? scanToMapFrontend_.registerScanToMap(
+                                    *ptrScanBodyFrame, states_.getCurrentState().pose(), states_, idxKeyframe)
+                              : std::nullopt;
 
         /* Build factors and optimize. The feature manager accumulates marginalization factors
          * from the prior marginalization step and combines them with newly created/updated
@@ -330,8 +345,11 @@ namespace mapping
         pcdRecovery->Transform(world_T_lidar.inverse().matrix());
 
         gtsam::NavState w_X_recovery;
+        // scan-to-map recovery needs the BA global map, without BA go straight to the extrapolation fallback
         const std::optional<gtsam::NavState> recoveredState =
-            scanToMapFrontend_.estimateRecoveryState(*pcdRecovery, states_.getCurrentState(), states_);
+            bundleAdjustment_
+                ? scanToMapFrontend_.estimateRecoveryState(*pcdRecovery, states_.getCurrentState(), states_)
+                : std::nullopt;
 
         if (recoveredState)
         {
@@ -339,7 +357,10 @@ namespace mapping
         }
         else
         {
-            LOG(ERROR, "scan-to-map recovery failed, falling back to constant-velocity extrapolation");
+            if (bundleAdjustment_)
+                LOG(ERROR, "scan-to-map recovery failed, falling back to constant-velocity extrapolation");
+            else
+                LOG(WARN, "bundle adjustment disabled, recovering with constant-velocity extrapolation");
             const auto &imuPoses = states_.getKeyframeImuPoses();
             const auto &timestamps = states_.getKeyframeTimestamps();
             auto itLatest = imuPoses.rbegin();
@@ -489,11 +510,15 @@ namespace mapping
 
     std::vector<std::shared_ptr<const FrozenSubmap>> MappingSystem::getAllFrozenSubmaps() const
     {
+        if (!bundleAdjustment_)
+            return {};
         return bundleAdjustment_->getAllFrozenSubmaps();
     }
 
     std::map<uint32_t, ActiveSubmap> MappingSystem::getAllActiveSubmaps() const
     {
+        if (!bundleAdjustment_)
+            return {};
         return bundleAdjustment_->getAllActiveSubmaps();
     }
 

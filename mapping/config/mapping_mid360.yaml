@@ -79,6 +79,7 @@ intrinsics:
       - -0.00185591
 
 bundle_adjustment:
+  enabled: true # run the BA thread & scan-to-map registration (default false)
   submap_min_distance: 1.0      # [m], min travel from last accepted submap
   submap_min_angle: 0.4       # [rad], min rotation from last accepted submap
   # IMPORTANT: should be larger than frontend voxel size!!

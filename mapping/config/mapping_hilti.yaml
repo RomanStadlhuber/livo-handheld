@@ -6,7 +6,7 @@ backend:
 
 lidar_frontend:
   voxel_size: 0.5 # [m]
-  undistort: false # generic LiDAR time offsets currently not supported
+  undistort: false # per-point offsets are parsed from the PointCloud2 FLOAT64 "timestamp" field if present (e.g. Hesai), undistortion off pending benchmarking
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
   normal_consistency_threshold: 0.85 # [0-1], accepting new points based updated normal consistency
@@ -64,6 +64,7 @@ intrinsics:
       - -0.00185591
 
 bundle_adjustment:
+  enabled: true # run the BA thread & scan-to-map registration (default false)
   submap_min_distance: 0.6      # [m], min travel from last accepted submap
   submap_min_angle: 0.25       # [rad], min rotation from last accepted submap
   # IMPORTANT: should be larger than frontend voxel size!!
