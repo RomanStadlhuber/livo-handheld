@@ -9,7 +9,6 @@ lidar_frontend:
   undistort: true # disable for solid state LiDARs
   knn_radius: 1.5 # [m], NOTE that a larger radius significantly increases search time
   knn_neighbors: 5
-  normal_consistency_threshold: 0.8 # [0-1], accepting new points based updated normal consistency
   # hyperparameters for adaptive voxelization setpoint function,
   # according to "GenZ-LIO" by Lee et. al, https://arxiv.org/abs/2603.16273
   adaptive_voxelization:
@@ -36,6 +35,7 @@ lidar_frontend:
     min_points: 5
     max_points: 20
     max_plane_thickness: 0.004 # [m]^2, NOTE: needs to be squared, residuals & thickness values are too
+    normal_consistency_threshold: 0.8 # [0-1], accepting new points based updated normal consistency
     sampling_voxel_size: 2.5 # [m], voxel size to use for cluster supplementation (0 = all)
     insert_lag: 0 # keyframe delay to use when inserting new clusters from keyframes
   keyframe:
