@@ -16,10 +16,10 @@ if(ENABLE_DBG_CMP)
   add_compile_definitions(ENABLE_DBG_CMP)
 endif()
 
-# benchmark-only code: run output directory, git build info, telemetry call points
+# benchmark-only code: run output directory, git build info, keyframe telemetry
 # enable via: colcon build --cmake-args -DMAPPING_BENCHMARKING=ON
 # NOTE: the option is cached, switch back with -DMAPPING_BENCHMARKING=OFF or use separate --build-base/--install-base
-option(MAPPING_BENCHMARKING "build benchmarking support (run output directory, git build info)" OFF)
+option(MAPPING_BENCHMARKING "build benchmarking support (run output directory, git build info, keyframe telemetry)" OFF)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
@@ -84,6 +84,11 @@ if(MAPPING_BENCHMARKING)
     src/mapping/benchmarking/TrajectoryRecorder.cpp
     src/mapping/benchmarking/RunOutput.cpp
     src/mapping/benchmarking/BuildInfo.cpp
+    src/mapping/benchmarking/Format.cpp
+    src/mapping/benchmarking/KeyframeTelemetry.cpp
+    src/mapping/benchmarking/TelemetryRecorder.cpp
+    src/mapping/benchmarking/Instrumentation.cpp
+    src/mapping/benchmarking/KeyframeProbe.cpp
   )
   target_compile_definitions(mapping PUBLIC MAPPING_BENCHMARKING)
 

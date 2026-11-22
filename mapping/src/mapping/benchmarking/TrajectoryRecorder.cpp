@@ -1,9 +1,11 @@
 /// @file
 /// @ingroup benchmarking
+#include <mapping/benchmarking/Format.hpp>
 #include <mapping/benchmarking/TrajectoryRecorder.hpp>
 
 #include <fstream>
 #include <iomanip>
+#include <string>
 
 namespace mapping
 {
@@ -25,8 +27,10 @@ namespace mapping
             const gtsam::Pose3 &pose = stamped.state.pose();
             const gtsam::Point3 &t = pose.translation();
             const gtsam::Quaternion q = pose.rotation().toQuaternion();
-            file << (stamped.timestamp + timeOffset) << ' ' << t.x() << ' ' << t.y() << ' ' << t.z() << ' ' << q.x()
-                 << ' ' << q.y() << ' ' << q.z() << ' ' << q.w() << '\n';
+            std::string timestamp;
+            appendBagTime(timestamp, stamped.timestamp, timeOffset);
+            file << timestamp << ' ' << t.x() << ' ' << t.y() << ' ' << t.z() << ' ' << q.x() << ' ' << q.y() << ' '
+                 << q.z() << ' ' << q.w() << '\n';
         }
         file.flush();
         return file.good();

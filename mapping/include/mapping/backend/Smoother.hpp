@@ -70,6 +70,11 @@ namespace mapping
         /// @brief Insert initial calibration values, timestamps, and priors into the smoother buffers.
         void setCalibrationPriors(const MappingConfig &config, const gtsam::Pose3 &initialExtrinsic);
 
+#ifdef MAPPING_BENCHMARKING
+        /// @brief Marginal covariance of a variable in the current graph (benchmark build only, for telemetry).
+        gtsam::Matrix marginalCovariance(const gtsam::Key key) const { return smoother_.marginalCovariance(key); }
+#endif
+
     private:
         // shorthand indicator on whether to add priors before the update pass
         bool hasPriors() const { return !initialPriors_.empty(); };

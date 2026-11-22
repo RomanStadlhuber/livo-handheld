@@ -6,6 +6,7 @@
 #define MAPPING_BENCHMARKING_RUNOUTPUT_HPP_
 
 #include <mapping/Config.hpp>
+#include <mapping/benchmarking/TelemetryRecorder.hpp>
 #include <mapping/benchmarking/TrajectoryRecorder.hpp>
 
 #include <cstddef>
@@ -47,14 +48,15 @@ namespace mapping
     bool prepareRunDir(const std::string &dir, std::string &error);
 
     /// @ingroup benchmarking
-    /// @brief Write `trajectory.tum`, `config.yaml` and `run.yaml` into the run directory.
+    /// @brief Write `trajectory.tum`, `telemetry.csv`, `config.yaml` and `run.yaml` into the run directory.
     /// @details `config.yaml` is the serialized `config` as used by the system, not a copy of the user file.
     /// It holds the real values, incl. defaults for keys missing in the user file.
     /// `run.yaml` is written even if another file fails. In that case it records exit code 1.
     /// @param error Set to a message on failure.
     /// @return false if any file could not be written.
-    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder, const MappingConfig &config,
-                        RunInfo info, std::string &error);
+    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder,
+                        const benchmarking::TelemetryRecorder &telemetry, const MappingConfig &config, RunInfo info,
+                        std::string &error);
 } // namespace mapping
 
 #endif // MAPPING_BENCHMARKING_RUNOUTPUT_HPP_

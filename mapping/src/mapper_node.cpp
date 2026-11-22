@@ -17,6 +17,7 @@
 #include <mapping/MappingSystem.hpp>
 #ifdef MAPPING_BENCHMARKING
 #include <mapping/benchmarking/RunOutput.hpp>
+#include <mapping/benchmarking/TelemetryRecorder.hpp>
 #include <mapping/benchmarking/TrajectoryRecorder.hpp>
 #endif
 
@@ -545,7 +546,12 @@ std::string normalizeTopicName(const std::string &topic)
 }
 
 #ifdef MAPPING_BENCHMARKING
-using BagRecorder = mapping::TrajectoryRecorder;
+/// @brief Benchmark output collected during a bag run.
+struct BagRecorder
+{
+    mapping::TrajectoryRecorder trajectory;
+    mapping::benchmarking::TelemetryRecorder telemetry;
+};
 #else
 struct BagRecorder
 {
@@ -560,8 +566,7 @@ struct BagStats
 };
 
 // Standalone bag reader for debugging and benchmarking
-int processBag(const BagOptions &options, const mapping::MappingConfig &config, BagRecorder &trajectoryRecorder,
-               BagStats &stats)
+int processBag(const BagOptions &options, const mapping::MappingConfig &config, BagRecorder &recorder, BagStats &stats)
 {
     // Setup bag reader
     rosbag2_cpp::Reader reader;
@@ -668,9 +673,16 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
     {
 #ifdef MAPPING_BENCHMARKING
         numRecordedKeyframes = slam.getKeyframeCount();
-        trajectoryRecorder.update(slam.getStates(), numRecordedKeyframes);
+        recorder.trajectory.update(slam.getStates(), numRecordedKeyframes);
 #else
-        (void)trajectoryRecorder;
+        (void)recorder;
+#endif
+    };
+    // drain the keyframe telemetry queue, so no row is lost (also a lost-tracking keyframe, which has no new pose)
+    auto recordTelemetry = [&]()
+    {
+#ifdef MAPPING_BENCHMARKING
+        recorder.telemetry.append(slam.takeTelemetry());
 #endif
     };
     const bool recordEnabled = !options.outputDir.empty();
@@ -717,6 +729,8 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
                 slam.feedLidar(lidarData, tLastMsg);
                 slam.update();
                 ++numLidarMsgs;
+                if (recordEnabled)
+                    recordTelemetry();
                 if (recordEnabled && slam.getKeyframeCount() != numRecordedKeyframes)
                     recordTrajectory();
             }
@@ -729,6 +743,9 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
         std::cerr << "Error: failed while processing the bag: " << e.what() << std::endl;
         failed = true;
     }
+    // also after an error: the probe of an aborted keyframe still queues its row
+    if (recordEnabled)
+        recordTelemetry();
 
     const double wallSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - tWallStart).count();
     std::cout << (failed                 ? "Aborted"
@@ -759,12 +776,12 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
 
 int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
 {
-    BagRecorder trajectoryRecorder;
+    BagRecorder recorder;
     BagStats stats;
 #ifdef MAPPING_BENCHMARKING
     const std::string wallStart = mapping::wallClockNowISO();
 #endif
-    int exitCode = processBag(options, config, trajectoryRecorder, stats);
+    int exitCode = processBag(options, config, recorder, stats);
 #ifdef MAPPING_BENCHMARKING
     // also written after an error or Ctrl+C, the partial trajectory is still useful for evaluation
     if (!options.outputDir.empty())
@@ -785,9 +802,9 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
         info.scansSkipped = stats.numSkippedLidarMsgs;
         info.keyframes = stats.numKeyframes;
         std::string error;
-        if (mapping::writeRunOutput(options.outputDir, trajectoryRecorder, config, info, error))
-            std::cout << "Wrote " << trajectoryRecorder.size() << " keyframe poses and run metadata to "
-                      << options.outputDir << std::endl;
+        if (mapping::writeRunOutput(options.outputDir, recorder.trajectory, recorder.telemetry, config, info, error))
+            std::cout << "Wrote " << recorder.trajectory.size() << " keyframe poses, " << recorder.telemetry.size()
+                      << " telemetry rows and run metadata to " << options.outputDir << std::endl;
         else
         {
             std::cerr << "Error: " << error << std::endl;
@@ -813,7 +830,8 @@ void printUsage(const char *argv0)
               << "  --scaling-imu <factor>  scale applied to accelerometer readings,\n"
               << "                          9.81 for [g] (Livox), 1.0 for [m/s^2] (default: 9.81)\n"
               << "  --output-dir <dir>      write trajectory.tum (IMU frame, absolute bag timestamps, for evo),\n"
-              << "                          config.yaml (loaded config) and run.yaml into <dir>.\n"
+              << "                          telemetry.csv (one row per keyframe), config.yaml\n"
+              << "                          (loaded config) and run.yaml into <dir>.\n"
               << "                          Fails if <dir> is not empty.\n"
               << "                          Needs a build with -DMAPPING_BENCHMARKING=ON (default: off)\n"
               << "  -h, --help              show this message" << std::endl;

@@ -129,14 +129,20 @@ namespace mapping
         return true;
     }
 
-    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder, const MappingConfig &config,
-                        RunInfo info, std::string &error)
+    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder,
+                        const benchmarking::TelemetryRecorder &telemetry, const MappingConfig &config, RunInfo info,
+                        std::string &error)
     {
         const fs::path root(dir);
         bool ok = true;
         if (!recorder.writeTum((root / "trajectory.tum").string(), info.bagStart))
         {
             appendError(error, "failed to write '" + (root / "trajectory.tum").string() + "'");
+            ok = false;
+        }
+        if (!telemetry.writeCsv((root / "telemetry.csv").string(), info.bagStart))
+        {
+            appendError(error, "failed to write '" + (root / "telemetry.csv").string() + "'");
             ok = false;
         }
         if (!writeConfigYaml(root / "config.yaml", config))

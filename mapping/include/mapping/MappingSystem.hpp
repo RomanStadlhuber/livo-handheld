@@ -18,11 +18,22 @@
 #include <mapping/backend/Smoother.hpp>
 
 #include <memory>
+#ifdef MAPPING_BENCHMARKING
+#include <mapping/benchmarking/KeyframeTelemetry.hpp>
+#include <vector>
+#endif
 
 #include <gtsam/geometry/Pose3.h>
 
 namespace mapping
 {
+#ifdef MAPPING_BENCHMARKING
+    namespace benchmarking
+    {
+        class KeyframeProbe;
+    } // namespace benchmarking
+#endif
+
     /// @ingroup system
     /// @brief LiDAR-Inertial Odometry and Mapping System
     /// @details Orchestrates IMU preintegration, LiDAR scan processing,
@@ -92,7 +103,17 @@ namespace mapping
         /// @brief Get the current (possibly optimized) temporal offset [s].
         double getTemporalOffset() const { return states_.getTemporalOffset(); }
 
+#ifdef MAPPING_BENCHMARKING
+        /// @brief Drain the keyframe telemetry rows recorded since the last call (benchmark build only).
+        std::vector<benchmarking::KeyframeTelemetry> takeTelemetry();
+#endif
+
     private:
+#ifdef MAPPING_BENCHMARKING
+        // reads the private state to record the keyframe telemetry, see BENCH_KEYFRAME_PROBE in track()
+        friend class benchmarking::KeyframeProbe;
+#endif
+
         /// @brief Static state (assumption-based) system initialization.
         /// @details Uses all IMU measurements up to the first LiDAR timestamp
         /// to build a gravity-aligned initial pose and calibrate the IMU preintegrator.
@@ -147,6 +168,11 @@ namespace mapping
         // configuration and cached extrinsic
         MappingConfig config_;
         gtsam::Pose3 imu_T_lidar_;
+
+#ifdef MAPPING_BENCHMARKING
+        /// @brief Finished keyframe telemetry rows, filled by `KeyframeProbe`, drained by `takeTelemetry()`.
+        std::vector<benchmarking::KeyframeTelemetry> telemetryQueue_;
+#endif
     };
 
 } // namespace mapping

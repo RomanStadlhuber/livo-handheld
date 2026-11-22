@@ -4,12 +4,14 @@
 #include <mapping/MappingSystem.hpp>
 #include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
+#include <mapping/benchmarking/telemetry_macros.hpp>
 
 #include <gtsam/slam/PriorFactor.h>
 
 #include <csignal>
 #include <iostream>
 #include <optional>
+#include <utility>
 
 SETUP_LOGS(DEBUG, "MappingSystem");
 
@@ -256,6 +258,7 @@ namespace mapping
         const uint32_t idxKeyframe =
             states_.createKeyframeSubmap(states_.getCurrentState().pose(), states_.tLastScan_, ptrNewSubmapVoxelized);
         LOG_STAMPED(INFO, states_.tLastScan_, "identified keyframe, creating submap [" << idxKeyframe << "]");
+        BENCH_KEYFRAME_PROBE(idxKeyframe); // benchmark build only: records this keyframe's telemetry on scope exit
 
         // update the adaptive voxel size controller after the warmup period has expired
         if (idxKeyframe > 5)
@@ -445,6 +448,13 @@ namespace mapping
     }
 
     // --- public query methods ---
+
+#ifdef MAPPING_BENCHMARKING
+    std::vector<benchmarking::KeyframeTelemetry> MappingSystem::takeTelemetry()
+    {
+        return std::exchange(telemetryQueue_, {});
+    }
+#endif
 
     SlidingWindowStates MappingSystem::getStates() const
     {
