@@ -41,8 +41,9 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/install/open3d-devel/lib
     `--scaling-imu <factor>` (default `9.81`, Livox IMU reports in `[g]`), see `--help`
   - the LiDAR message type (Livox `CustomMsg` or `sensor_msgs/PointCloud2`) is detected from the bag
   - e.g. HILTI 2022: `--topic-imu /alphasense/imu --topic-lidar /hesai/pandar --scaling-imu 1.0`
-  - `--trajectory-out <file>` writes the keyframe poses (IMU frame, absolute bag timestamps) as TUM file,
-    e.g. for `evo_ape tum <ground_truth.txt> <file> -a --t_max_diff 0.05`
+  - `--output-dir <dir>` (benchmark build only) writes `trajectory.tum`, `config.yaml` and `run.yaml` to a new run directory,
+    e.g. for `evo_ape tum <ground_truth.txt> <dir>/trajectory.tum -a --t_max_diff 0.05`,
+    see [Benchmark Build](./DEVELOPMENT.md#benchmark-build-mapping_benchmarking)
 - node: currently via `ros2 launch mapping mapper_node.launch` (includes RViz)
 
 ### Configuration
