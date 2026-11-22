@@ -31,7 +31,8 @@ namespace mapping
 
             /// @brief Fill the post-update columns of `row` (`row.kf` must be set).
             /// @details Each column group (IMU, frontend, geometry, backend) is collected on its own.
-            /// A group that throws keeps `nan` and is logged, the other groups are still collected.
+            /// When a group throws, it is logged and the other groups are still collected. The columns that the
+            /// group set before the throw keep their values, the rest of the group stays `nan`.
             /// IMU and backend columns stay `nan` when `row.lost_tracking` is set.
             ///
             /// Per-factor error:

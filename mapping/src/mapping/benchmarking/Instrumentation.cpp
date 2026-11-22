@@ -11,6 +11,8 @@
 
 #include <exception>
 #include <iterator>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 SETUP_LOGS(INFO, "Instrumentation")
@@ -136,13 +138,15 @@ namespace mapping
                 const auto &imuPoses = states.getKeyframeImuPoses();
                 row.t = timestamps.at(idxKeyframe);
                 const auto itKf = imuPoses.find(idxKeyframe);
+                if (itKf == imuPoses.end())
+                    throw std::out_of_range("no IMU pose for keyframe " + std::to_string(idxKeyframe));
                 imuPropagated = *itKf->second;
                 if (itKf != imuPoses.begin())
                 {
                     const auto itPrev = std::prev(itKf);
                     const gtsam::Pose3 &prev = *itPrev->second;
                     row.trigger_dist = (imuPropagated.translation() - prev.translation()).norm();
-                    row.trigger_angle = prev.rotation().between(imuPropagated.rotation()).axisAngle().second;
+                    row.trigger_angle = gtsam::Rot3::Logmap(prev.rotation().between(imuPropagated.rotation())).norm();
                     row.trigger_dt = row.t - timestamps.at(itPrev->first);
                 }
                 row.pts_submap = states.getKeyframeSubmaps().at(idxKeyframe)->points_.size();
