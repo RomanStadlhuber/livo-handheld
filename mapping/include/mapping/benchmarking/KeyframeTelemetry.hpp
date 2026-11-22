@@ -47,7 +47,9 @@
 /// - `w_lidar`: IRLS weight `w(r)` of the robust kernel per `PointToPlaneFactor` (`1`: full weight, `-> 0`:
 ///   switched off by the kernel). The optimizer solves for `w_lidar * err_lidar` per factor.
 ///   Pick the "rejected" threshold in the evaluation, it depends on the kernel and its scale.
-/// - `err_marg_sum`: summed error of all `LinearContainerFactor` (marginalization) in the smoother
+/// - `err_marg_sum`: summed error of all `LinearContainerFactor` (marginalization) in the smoother.
+///   Combines the built-in iSAM2 fixed-lag marginalization factors and the custom marginalization factors
+///   that the system adds (e.g. `PointToPlaneFactor::createMarginalizationFactor`)
 /// - `cov_rot_trace`, `cov_trans_trace`: trace of the rotation and translation blocks of the marginal covariance
 ///   of `X(kf)`
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
