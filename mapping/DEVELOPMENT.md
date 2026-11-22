@@ -304,7 +304,7 @@ When adding new diagnostic-only logic, wrap it in
 ## Benchmark Build `MAPPING_BENCHMARKING`
 
 The option `MAPPING_BENCHMARKING` (default `OFF`) compiles the benchmarking code in `src/mapping/benchmarking/`:
-the run output directory, `TrajectoryRecorder`, the git build info and the telemetry call-point macros
+the run output directory, `TrajectoryRecorder`, the git build info and the header for telemetry call-point macros
 (`mapping/benchmarking/telemetry_macros.hpp`). The production binary has none of it.
 
 ```bash
