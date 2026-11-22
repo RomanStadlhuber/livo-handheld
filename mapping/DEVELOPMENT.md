@@ -318,16 +318,16 @@ or use separate `--build-base` / `--install-base` folders for benchmark and prod
 In a benchmark build, bag mode writes one directory per run:
 
 ```bash
-ros2 run mapping mapper --bag <bag_dir> --config <config.yaml> --output-dir <repo>/runs/<name>
+ros2 run mapping mapper --bag <bag_dir> --config <config.yaml> --output-dir <repo>/benchmark_runs/<name>
 ```
 
 - `trajectory.tum`: keyframe poses (IMU frame) with absolute bag timestamps, readable by `evo`
-- `config.yaml`: byte copy of the config
+- `config.yaml`: the `MappingConfig` used by the run, serialized after loading. It holds the real values incl. defaults for missing keys, not the user file
 - `run.yaml`: git commit and dirty flag, build type, inputs, timing and result counters, exit code
 
 The command exits with code 1 if `<dir>` exists and is not empty. In a production build `--output-dir` exits with code 1.
 The git commit is read at every build, so build from the main checkout and move it with `git switch --detach <branch>`.
-A build inside a worktree folder reports `unknown`. To keep runs inside the repo, put them under `<repo>/runs/`. Git ignores this folder.
+A build inside a worktree folder reports `unknown`. To keep runs inside the repo, put them under `<repo>/benchmark_runs/`. Git ignores this folder.
 
 ## Profiling with `gperftools`
 

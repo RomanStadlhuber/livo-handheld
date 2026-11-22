@@ -249,4 +249,4 @@ cython_debug/
 #.idea/
 
 # benchmark run output directories
-runs/
+benchmark_runs/
