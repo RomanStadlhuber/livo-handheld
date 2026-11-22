@@ -301,6 +301,34 @@ Rebuild without the flag (or with `-DENABLE_DBG_CMP=OFF`) to disable instrumenta
 When adding new diagnostic-only logic, wrap it in
 `#ifdef ENABLE_DBG_CMP` so it is excluded from release-style builds.
 
+## Benchmark Build `MAPPING_BENCHMARKING`
+
+The option `MAPPING_BENCHMARKING` (default `OFF`) compiles the benchmarking code in `src/mapping/benchmarking/`:
+the run output directory, `TrajectoryRecorder`, the git build info and the telemetry call-point macros
+(`mapping/benchmarking/telemetry_macros.hpp`). The production binary has none of it.
+
+```bash
+colcon build --symlink-install --packages-select mapping \
+    --cmake-args -DMAPPING_BENCHMARKING=ON
+```
+
+The option is stored in the CMake cache. Switch back with `-DMAPPING_BENCHMARKING=OFF`,
+or use separate `--build-base` / `--install-base` folders for benchmark and production builds.
+
+In a benchmark build, bag mode writes one directory per run:
+
+```bash
+ros2 run mapping mapper --bag <bag_dir> --config <config.yaml> --output-dir <repo>/runs/<name>
+```
+
+- `trajectory.tum`: keyframe poses (IMU frame) with absolute bag timestamps, readable by `evo`
+- `config.yaml`: byte copy of the config
+- `run.yaml`: git commit and dirty flag, build type, inputs, timing and result counters, exit code
+
+The command exits with code 1 if `<dir>` exists and is not empty. In a production build `--output-dir` exits with code 1.
+The git commit is read at every build, so build from the main checkout and move it with `git switch --detach <branch>`.
+A build inside a worktree folder reports `unknown`. To keep runs inside the repo, put them under `<repo>/runs/`. Git ignores this folder.
+
 ## Profiling with `gperftools`
 
 Inside the docker container install
