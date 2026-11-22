@@ -39,13 +39,8 @@ namespace mapping
         /// @param distortionCoefficients Coefficients of the perspective distortion model.
         /// @note `PinholeRadTan` uses the default `cv` namespace, whereas
         /// `PinholeEquidistant` uses `cv::fisheye` and is **not supported as of yet**.
-        void setCalibration(
-            mapping::CameraCalibrationType calibrationType,
-            float fx,
-            float fy,
-            float cx,
-            float cy,
-            std::vector<float> distortionCoefficients = {});
+        void setCalibration(mapping::CameraCalibrationType calibrationType, float fx, float fy, float cx, float cy,
+                            std::vector<float> distortionCoefficients = {});
 
         /// @brief Check the buffers to sync LiDAR & Camera
         ///
@@ -59,10 +54,7 @@ namespace mapping
         /// @param config Used to control the temporal synchronization tolerance
         /// & camera buffer keepalive-time.
         /// @note Modifies `buffers` in-place!
-        void syncCameraToLiDAR(
-            const States &states,
-            Buffers &buffers,
-            const MappingConfig &config);
+        void syncCameraToLiDAR(const States &states, Buffers &buffers, const MappingConfig &config);
 
         /// @brief Colorize an accumulated submap from the most recent synchronized image in the scan window.
         /// @note Falls back to earlier scans if the last scan has no synced image. This introduces a small
@@ -71,11 +63,8 @@ namespace mapping
         /// @param states Used to compute the extrinsic between camera and LiDAR
         /// @param buffers Used to find the most recent synced image across the buffered scan window
         /// @param ptrPcd The submap pointcloud, assumed to be in the LiDAR frame, colorization is in-place.
-        void colorizeSubmapInPlace(
-            const States &states,
-            Buffers &buffers,
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcd
-        );
+        void colorizeSubmapInPlace(const States &states, Buffers &buffers,
+                                   std::shared_ptr<open3d::geometry::PointCloud> ptrPcd);
 
     private:
         /// @brief Colorize a pointcloud (LiDAR-frame) in-place.
@@ -83,11 +72,8 @@ namespace mapping
         /// @param camera_T_lidar Extrinsic calibration to express a LiDAR point in the camera frame.
         /// @param cameraData Camera image with its color space.
         /// @note If the image color space does not match the frontend's configured color space, it will be converted.
-        void colorizeInPlace(
-            std::shared_ptr<open3d::geometry::PointCloud> ptrPcd,
-            Eigen::Isometry3d camera_T_lidar,
-            const CameraData &cameraData);
-
+        void colorizeInPlace(std::shared_ptr<open3d::geometry::PointCloud> ptrPcd, Eigen::Isometry3d camera_T_lidar,
+                             const CameraData &cameraData);
 
     private:
         /// @brief The color space used to process images.
@@ -100,6 +86,6 @@ namespace mapping
         mapping::CameraCalibrationType calibrationType_;
         bool hasCalibration_{false};
     };
-}
+} // namespace mapping
 
 #endif // MAPPING_FRONTEND_CAMERAFRONTEND_HPP_

@@ -28,13 +28,12 @@ namespace mapping
         /// all non-zero readings represent sensor noise.
         /// @param accVariance Variance of the accelerometer noise over the static period.
         /// @param gyroVariance Variance of the gyroscope noise over the static period.
-        /// @param gyroBiasMean Mean of the gyroscope measurements, used as initial bias estimate
-        void initializeFromStatic(
-            const double &accVariance,
-            const double &gyroVariance,
-            const Eigen::Vector3d &gyroBiasMean
-        );
+        /// @param initialBias Initial bias estimate from the static period (accelerometer and gyroscope).
+        void initializeFromStatic(const double &accVariance, const double &gyroVariance,
+                                  const gtsam::imuBias::ConstantBias &initialBias);
 
+        /// @brief Gravity magnitude [m/s^2] that the preintegrator assumes in the navigation frame.
+        double getGravityMagnitude() const { return preintegrator_.params()->n_gravity.norm(); }
 
         /// @brief Lock the IMU buffer and preintegrate all measurements within it.
         /// @param states The current system states, used for preintegrator reset and bias updates.
@@ -55,16 +54,13 @@ namespace mapping
         /// @param states The current system states, used for preintegrator reset and bias updates.
         void resetPreintegrator(const States &states);
 
-        /// @brief Create a CombinedImuFactor between the previous and current keyframe using the preintegrated measurements.
-        gtsam::CombinedImuFactor createPreintegrationFactor(
-            const uint32_t &idxPrevKeyframe,
-            const uint32_t &idxCurrKeyframe) const
+        /// @brief Create a CombinedImuFactor between the previous and current keyframe using the preintegrated
+        /// measurements.
+        gtsam::CombinedImuFactor createPreintegrationFactor(const uint32_t &idxPrevKeyframe,
+                                                            const uint32_t &idxCurrKeyframe) const
         {
-            return gtsam::CombinedImuFactor(
-                X(idxPrevKeyframe), V(idxPrevKeyframe),
-                X(idxCurrKeyframe), V(idxCurrKeyframe),
-                B(idxPrevKeyframe), B(idxCurrKeyframe),
-                preintegrator_);
+            return gtsam::CombinedImuFactor(X(idxPrevKeyframe), V(idxPrevKeyframe), X(idxCurrKeyframe),
+                                            V(idxCurrKeyframe), B(idxPrevKeyframe), B(idxCurrKeyframe), preintegrator_);
         };
 
     private:

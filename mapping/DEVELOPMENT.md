@@ -1,5 +1,28 @@
 # Development in the `mapping`  Codebase
 
+## Formatting with `pre-commit`
+
+The repository root holds a `.pre-commit-config.yaml` that runs `clang-format` (style: `mapping/.clang-format`)
+on all C++ sources in `mapping/`.
+
+Install the git hook **once, on the host**:
+
+```bash
+pipx install pre-commit    # or: pip install --user pre-commit
+cd livo-handheld && pre-commit install
+```
+
+The `mapping-dev` container already has `pre-commit` (see `Dockerfile.mapping`) and shares the hook through the
+bind-mounted `.git/` directory, so commits from inside the container run the same check.
+
+> **Do not run `pre-commit install` inside the container.**
+> The hook script stores the absolute path of the interpreter it was installed with.
+> From the host, that is the `pipx` venv, which does not exist in the container, so the hook falls back to
+> `pre-commit` on `PATH`. From the container, it is `/usr/bin/python3`, which exists on the host but without the
+> `pre_commit` module, so the hook fails on the host.
+
+Run the check on all files by hand with `pre-commit run --all-files`.
+
 ## Documentation
 
 The project uses Doxygen with the [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css)

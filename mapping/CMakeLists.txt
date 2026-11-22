@@ -72,6 +72,8 @@ add_library(mapping
   src/mapping/backend/FeatureManager.cpp
   src/mapping/backend/Smoother.cpp
   src/mapping/BundleAdjustment.cpp
+  # benchmarking
+  src/mapping/benchmarking/TrajectoryRecorder.cpp
 )
 
 target_include_directories(mapping PUBLIC include)

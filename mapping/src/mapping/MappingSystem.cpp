@@ -23,10 +23,20 @@ namespace mapping
     void MappingSystem::setConfig(const MappingConfig &config)
     {
         config_ = config;
-        bundleAdjustment_ = std::make_unique<BundleAdjustment>(config_);
-        bundleAdjustment_->startOptimizationWorker();
-        scanToMapFrontend_ = ScanToMapFrontend{*bundleAdjustment_, config_};
-        states_.setCollectMarginalizedSubmaps(true);
+        // tear down a previously configured BA (if any) before creating a new one,
+        // the scan-to-map frontend holds a raw pointer to it, the BA destructor stops and joins its worker thread
+        scanToMapFrontend_ = ScanToMapFrontend{};
+        bundleAdjustment_.reset();
+        if (config_.bundle_adjustment.enabled)
+        {
+            bundleAdjustment_ = std::make_unique<BundleAdjustment>(config_);
+            bundleAdjustment_->startOptimizationWorker();
+            scanToMapFrontend_ = ScanToMapFrontend{*bundleAdjustment_, config_};
+        }
+        else
+            LOG(DEBUG, "bundle adjustment disabled, scan-to-map registration is skipped");
+        // marginalized submaps are only consumed by BA, collecting them without BA would grow memory unbounded
+        states_.setCollectMarginalizedSubmaps(config_.bundle_adjustment.enabled);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
@@ -127,9 +137,6 @@ namespace mapping
         w_R_i0.col(2) = zAxis;
         w_R_i0.transposeInPlace();
 
-        gtsam::Pose3 w_T_i0{gtsam::Rot3(w_R_i0), gtsam::Point3(0, 0, 0)};
-        gtsam::Pose3 w_T_l0 = w_T_i0.compose(imu_T_lidar_);
-
         // create initial submap from all buffered lidar scans
         open3d::geometry::PointCloud newSubmap;
         for (auto it = lidarBuffer.begin(); it != lidarBufferEndIt; ++it)
@@ -137,12 +144,12 @@ namespace mapping
             open3d::geometry::PointCloud pcdScan =
                 Scan2PCD(it->second, config_.point_filter.min_distance, config_.point_filter.max_distance);
             std::shared_ptr<open3d::geometry::PointCloud> ptrPcdScan = pcdScan.VoxelDownSample(states_.getVoxelSize());
-            ptrPcdScan->Transform(w_T_l0.matrix());
             newSubmap += *ptrPcdScan;
         }
         std::shared_ptr<open3d::geometry::PointCloud> ptrNewSubmapVoxelized =
             newSubmap.VoxelDownSample(states_.getVoxelSize());
 
+        gtsam::Pose3 w_T_i0{gtsam::Rot3(w_R_i0), gtsam::Point3(0, 0, 0)};
         // modifies states_: stores keyframe submap, pose, timestamp, increments keyframe counter
         const uint32_t idxNewKF = states_.createKeyframeSubmap(w_T_i0, 0.0, ptrNewSubmapVoxelized);
         // modifies featureManager_: creates premature clusters for each point in the keyframe
@@ -164,9 +171,20 @@ namespace mapping
         accVariance /= (numImuSamples - 1.0);
         gyroVariance /= (numImuSamples - 1.0);
 
+        /* At rest, the accelerometer measures only gravity, so any difference between the measured and the
+         * assumed gravity magnitude is accelerometer bias. Only the part along gravity is observable here,
+         * the remaining (horizontal) part is absorbed into the initial roll & pitch.
+         * Without this, a magnitude error (e.g. |a| = 9.66 on the HILTI 2022 IMU) is integrated as a
+         * constant vertical acceleration and the trajectory drifts up or down.
+         */
+        const double gravityMagnitude = imuFrontend_.getGravityMagnitude();
+        const Eigen::Vector3d accBiasMean = accMean - gravityMagnitude * accMean.normalized();
+        LOG(INFO, "static init: |acc| = " << accMean.norm() << " m/s^2, assumed gravity = " << gravityMagnitude
+                                          << " m/s^2, initial accelerometer bias = " << accBiasMean.transpose());
+        gtsam::imuBias::ConstantBias priorImuBias{accBiasMean, gyroBiasMean};
         // modifies imuFrontend_: calibrates preintegrator noise and resets with computed bias
-        imuFrontend_.initializeFromStatic(accVariance, gyroVariance, gyroBiasMean);
-        gtsam::imuBias::ConstantBias priorImuBias{Eigen::Vector3d::Zero(), gyroBiasMean};
+        imuFrontend_.initializeFromStatic(accVariance, gyroVariance, priorImuBias);
+        states_.setCurrentBias(priorImuBias);
         gtsam::NavState x0{w_T_i0, gtsam::Vector3::Zero()};
         // build prior factors for the first keyframe
         gtsam::NonlinearFactorGraph priors = constructSystemPriors(idxNewKF, x0, priorImuBias);
@@ -230,8 +248,9 @@ namespace mapping
         buffers_.getScanBuffer().clear();
 
         // snapshot the scan in LiDAR body frame before createKeyframeSubmap transforms it to world frame in-place
-        // for registerScanToMap we need the pointcloud to be in the LiDAR frame
-        const auto ptrScanBodyFrame = std::make_shared<open3d::geometry::PointCloud>(*ptrNewSubmapVoxelized);
+        // for registerScanToMap we need the pointcloud to be in the LiDAR frame (only used with BA enabled)
+        const auto ptrScanBodyFrame =
+            bundleAdjustment_ ? std::make_shared<open3d::geometry::PointCloud>(*ptrNewSubmapVoxelized) : nullptr;
 
         // modifies states_: stores new keyframe submap, pose, timestamp, increments counter
         const uint32_t idxKeyframe =
@@ -250,9 +269,11 @@ namespace mapping
         marginalizeKeyframesOutsideSlidingWindow(idxKeyframe);
 
         // drain newly marginalized submaps into the BA pipeline
+        // NOTE: always drain (empty when collection is disabled) so nothing piles up without BA
         auto newlyMarginalized = states_.getMarginalizedSubmaps();
-        for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
-            bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
+        if (bundleAdjustment_)
+            for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
+                bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
         const bool isTracking =
@@ -270,8 +291,10 @@ namespace mapping
             return;
         }
 
-        const auto registrationPrior = scanToMapFrontend_.registerScanToMap(
-            *ptrScanBodyFrame, states_.getCurrentState().pose(), states_, idxKeyframe);
+        const auto registrationPrior =
+            bundleAdjustment_ ? scanToMapFrontend_.registerScanToMap(
+                                    *ptrScanBodyFrame, states_.getCurrentState().pose(), states_, idxKeyframe)
+                              : std::nullopt;
 
         /* Build factors and optimize. The feature manager accumulates marginalization factors
          * from the prior marginalization step and combines them with newly created/updated
@@ -322,8 +345,11 @@ namespace mapping
         pcdRecovery->Transform(world_T_lidar.inverse().matrix());
 
         gtsam::NavState w_X_recovery;
+        // scan-to-map recovery needs the BA global map, without BA go straight to the extrapolation fallback
         const std::optional<gtsam::NavState> recoveredState =
-            scanToMapFrontend_.estimateRecoveryState(*pcdRecovery, states_.getCurrentState(), states_);
+            bundleAdjustment_
+                ? scanToMapFrontend_.estimateRecoveryState(*pcdRecovery, states_.getCurrentState(), states_)
+                : std::nullopt;
 
         if (recoveredState)
         {
@@ -331,7 +357,10 @@ namespace mapping
         }
         else
         {
-            LOG(ERROR, "scan-to-map recovery failed, falling back to constant-velocity extrapolation");
+            if (bundleAdjustment_)
+                LOG(ERROR, "scan-to-map recovery failed, falling back to constant-velocity extrapolation");
+            else
+                LOG(WARN, "bundle adjustment disabled, recovering with constant-velocity extrapolation");
             const auto &imuPoses = states_.getKeyframeImuPoses();
             const auto &timestamps = states_.getKeyframeTimestamps();
             auto itLatest = imuPoses.rbegin();
@@ -402,8 +431,15 @@ namespace mapping
         priorPoseSigma << 0.0175, 0.0175, 0.0873, 0.1, 0.1, 0.1; // rpy xyz
         priors.addPrior(X(idxKeyframe), xPrior.pose(), gtsam::noiseModel::Diagonal::Sigmas(priorPoseSigma));
         priors.addPrior(V(idxKeyframe), xPrior.velocity(), gtsam::noiseModel::Isotropic::Sigma(3, 1e-2));
+        /* Bias order is [acc | gyro]. The accelerometer bias is only partly observable during static init
+         * (along gravity), so its prior must leave room for the remaining offset (BMI085 zero-g offset is
+         * in the order of 0.1-0.2 m/s^2). The gyro bias is well observed at rest, so its prior stays tight.
+         */
+        constexpr double biasPriorSigmaAcc = 0.05, biasPriorSigmaGyro = 1e-3; // [m/s^2], [rad/s]
+        gtsam::Vector6 biasPriorSigma;
+        biasPriorSigma << gtsam::Vector3::Constant(biasPriorSigmaAcc), gtsam::Vector3::Constant(biasPriorSigmaGyro);
         const gtsam::noiseModel::Diagonal::shared_ptr biasPriorNoise =
-            gtsam::noiseModel::Diagonal::Sigmas(1e-3 * gtsam::Vector6::Ones());
+            gtsam::noiseModel::Diagonal::Sigmas(biasPriorSigma);
         priors.addPrior(B(idxKeyframe), bPrior, biasPriorNoise);
         return priors;
     }
@@ -474,11 +510,15 @@ namespace mapping
 
     std::vector<std::shared_ptr<const FrozenSubmap>> MappingSystem::getAllFrozenSubmaps() const
     {
+        if (!bundleAdjustment_)
+            return {};
         return bundleAdjustment_->getAllFrozenSubmaps();
     }
 
     std::map<uint32_t, ActiveSubmap> MappingSystem::getAllActiveSubmaps() const
     {
+        if (!bundleAdjustment_)
+            return {};
         return bundleAdjustment_->getAllActiveSubmaps();
     }
 

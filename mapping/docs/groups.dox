@@ -61,5 +61,8 @@
 /// @ingroup core
 /// @brief Configurable per-module logging with console colorization and file output.
 
+/// @defgroup benchmarking Benchmarking
+/// @brief Utilities for offline evaluation, e.g. trajectory export for evo.
+
 /// @defgroup system System
 /// @brief Top-level orchestration and ROS visualization.

@@ -11,6 +11,13 @@ implemented to build a globally consistent map for the tracking to register to i
 effort to improve the global pose accuracy and mitigate drift when revisiting previously
 seen locations.
 
+**Note:** BA is disabled by default.
+Set `bundle_adjustment.enabled: true` in the config to run the BA thread and the scan-to-map
+registration against its global map.
+When disabled, marginalized submaps are not collected, no scan-to-map registration priors are added,
+and tracking recovery falls back to constant-velocity extrapolation.
+Also, the node does not publish the global map (`mapping/map`), so RViz shows only the keyframe submaps.
+
 ## Core Idea
 
 After poses and their submap pointclouds have been marginalized from the sliding window

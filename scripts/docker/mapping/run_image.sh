@@ -7,6 +7,17 @@ fi
 
 echo "creating container with data-dir $1"
 
+# forward the host ssh-agent (if any) so git pull / push over SSH work inside the container
+# NOTE: resolve symlinks first (e.g. byobu's ~/.byobu/.ssh-agent), then mount the socket's directory
+SSH_ARGS=()
+if [ -n "$SSH_AUTH_SOCK" ]; then
+    SOCK=$(readlink -f "$SSH_AUTH_SOCK")
+    SSH_ARGS=(-v "$(dirname "$SOCK")":/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent/"$(basename "$SOCK")")
+    echo "forwarding ssh-agent socket $SOCK"
+else
+    echo "no ssh-agent found (SSH_AUTH_SOCK unset), git pull / push over SSH will not work in the container"
+fi
+
 xhost +
 docker run \
 -it \
@@ -23,6 +34,7 @@ docker run \
 -v /mnt:/mnt \
 -v /media:/media \
 -v $1:/data \
+"${SSH_ARGS[@]}" \
 --name mapping-dev \
 livo-mapping:dev \
 bash
