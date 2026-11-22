@@ -29,7 +29,8 @@
 /// - `trigger_dist` `[m]`, `trigger_angle` `[rad]`: previous keyframe IMU pose to the IMU-propagated pose,
 ///   same values that `track()` compares with the keyframe thresholds
 /// - `trigger_dt` `[s]`: time since the previous keyframe
-/// - `imu_pred_dpos` `[m]`, `imu_pred_drot` `[rad]`: IMU-propagated pose to the optimized pose of this keyframe
+/// - `imu_pred_dpos` `[m]`, `imu_pred_drot` `[rad]`: distance / angle between the IMU-propagated and the optimized
+///   pose of the current keyframe (magnitude of smoother correction)
 /// - `vel_norm` `[m/s]`, `ba_norm`, `bg_norm`: optimized velocity, accelerometer and gyroscope bias norms
 /// - `pts_submap`: points in the keyframe submap after the voxel filter
 /// - `voxel_size`: adaptive voxel size when the keyframe is created (`States::getVoxelSize()`)
