@@ -15,7 +15,10 @@
 
 // Mapping
 #include <mapping/MappingSystem.hpp>
+#ifdef MAPPING_BENCHMARKING
+#include <mapping/benchmarking/RunOutput.hpp>
 #include <mapping/benchmarking/TrajectoryRecorder.hpp>
+#endif
 
 // publishing the state
 #include <tf2_ros/transform_broadcaster.h>
@@ -529,8 +532,10 @@ struct BagOptions
     std::string topicLidar = "/livox/lidar";
     /// @brief Scaling applied to raw accelerometer readings (Livox reports in `[g]`, so default is 9.81).
     double scalingImu = 9.81;
-    /// @brief If set, write the keyframe trajectory to this file in TUM format (absolute bag timestamps).
-    std::string trajectoryOut;
+    /// @brief If set, write trajectory, config copy and run metadata into this directory (benchmarking builds only).
+    std::string outputDir;
+    /// @brief Config path as given on the command line, recorded in the run metadata.
+    std::string configPath;
 };
 
 /// @brief Strip a leading slash, so that e.g. `livox/lidar` and `/livox/lidar` match the same bag topic.
@@ -539,8 +544,24 @@ std::string normalizeTopicName(const std::string &topic)
     return (!topic.empty() && topic.front() == '/') ? topic.substr(1) : topic;
 }
 
+#ifdef MAPPING_BENCHMARKING
+using BagRecorder = mapping::TrajectoryRecorder;
+#else
+struct BagRecorder
+{
+};
+#endif
+
+/// @brief Counters and timing of a bag run, filled by `processBag`.
+struct BagStats
+{
+    size_t numImuMsgs = 0, numLidarMsgs = 0, numSkippedLidarMsgs = 0, numKeyframes = 0;
+    double bagStart = 0.0, wallSeconds = 0.0, realtimeFactor = 0.0;
+};
+
 // Standalone bag reader for debugging and benchmarking
-int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
+int processBag(const BagOptions &options, const mapping::MappingConfig &config, BagRecorder &trajectoryRecorder,
+               BagStats &stats)
 {
     // Setup bag reader
     rosbag2_cpp::Reader reader;
@@ -642,13 +663,17 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
     };
 
     // the smoother only optimizes at keyframes, so the trajectory is recorded once per new keyframe
-    mapping::TrajectoryRecorder trajectoryRecorder;
     uint32_t numRecordedKeyframes = 0;
     auto recordTrajectory = [&]()
     {
+#ifdef MAPPING_BENCHMARKING
         numRecordedKeyframes = slam.getKeyframeCount();
         trajectoryRecorder.update(slam.getStates(), numRecordedKeyframes);
+#else
+        (void)trajectoryRecorder;
+#endif
     };
+    const bool recordEnabled = !options.outputDir.empty();
 
     size_t numImuMsgs = 0, numLidarMsgs = 0, numSkippedLidarMsgs = 0;
     double tLastMsg = 0.0;
@@ -692,11 +717,11 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
                 slam.feedLidar(lidarData, tLastMsg);
                 slam.update();
                 ++numLidarMsgs;
-                if (!options.trajectoryOut.empty() && slam.getKeyframeCount() != numRecordedKeyframes)
+                if (recordEnabled && slam.getKeyframeCount() != numRecordedKeyframes)
                     recordTrajectory();
             }
         }
-        if (!options.trajectoryOut.empty())
+        if (recordEnabled)
             recordTrajectory();
     }
     catch (const std::exception &e)
@@ -713,18 +738,13 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
               << numSkippedLidarMsgs << " skipped), " << slam.getKeyframeCount() << " keyframes, " << tLastMsg
               << " s of data in " << wallSeconds << " s wall-clock ("
               << (wallSeconds > 0.0 ? tLastMsg / wallSeconds : 0.0) << "x real-time)" << std::endl;
-    // also written after an error or Ctrl+C, the partial trajectory is still useful for evaluation
-    if (!options.trajectoryOut.empty() && has_start_time)
-    {
-        if (trajectoryRecorder.writeTum(options.trajectoryOut, start_time.seconds()))
-            std::cout << "Wrote " << trajectoryRecorder.size() << " keyframe poses (TUM) to " << options.trajectoryOut
-                      << std::endl;
-        else
-        {
-            std::cerr << "Error: failed to write trajectory to '" << options.trajectoryOut << "'" << std::endl;
-            failed = true;
-        }
-    }
+    stats = {numImuMsgs,
+             numLidarMsgs,
+             numSkippedLidarMsgs,
+             slam.getKeyframeCount(),
+             has_start_time ? start_time.seconds() : 0.0,
+             wallSeconds,
+             wallSeconds > 0.0 ? tLastMsg / wallSeconds : 0.0};
     if (failed)
         return 1;
     if (g_shutdown_requested)
@@ -735,6 +755,47 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
         return 2;
     }
     return 0;
+}
+
+int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
+{
+    BagRecorder trajectoryRecorder;
+    BagStats stats;
+#ifdef MAPPING_BENCHMARKING
+    const std::string wallStart = mapping::wallClockNowISO();
+#endif
+    int exitCode = processBag(options, config, trajectoryRecorder, stats);
+#ifdef MAPPING_BENCHMARKING
+    // also written after an error or Ctrl+C, the partial trajectory is still useful for evaluation
+    if (!options.outputDir.empty())
+    {
+        mapping::RunInfo info;
+        info.bagPath = options.bagPath;
+        info.topicImu = options.topicImu;
+        info.topicLidar = options.topicLidar;
+        info.scalingImu = options.scalingImu;
+        info.configPath = options.configPath;
+        info.bagStart = stats.bagStart;
+        info.wallStart = wallStart;
+        info.wallDurationS = stats.wallSeconds;
+        info.realtimeFactor = stats.realtimeFactor;
+        info.exitCode = exitCode;
+        info.msgsImu = stats.numImuMsgs;
+        info.msgsLidar = stats.numLidarMsgs;
+        info.scansSkipped = stats.numSkippedLidarMsgs;
+        info.keyframes = stats.numKeyframes;
+        std::string error;
+        if (mapping::writeRunOutput(options.outputDir, trajectoryRecorder, config, info, error))
+            std::cout << "Wrote " << trajectoryRecorder.size() << " keyframe poses and run metadata to "
+                      << options.outputDir << std::endl;
+        else
+        {
+            std::cerr << "Error: " << error << std::endl;
+            exitCode = 1;
+        }
+    }
+#endif
+    return exitCode;
 }
 
 void printUsage(const char *argv0)
@@ -751,8 +812,10 @@ void printUsage(const char *argv0)
               << "                          the type is detected from the bag (default: /livox/lidar)\n"
               << "  --scaling-imu <factor>  scale applied to accelerometer readings,\n"
               << "                          9.81 for [g] (Livox), 1.0 for [m/s^2] (default: 9.81)\n"
-              << "  --trajectory-out <file> write keyframe poses (IMU frame) as TUM file with absolute\n"
-              << "                          bag timestamps, e.g. for evo (default: off)\n"
+              << "  --output-dir <dir>      write trajectory.tum (IMU frame, absolute bag timestamps, for evo),\n"
+              << "                          config.yaml (loaded config) and run.yaml into <dir>.\n"
+              << "                          Fails if <dir> is not empty.\n"
+              << "                          Needs a build with -DMAPPING_BENCHMARKING=ON (default: off)\n"
               << "  -h, --help              show this message" << std::endl;
 }
 
@@ -775,7 +838,7 @@ int main(int argc, char **argv)
             return 0;
         }
         const bool takesValue = arg == "--config" || arg == "--bag" || arg == "--topic-imu" || arg == "--topic-lidar" ||
-                                arg == "--scaling-imu" || arg == "--trajectory-out";
+                                arg == "--scaling-imu" || arg == "--output-dir";
         if (!takesValue)
             continue; // e.g. ROS arguments
         if (i + 1 >= argc)
@@ -793,10 +856,10 @@ int main(int argc, char **argv)
             rclcpp::shutdown();
             return 1;
         }
-        if (arg == "--topic-imu" || arg == "--topic-lidar" || arg == "--scaling-imu" || arg == "--trajectory-out")
+        if (arg == "--topic-imu" || arg == "--topic-lidar" || arg == "--scaling-imu" || arg == "--output-dir")
             bagOnlyOptionGiven = true;
         if (arg == "--config")
-            config_path = value;
+            config_path = bagOptions.configPath = value;
         else if (arg == "--bag")
         {
             bagOptions.bagPath = value;
@@ -806,8 +869,8 @@ int main(int argc, char **argv)
             bagOptions.topicImu = value;
         else if (arg == "--topic-lidar")
             bagOptions.topicLidar = value;
-        else if (arg == "--trajectory-out")
-            bagOptions.trajectoryOut = value;
+        else if (arg == "--output-dir")
+            bagOptions.outputDir = value;
         else if (arg == "--scaling-imu")
         {
             try
@@ -836,7 +899,7 @@ int main(int argc, char **argv)
     }
 
     if (!use_bag && bagOnlyOptionGiven)
-        std::cerr << "Warning: --topic-imu, --topic-lidar, --scaling-imu and --trajectory-out only apply to --bag "
+        std::cerr << "Warning: --topic-imu, --topic-lidar, --scaling-imu and --output-dir only apply to --bag "
                      "mode, the ROS node uses the ROS parameters topic_imu, topic_lidar and scaling_imu"
                   << std::endl;
 
@@ -848,6 +911,25 @@ int main(int argc, char **argv)
         // rclcpp::init installed its own SIGINT handler, replace it so Ctrl+C stops the bag loop gracefully
         // NOTE: in node mode rclcpp's handler is kept, it shuts down the executor on Ctrl+C
         std::signal(SIGINT, signalHandler);
+#ifdef MAPPING_BENCHMARKING
+        if (!bagOptions.outputDir.empty())
+        {
+            std::string error;
+            if (!mapping::prepareRunDir(bagOptions.outputDir, error))
+            {
+                std::cerr << "Error: " << error << std::endl;
+                rclcpp::shutdown();
+                return 1;
+            }
+        }
+#else
+        if (!bagOptions.outputDir.empty())
+        {
+            std::cerr << "Error: --output-dir requires a build with -DMAPPING_BENCHMARKING=ON" << std::endl;
+            rclcpp::shutdown();
+            return 1;
+        }
+#endif
         mapping::MappingConfig config = loadConfig(config_path);
         exitCode = runFromBag(bagOptions, config);
     }

@@ -16,6 +16,11 @@ if(ENABLE_DBG_CMP)
   add_compile_definitions(ENABLE_DBG_CMP)
 endif()
 
+# benchmark-only code: run output directory, git build info, telemetry call points
+# enable via: colcon build --cmake-args -DMAPPING_BENCHMARKING=ON
+# NOTE: the option is cached, switch back with -DMAPPING_BENCHMARKING=OFF or use separate --build-base/--install-base
+option(MAPPING_BENCHMARKING "build benchmarking support (run output directory, git build info)" OFF)
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -72,9 +77,35 @@ add_library(mapping
   src/mapping/backend/FeatureManager.cpp
   src/mapping/backend/Smoother.cpp
   src/mapping/BundleAdjustment.cpp
-  # benchmarking
-  src/mapping/benchmarking/TrajectoryRecorder.cpp
 )
+
+if(MAPPING_BENCHMARKING)
+  target_sources(mapping PRIVATE
+    src/mapping/benchmarking/TrajectoryRecorder.cpp
+    src/mapping/benchmarking/RunOutput.cpp
+    src/mapping/benchmarking/BuildInfo.cpp
+  )
+  target_compile_definitions(mapping PUBLIC MAPPING_BENCHMARKING)
+
+  # regenerate the git info header on every build (no OUTPUT, so the target always runs),
+  # git is deliberately not run at configure time as that step is cached
+  set(MAPPING_BUILD_INFO_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+  add_custom_target(mapping_build_info
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+      -DOUTPUT=${MAPPING_BUILD_INFO_DIR}/mapping/build_info.hpp
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_info.cmake
+    BYPRODUCTS ${MAPPING_BUILD_INFO_DIR}/mapping/build_info.hpp
+    COMMENT "Generating git build info"
+    VERBATIM
+  )
+  add_dependencies(mapping mapping_build_info)
+  # only BuildInfo.cpp includes the generated header
+  set_source_files_properties(src/mapping/benchmarking/BuildInfo.cpp PROPERTIES
+    INCLUDE_DIRECTORIES ${MAPPING_BUILD_INFO_DIR}
+    COMPILE_DEFINITIONS "MAPPING_BUILD_TYPE=\"${CMAKE_BUILD_TYPE}\""
+  )
+endif()
 
 target_include_directories(mapping PUBLIC include)
 
