@@ -3,6 +3,9 @@
 #include <mapping/benchmarking/BuildInfo.hpp>
 #include <mapping/benchmarking/RunOutput.hpp>
 
+#include <config_utilities/parsing/yaml.h>
+#include <yaml-cpp/yaml.h>
+
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -69,6 +72,19 @@ namespace mapping
             return file.good();
         }
 
+        /// @brief Serialize the config as used by the system, so the file shows the real settings.
+        bool writeConfigYaml(const fs::path &path, const MappingConfig &config)
+        {
+            YAML::Emitter out;
+            out << config::toYaml(config);
+            std::ofstream file(path);
+            if (!file || !out.good())
+                return false;
+            file << out.c_str() << '\n';
+            file.flush();
+            return file.good();
+        }
+
         /// @brief Append a message to the error string, so that no earlier failure is lost.
         void appendError(std::string &error, const std::string &message)
         {
@@ -78,7 +94,7 @@ namespace mapping
         }
     } // namespace
 
-    std::string wallClockNowIso()
+    std::string wallClockNowISO()
     {
         const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         std::tm tm{};
@@ -113,7 +129,8 @@ namespace mapping
         return true;
     }
 
-    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder, RunInfo info, std::string &error)
+    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder, const MappingConfig &config,
+                        RunInfo info, std::string &error)
     {
         const fs::path root(dir);
         bool ok = true;
@@ -122,11 +139,9 @@ namespace mapping
             appendError(error, "failed to write '" + (root / "trajectory.tum").string() + "'");
             ok = false;
         }
-        std::error_code ec;
-        fs::copy_file(info.configPath, root / "config.yaml", fs::copy_options::overwrite_existing, ec);
-        if (ec)
+        if (!writeConfigYaml(root / "config.yaml", config))
         {
-            appendError(error, "failed to copy config '" + info.configPath + "': " + ec.message());
+            appendError(error, "failed to write '" + (root / "config.yaml").string() + "'");
             ok = false;
         }
         if (!ok)

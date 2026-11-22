@@ -762,7 +762,7 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
     BagRecorder trajectoryRecorder;
     BagStats stats;
 #ifdef MAPPING_BENCHMARKING
-    const std::string wallStart = mapping::wallClockNowIso();
+    const std::string wallStart = mapping::wallClockNowISO();
 #endif
     int exitCode = processBag(options, config, trajectoryRecorder, stats);
 #ifdef MAPPING_BENCHMARKING
@@ -785,7 +785,7 @@ int runFromBag(const BagOptions &options, const mapping::MappingConfig &config)
         info.scansSkipped = stats.numSkippedLidarMsgs;
         info.keyframes = stats.numKeyframes;
         std::string error;
-        if (mapping::writeRunOutput(options.outputDir, trajectoryRecorder, info, error))
+        if (mapping::writeRunOutput(options.outputDir, trajectoryRecorder, config, info, error))
             std::cout << "Wrote " << trajectoryRecorder.size() << " keyframe poses and run metadata to "
                       << options.outputDir << std::endl;
         else
@@ -813,7 +813,8 @@ void printUsage(const char *argv0)
               << "  --scaling-imu <factor>  scale applied to accelerometer readings,\n"
               << "                          9.81 for [g] (Livox), 1.0 for [m/s^2] (default: 9.81)\n"
               << "  --output-dir <dir>      write trajectory.tum (IMU frame, absolute bag timestamps, for evo),\n"
-              << "                          config.yaml and run.yaml into <dir>. Fails if <dir> is not empty.\n"
+              << "                          config.yaml (loaded config) and run.yaml into <dir>.\n"
+              << "                          Fails if <dir> is not empty.\n"
               << "                          Needs a build with -DMAPPING_BENCHMARKING=ON (default: off)\n"
               << "  -h, --help              show this message" << std::endl;
 }
