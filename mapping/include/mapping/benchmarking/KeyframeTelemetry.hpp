@@ -34,10 +34,11 @@
 /// - `vel_norm` `[m/s]`, `ba_norm`, `bg_norm`: optimized velocity, accelerometer and gyroscope bias norms
 /// - `pts_submap`: points in the keyframe submap after the voxel filter
 /// - `voxel_size`: adaptive voxel size when the keyframe is created (`States::getVoxelSize()`)
-/// - `clusters_valid`: `Tracked` clusters with a point in this keyframe after tracking.
-///   Can differ slightly from `numValidClusters` in `track()` (a cluster on the `clusterTooSmall` path also gets
-///   a point in this keyframe). Equal to `thickness_n` by construction.
-/// - `thickness`: newest plane thickness history entry of these clusters
+/// - `clusters_valid`: `numValidClusters` of `LidarFrontend::trackScanPointsToClusters` at the current keyframe,
+///   `nan` when it returned false (see `LidarFrontend::keyframeNumValidClusters`)
+/// - `thickness`: newest plane thickness history entry of the `Tracked` clusters with a point in the current
+///   keyframe. `thickness_n` can be slightly larger than `clusters_valid` (a cluster on the `clusterTooSmall`
+///   path also gets a point in the current keyframe but is not counted)
 /// - `eig_rot_min`, `eig_trans_min`: smallest eigenvalue of the rotation and translation blocks
 ///   of the point-to-plane information matrix of this keyframe pose
 /// - `err_imu`, `err_lidar`: per-factor error of all `CombinedImuFactor` / `PointToPlaneFactor` in the smoother.

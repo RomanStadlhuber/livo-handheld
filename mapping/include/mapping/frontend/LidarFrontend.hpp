@@ -14,6 +14,10 @@
 #include <open3d/geometry/PointCloud.h>
 #include <open3d/geometry/KDTreeFlann.h>
 
+#include <cstddef>
+#include <map>
+#include <optional>
+
 namespace mapping
 {
     /// @ingroup frontend_lidar
@@ -39,6 +43,12 @@ namespace mapping
         /// @return True if the keyframe was tracked successfully
         bool trackScanPointsToClusters(const uint32_t &idxKeyframe, const States &states,
                                        FeatureManager &featureManager, const MappingConfig &config);
+
+#ifdef MAPPING_BENCHMARKING
+        /// @brief Benchmark build only: `numValidClusters` of each `trackScanPointsToClusters` call, by keyframe index.
+        /// `std::nullopt` when the call returned false (lost tracking).
+        std::map<uint32_t, std::optional<std::size_t>> keyframeNumValidClusters;
+#endif
     };
 
     /// @ingroup frontend_lidar

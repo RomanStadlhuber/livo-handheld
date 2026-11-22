@@ -80,7 +80,6 @@ namespace mapping
                         J << p.cross(n).transpose(), n.transpose();
                         information += J.transpose() * J / featureManager.clusterSigmas_.at(clusterId);
                     }
-                    row.clusters_valid = thickness.size();
                     row.thickness = makeStats(std::move(thickness));
                     const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigRot(information.topLeftCorner<3, 3>(),
                                                                                 Eigen::EigenvaluesOnly),

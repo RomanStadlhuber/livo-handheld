@@ -34,6 +34,9 @@ namespace mapping
         {
             const States &states = system_.states_;
             row_.lost_tracking = states.getLifecycleState() == SystemState::Recovery ? 1 : 0;
+            const auto &numValidClusters = system_.lidarFrontend_.keyframeNumValidClusters;
+            if (const auto it = numValidClusters.find(*row_.kf); it != numValidClusters.end())
+                row_.clusters_valid = it->second;
             instrumentation::collect(row_, imuPropagated_, states, system_.featureManager_, system_.smoother_);
             try
             {

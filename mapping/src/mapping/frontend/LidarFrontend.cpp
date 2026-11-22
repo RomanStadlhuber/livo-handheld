@@ -211,6 +211,9 @@ namespace mapping
         }
         if (validTracks == 0) // abort if the latest frame could not be tracked
         {
+#ifdef MAPPING_BENCHMARKING
+            keyframeNumValidClusters[idxKeyframe] = std::nullopt;
+#endif
             return false;
         }
 #ifdef ENABLE_DBG_CMP
@@ -225,7 +228,12 @@ namespace mapping
                                           << " gating=" << stats.rejGating << " consistency=" << stats.rejConsistency),
                   STREAM("promoted to Tracked: " << stats.promotedTracked << ", valid tracks: " << validTracks));
 #endif
-        return idxKeyframe < config.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
+        const bool isTracking = idxKeyframe < config.lidar_frontend.clustering.min_points ? true : numValidClusters > 0;
+#ifdef MAPPING_BENCHMARKING
+        keyframeNumValidClusters[idxKeyframe] =
+            isTracking ? std::optional<std::size_t>{numValidClusters} : std::nullopt;
+#endif
+        return isTracking;
     }
 
     void AdaptiveVoxelsizeController::reset(const double currentVoxelsize)
