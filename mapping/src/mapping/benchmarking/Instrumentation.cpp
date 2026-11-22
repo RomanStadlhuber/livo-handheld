@@ -4,7 +4,6 @@
 #include <mapping/factors/PointToPlaneFactor.hpp>
 #include <mapping/logging.hpp>
 
-#include <gtsam/linear/JacobianFactor.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
 #include <gtsam/nonlinear/LinearContainerFactor.h>
 
@@ -91,7 +90,7 @@ namespace mapping
                 void collectBackend(KeyframeTelemetry &row, const States &states, const Smoother &smoother)
                 {
                     const gtsam::Values &estimate = states.getSmootherEstimate();
-                    std::vector<double> errImu, errLidar;
+                    std::vector<double> errImu, errLidar, wLidar;
                     double errMargSum = 0.0;
                     std::size_t numFailed = 0;
                     for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
@@ -104,10 +103,10 @@ namespace mapping
                                 errImu.push_back(factor->error(estimate));
                             else if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
                             {
-                                const auto jacobian =
-                                    boost::dynamic_pointer_cast<gtsam::JacobianFactor>(ptp->linearize(estimate));
-                                if (jacobian)
-                                    errLidar.push_back(0.5 * jacobian->getb().squaredNorm());
+                                const PointToPlaneFactor::ErrorDiagnostic diagnostic =
+                                    ptp->evaluateErrorDiagnostic(estimate);
+                                errLidar.push_back(diagnostic.error);
+                                wLidar.push_back(diagnostic.weight);
                             }
                             else if (boost::dynamic_pointer_cast<gtsam::LinearContainerFactor>(factor))
                                 errMargSum += factor->error(estimate);
@@ -121,6 +120,7 @@ namespace mapping
                         LOG(WARN, "keyframe " << *row.kf << ": error of " << numFailed << " factors not evaluated");
                     row.err_imu = makeStats(std::move(errImu));
                     row.err_lidar = makeStats(std::move(errLidar));
+                    row.w_lidar = makeStats(std::move(wLidar));
                     row.err_marg_sum = errMargSum;
                     const gtsam::Matrix cov = smoother.marginalCovariance(X(static_cast<uint32_t>(*row.kf)));
                     row.cov_rot_trace = cov.topLeftCorner<3, 3>().trace();

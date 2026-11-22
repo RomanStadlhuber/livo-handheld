@@ -34,12 +34,11 @@ namespace mapping
             /// A group that throws keeps `nan` and is logged, the other groups are still collected.
             /// IMU and backend columns stay `nan` when `row.lost_tracking` is set.
             ///
-            /// Per-factor error, as the optimizer sees it:
+            /// Per-factor error:
             /// - `CombinedImuFactor`, `LinearContainerFactor`: `factor->error(estimate)`
-            /// - `PointToPlaneFactor`: `0.5 * |b|^2` of the `JacobianFactor` from `linearize(estimate)`.
-            ///   Its `unwhitenedError` throws by design and `evaluateErrorDiagnostic` has no definition.
-            ///   `linearize` is what iSAM2 uses: `b` is whitened with the noise model and scaled
-            ///   with the robust (Geman-McClure) weight, so this is the robust-weighted error of the factor.
+            /// - `PointToPlaneFactor`: `evaluateErrorDiagnostic(estimate)`, the unweighted error (`err_lidar`)
+            ///   and the IRLS weight of the robust kernel (`w_lidar`) at the same residual that `linearize` uses.
+            ///   Its `unwhitenedError` throws by design, so `factor->error()` is not available.
             ///
             /// Information matrix for `eig_*_min`: sum over `Tracked` clusters with a point in this keyframe of
             /// `J^T J / s`, `J = [(p x n)^T, n^T]`, `p` the point and `n` the cluster normal in the keyframe IMU frame,

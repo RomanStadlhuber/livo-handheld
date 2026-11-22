@@ -4,6 +4,7 @@
 
 #include <gtsam/base/Matrix.h>
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/linear/NoiseModel.h>
 
 namespace mapping
 {
@@ -221,6 +222,22 @@ namespace mapping
             Hs.push_back(H_ext_accum);
 
         return {errorVec, Hs};
+    }
+
+    PointToPlaneFactor::ErrorDiagnostic PointToPlaneFactor::evaluateErrorDiagnostic(const gtsam::Values &values) const
+    {
+        if (isInvalid_)
+        {
+            throw std::runtime_error("Attempting to evaluate an invalid PointToPlaneFactor.");
+        }
+        const gtsam::Vector errorVec = computeErrorAndJacobians(values).first;
+        if (const auto robust = boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(adaptiveNoiseModel_))
+        {
+            const double squaredDist = robust->noise()->squaredMahalanobisDistance(errorVec);
+            // same weight as Robust::WhitenSystem in linearize(): the kernel at the norm of the whitened residual
+            return {0.5 * squaredDist, robust->robust()->weight(std::sqrt(squaredDist))};
+        }
+        return {0.5 * adaptiveNoiseModel_->squaredMahalanobisDistance(errorVec), 1.0};
     }
 
     gtsam::NonlinearFactor::shared_ptr PointToPlaneFactor::clone() const

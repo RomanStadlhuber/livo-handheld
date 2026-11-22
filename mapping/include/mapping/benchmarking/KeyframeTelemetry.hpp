@@ -42,11 +42,11 @@
 /// - `eig_rot_min`, `eig_trans_min`: smallest eigenvalue of the rotation and translation blocks
 ///   of the point-to-plane information matrix of this keyframe pose
 /// - `err_imu`, `err_lidar`: per-factor error of all `CombinedImuFactor` / `PointToPlaneFactor` in the smoother.
-///   `err_lidar` is `0.5 * |b|^2` of `PointToPlaneFactor::linearize`, the system the optimizer solves.
-///   `PointToPlaneFactor::unwhitenedError` throws by design and `evaluateErrorDiagnostic` has no definition.
-///   With a robust noise model `b` is scaled by `sqrt(w(r))` (IRLS weight), so this is `0.5 * w(r) * r^2`,
-///   not the robust loss `rho(r)`. For large residuals the value falls towards 0 instead of saturating.
-///   Read a small `err_lidar` together with `clusters_valid` and `thickness` before trusting it.
+///   `err_lidar` is the unweighted error `0.5 * r^2 / sigma^2` of `PointToPlaneFactor::evaluateErrorDiagnostic`,
+///   without the robust kernel.
+/// - `w_lidar`: IRLS weight `w(r)` of the robust kernel per `PointToPlaneFactor` (`1`: full weight, `-> 0`:
+///   switched off by the kernel). The optimizer solves for `w_lidar * err_lidar` per factor.
+///   Pick the "rejected" threshold in the evaluation, it depends on the kernel and its scale.
 /// - `err_marg_sum`: summed error of all `LinearContainerFactor` (marginalization) in the smoother
 /// - `cov_rot_trace`, `cov_trans_trace`: trace of the rotation and translation blocks of the marginal covariance
 ///   of `X(kf)`
@@ -70,6 +70,7 @@
     X(Real, eig_trans_min)                                                                                             \
     X(Stats, err_imu)                                                                                                  \
     X(Stats, err_lidar)                                                                                                \
+    X(Stats, w_lidar)                                                                                                  \
     X(Real, err_marg_sum)                                                                                              \
     X(Real, cov_rot_trace)                                                                                             \
     X(Real, cov_trans_trace)
