@@ -304,8 +304,8 @@ When adding new diagnostic-only logic, wrap it in
 ## Benchmark Build `MAPPING_BENCHMARKING`
 
 The option `MAPPING_BENCHMARKING` (default `OFF`) compiles the benchmarking code in `src/mapping/benchmarking/`:
-the run output directory, `TrajectoryRecorder`, the git build info and the header for telemetry call-point macros
-(`mapping/benchmarking/telemetry_macros.hpp`). The production binary has none of it.
+the run output directory, `TrajectoryRecorder`, the git build info and the keyframe telemetry
+(call-point macros in `mapping/benchmarking/telemetry_macros.hpp`). The production binary has none of it.
 
 ```bash
 colcon build --symlink-install --packages-select mapping \
@@ -322,12 +322,73 @@ ros2 run mapping mapper --bag <bag_dir> --config <config.yaml> --output-dir <rep
 ```
 
 - `trajectory.tum`: keyframe poses (IMU frame) with absolute bag timestamps, readable by `evo`
+- `telemetry.csv`: one row per keyframe that `track()` creates, also for keyframes that lose tracking, see below
 - `config.yaml`: the `MappingConfig` used by the run, serialized after loading. It holds the real values incl. defaults for missing keys, not the user file
 - `run.yaml`: git commit and dirty flag, build type, inputs, timing and result counters, exit code
 
 The command exits with code 1 if `<dir>` exists and is not empty. In a production build `--output-dir` exits with code 1.
 The git commit is read at every build, so build from the main checkout and move it with `git switch --detach <branch>`.
 A build inside a worktree folder reports `unknown`. To keep runs inside the repo, put them under `<repo>/benchmark_runs/`. Git ignores this folder.
+
+### Keyframe Telemetry
+
+`telemetry.csv` holds one row per keyframe. The column `t` has the same value as the timestamp in `trajectory.tum`,
+so a time on the error curve leads to exactly one telemetry row. Columns without a value are `nan`,
+e.g. the IMU and backend columns of a keyframe with `lost_tracking=1`.
+The schema and the meaning of each column are in `mapping/benchmarking/KeyframeTelemetry.hpp`.
+
+The only call point is one line in `MappingSystem::track()`:
+
+```cpp
+BENCH_KEYFRAME_PROBE(idxKeyframe); // benchmark build only: records this keyframe's telemetry on scope exit
+```
+
+The macro creates a `benchmarking::KeyframeProbe`. Its constructor reads the values that the update overwrites,
+its destructor runs on every exit of `track()` and collects the rest through the free functions in
+`src/mapping/benchmarking/Instrumentation.cpp`. Do not add telemetry code to the SLAM components.
+
+To add a column:
+
+1. Add one line to `KF_TELEMETRY_FIELDS` in `KeyframeTelemetry.hpp`, e.g. `X(Real, my_value)`.
+   Types: `Index`, `Flag`, `Real`, `Time`, `Stats` (6 columns `_n`, `_min`, `_max`, `_median`, `_mean`, `_std`).
+2. Set `row.my_value` in `Instrumentation.cpp`. A `Stats` value comes from `makeStats(std::vector<double>)`.
+
+The member, the CSV header and the CSV writer follow from the list.
+
+### Evaluation Script
+
+`scripts/evaluate_run.py` joins the trajectory error of a run to its telemetry. It uses its own venv, not the ROS
+Python, and runs without a sourced ROS setup. Set up the venv once, from the repository root:
+
+```bash
+python3 -m venv mapping/scripts/.venv
+mapping/scripts/.venv/bin/pip install -r mapping/scripts/requirements-eval.txt
+```
+
+Run it on a run directory and a ground-truth TUM file:
+
+```bash
+mapping/scripts/.venv/bin/python mapping/scripts/evaluate_run.py benchmark_runs/<name> <ground_truth.txt>
+```
+
+Options: `--t-max-diff` (default 0.05 s, max. timestamp difference to match a ground-truth pose),
+`--align-seconds` (default 5 s, SE(3) alignment on the start of the run only, no global alignment),
+`--segment` (default 1 s, segment length of the relative error), `--threshold` (default 1 m).
+
+It writes into `<run dir>/eval/`:
+
+- `errors.csv`: the telemetry with the error columns (`ape_*`, `rpe_*`), one row per keyframe.
+  Keyframes without a matched pose (e.g. lost tracking) keep their row with `nan` errors
+- `overview.png`: error curves on top, then one panel per stage (IMU, LiDAR frontend, geometry, backend).
+  Red lines mark lost tracking, orange lines the recovery keyframe after it
+
+On stdout it prints the first time the absolute error passes `--threshold`, and the telemetry row at that time.
+Plot title and summary show the commit, dirty flag and config name from `run.yaml`.
+A run directory written from the container belongs to `root`. Give it to your user first
+(`sudo chown -R $USER benchmark_runs/<name>`) so the script can create `eval/`.
+
+The initialization keyframe `0` is not created by `track()`, so it has a pose in `trajectory.tum`
+but no telemetry row. The script reports it as one unmatched pose.
 
 ## Profiling with `gperftools`
 
