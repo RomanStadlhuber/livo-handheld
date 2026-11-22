@@ -33,11 +33,18 @@
 /// - `vel_norm` `[m/s]`, `ba_norm`, `bg_norm`: optimized velocity, accelerometer and gyroscope bias norms
 /// - `pts_submap`: points in the keyframe submap after the voxel filter
 /// - `voxel_size`: adaptive voxel size when the keyframe is created (`States::getVoxelSize()`)
-/// - `clusters_valid`: `Tracked` clusters with a point in this keyframe after tracking
+/// - `clusters_valid`: `Tracked` clusters with a point in this keyframe after tracking.
+///   Can differ slightly from `numValidClusters` in `track()` (a cluster on the `clusterTooSmall` path also gets
+///   a point in this keyframe). Equal to `thickness_n` by construction.
 /// - `thickness`: newest plane thickness history entry of these clusters
 /// - `eig_rot_min`, `eig_trans_min`: smallest eigenvalue of the rotation and translation blocks
 ///   of the point-to-plane information matrix of this keyframe pose
-/// - `err_imu`, `err_lidar`: per-factor error of all `CombinedImuFactor` / `PointToPlaneFactor` in the smoother
+/// - `err_imu`, `err_lidar`: per-factor error of all `CombinedImuFactor` / `PointToPlaneFactor` in the smoother.
+///   `err_lidar` is `0.5 * |b|^2` of `PointToPlaneFactor::linearize`, the system the optimizer solves.
+///   `PointToPlaneFactor::unwhitenedError` throws by design and `evaluateErrorDiagnostic` has no definition.
+///   With a robust noise model `b` is scaled by `sqrt(w(r))` (IRLS weight), so this is `0.5 * w(r) * r^2`,
+///   not the robust loss `rho(r)`. For large residuals the value falls towards 0 instead of saturating.
+///   Read a small `err_lidar` together with `clusters_valid` and `thickness` before trusting it.
 /// - `err_marg_sum`: summed error of all `LinearContainerFactor` (marginalization) in the smoother
 /// - `cov_rot_trace`, `cov_trans_trace`: trace of the rotation and translation blocks of the marginal covariance
 ///   of `X(kf)`

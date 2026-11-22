@@ -388,7 +388,8 @@ A run directory written from the container belongs to `root`. Give it to your us
 (`sudo chown -R $USER benchmark_runs/<name>`) so the script can create `eval/`.
 
 The initialization keyframe `0` is not created by `track()`, so it has a pose in `trajectory.tum`
-but no telemetry row. The script reports it as one unmatched pose.
+but no telemetry row. This is a known exception to "every `t` in `trajectory.tum` has a telemetry row".
+The script reports it as one unmatched pose.
 
 ## Profiling with `gperftools`
 
