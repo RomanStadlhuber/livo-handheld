@@ -6,6 +6,11 @@
 # The header is only rewritten if its content changes, so an unchanged git state does not trigger a recompile.
 # Failing git calls never fail the build, the values fall back to "unknown" / -1.
 
+# printed on every build, the option is cached and a later production build would keep the instrumentation
+message(WARNING "mapping: benchmarking build (MAPPING_BENCHMARKING=ON). "
+  "For a production build without instrumentation, rebuild with --cmake-args -DMAPPING_BENCHMARKING=OFF "
+  "or use a separate --build-base / --install-base.")
+
 set(MAPPING_COMMIT "unknown")
 execute_process(
   COMMAND git -c safe.directory=* rev-parse HEAD
