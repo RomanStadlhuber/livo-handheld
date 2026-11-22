@@ -566,7 +566,9 @@ struct BagStats
 };
 
 // Standalone bag reader for debugging and benchmarking
-int processBag(const BagOptions &options, const mapping::MappingConfig &config, BagRecorder &recorder, BagStats &stats)
+// recorder is unused without MAPPING_BENCHMARKING, [[maybe_unused]] suppresses the unused-parameter warning
+int processBag(const BagOptions &options, const mapping::MappingConfig &config, [[maybe_unused]] BagRecorder &recorder,
+               BagStats &stats)
 {
     // Setup bag reader
     rosbag2_cpp::Reader reader;
@@ -674,8 +676,6 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
 #ifdef MAPPING_BENCHMARKING
         numRecordedKeyframes = slam.getKeyframeCount();
         recorder.trajectory.update(slam.getStates(), numRecordedKeyframes);
-#else
-        (void)recorder;
 #endif
     };
     // drain the keyframe telemetry queue, so no row is lost (also a lost-tracking keyframe, which has no new pose)
