@@ -54,7 +54,7 @@ namespace mapping
     /// `run.yaml` is written even if another file fails. In that case it records exit code 1.
     /// @param error Set to a message on failure.
     /// @return false if any file could not be written.
-    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder,
+    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &trajectory,
                         const benchmarking::TelemetryRecorder &telemetry, const MappingConfig &config, RunInfo info,
                         std::string &error);
 } // namespace mapping
