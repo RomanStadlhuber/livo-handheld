@@ -7,6 +7,13 @@ backend:
   solver_iterations: 2
   isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
 
+imu_frontend:
+  # Bosch BMI085 datasheet (rev. 1.6), output noise density:
+  # acc 105 µg/√Hz (X, Y), 135 µg/√Hz (Z) -> (n * 9.80665e-6)^2, gyro 0.014 °/s/√Hz -> (n * π/180)^2
+  # assumes the chip axes are the axes of the IMU message
+  accelerometer_noise_density_floor: [1.0603e-6, 1.0603e-6, 1.7527e-6] # [(m/s^2)^2/Hz]
+  gyroscope_noise_density_floor: [5.9705e-8, 5.9705e-8, 5.9705e-8] # [(rad/s)^2/Hz]
+
 lidar_frontend:
   voxel_size: 0.25 # [m]
   undistort: false # per-point offsets are parsed from the PointCloud2 FLOAT64 "timestamp" field (Hesai), undistortion off pending benchmarking

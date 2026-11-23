@@ -30,13 +30,14 @@ namespace mapping
         preintegrator_ = gtsam::PreintegratedCombinedMeasurements(params, priorImuBias);
     }
 
-    void ImuFrontend::initializeFromStatic(const double &accVariance, const double &gyroVariance,
+    void ImuFrontend::initializeFromStatic(const Eigen::Vector3d &accNoiseDensity,
+                                           const Eigen::Vector3d &gyroNoiseDensity,
                                            const gtsam::imuBias::ConstantBias &initialBias)
     {
         if (isInitialized_)
             throw std::runtime_error("::: [ERROR] Tried to initialize (static) IMU frontend twice. :::");
-        preintegrator_.params()->accelerometerCovariance = gtsam::I_3x3 * accVariance;
-        preintegrator_.params()->gyroscopeCovariance = gtsam::I_3x3 * gyroVariance;
+        preintegrator_.params()->accelerometerCovariance = accNoiseDensity.asDiagonal();
+        preintegrator_.params()->gyroscopeCovariance = gyroNoiseDensity.asDiagonal();
         preintegrator_.resetIntegrationAndSetBias(initialBias);
         isInitialized_ = true;
     }
