@@ -146,6 +146,12 @@ namespace mapping
         // Plane thickness alone only captures fit quality, not LiDAR ranging noise
         // or residual pose uncertainty at evaluation time.
         static constexpr double SENSOR_VARIANCE = 1.6e-7; // [m^4] (variance!)
+        /// @brief Variance [m^4] of the point-to-plane factor noise model of a cluster.
+        /// @note Differs from `clusterSigmas_`, which the front-end gating test uses.
+        double factorVariance(const ClusterId clusterId) const
+        {
+            return clusterSigmas_.at(clusterId) + SENSOR_VARIANCE;
+        }
         /// @brief Add or update the factor index mapping for a given cluster id.
         /// @param clusterId Id of the cluster.
         /// @param factorIdx Index of the factor in the `NonlinearFactorGraph` as returned by

@@ -9,6 +9,7 @@
 
 #include <Eigen/Eigenvalues>
 
+#include <cmath>
 #include <exception>
 #include <iterator>
 #include <stdexcept>
@@ -79,7 +80,7 @@ namespace mapping
                         const Eigen::Vector3d n = i_R_w * *featureManager.clusterNormals_.at(clusterId);
                         Eigen::Matrix<double, 1, 6> J;
                         J << p.cross(n).transpose(), n.transpose();
-                        information += J.transpose() * J / featureManager.clusterSigmas_.at(clusterId);
+                        information += J.transpose() * J / featureManager.factorVariance(clusterId);
                     }
                     row.thickness = makeStats(std::move(thickness));
                     const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigRot(information.topLeftCorner<3, 3>(),
@@ -92,7 +93,7 @@ namespace mapping
                 void collectBackend(KeyframeTelemetry &row, const States &states, const Smoother &smoother)
                 {
                     const gtsam::Values &estimate = states.getSmootherEstimate();
-                    std::vector<double> errImu, errLidar, wLidar;
+                    std::vector<double> errImu, errLidar, wLidar, varLidar;
                     double errMargSum = 0.0;
                     std::size_t numFailed = 0;
                     for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
@@ -109,6 +110,12 @@ namespace mapping
                                     ptp->evaluateErrorDiagnostic(estimate);
                                 errLidar.push_back(diagnostic.error);
                                 wLidar.push_back(diagnostic.weight);
+                                gtsam::SharedNoiseModel noise = ptp->noiseModel();
+                                if (const auto robust = boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(noise))
+                                    noise = robust->noise();
+                                if (const auto gaussian =
+                                        boost::dynamic_pointer_cast<gtsam::noiseModel::Gaussian>(noise))
+                                    varLidar.push_back(std::pow(gaussian->sigmas()(0), 2));
                             }
                             else if (boost::dynamic_pointer_cast<gtsam::LinearContainerFactor>(factor))
                                 errMargSum += factor->error(estimate);
@@ -123,6 +130,7 @@ namespace mapping
                     row.err_imu = makeStats(std::move(errImu));
                     row.err_lidar = makeStats(std::move(errLidar));
                     row.w_lidar = makeStats(std::move(wLidar));
+                    row.lidar_var = makeStats(std::move(varLidar));
                     row.err_marg_sum = errMargSum;
                     const gtsam::Matrix cov = smoother.marginalCovariance(X(static_cast<uint32_t>(*row.kf)));
                     row.cov_rot_trace = cov.topLeftCorner<3, 3>().trace();
