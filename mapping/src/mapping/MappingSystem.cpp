@@ -12,6 +12,7 @@
 #include <iostream>
 #include <optional>
 #include <utility>
+#include <vector>
 
 SETUP_LOGS(DEBUG, "MappingSystem");
 
@@ -164,14 +165,46 @@ namespace mapping
             gyroBiasMean += it->second->angular_velocity;
         gyroBiasMean /= numImuSamples;
 
-        double accVariance = 0.0, gyroVariance = 0.0;
+        // per-axis sample variance of the discrete measurements [(m/s^2)^2], [(rad/s)^2]
+        Eigen::Vector3d accVariance = Eigen::Vector3d::Zero(), gyroVariance = Eigen::Vector3d::Zero();
         for (auto it = imuBuffer.begin(); it != imuBufferEndIt; ++it)
         {
-            accVariance += (it->second->acceleration - accMean).squaredNorm();
-            gyroVariance += (it->second->angular_velocity - gyroBiasMean).squaredNorm();
+            accVariance += (it->second->acceleration - accMean).cwiseAbs2();
+            gyroVariance += (it->second->angular_velocity - gyroBiasMean).cwiseAbs2();
         }
         accVariance /= (numImuSamples - 1.0);
         gyroVariance /= (numImuSamples - 1.0);
+
+        /* GTSAM expects continuous-time white noise densities and divides them by dt during preintegration.
+         * For a sample period dt, the discrete variance relates to the density as sigma_c^2 = sigma_d^2 * dt.
+         * Use the median period of the init window, so single gaps or bursts in the timestamps have no effect.
+         */
+        std::vector<double> samplePeriods;
+        samplePeriods.reserve(static_cast<std::size_t>(numImuSamples));
+        for (auto it = std::next(imuBuffer.begin()); it != imuBufferEndIt; ++it)
+            samplePeriods.push_back(it->first - std::prev(it)->first);
+        if (samplePeriods.empty())
+            throw std::runtime_error("::: [ERROR] Static initialization needs at least two IMU samples. :::");
+        const auto medianIt = samplePeriods.begin() + samplePeriods.size() / 2;
+        std::nth_element(samplePeriods.begin(), medianIt, samplePeriods.end());
+        const double imuSamplePeriod = *medianIt;
+        const Eigen::Vector3d accDensityStatic = accVariance * imuSamplePeriod,
+                              gyroDensityStatic = gyroVariance * imuSamplePeriod;
+        /* At rest, the measurements have no vibration and come after the sensor's internal low-pass filter,
+         * so the static density can be lower than the real one. The configured floor (datasheet) bounds it.
+         */
+        const Eigen::Vector3d &accDensityFloor = config_.imu_frontend.accelerometer_noise_density_floor,
+                              &gyroDensityFloor = config_.imu_frontend.gyroscope_noise_density_floor;
+        const Eigen::Vector3d accDensity = accDensityStatic.cwiseMax(accDensityFloor),
+                              gyroDensity = gyroDensityStatic.cwiseMax(gyroDensityFloor);
+        LOG(INFO, "static init: IMU sample period (median) = " << imuSamplePeriod << " s (" << 1.0 / imuSamplePeriod
+                                                               << " Hz)");
+        LOG(INFO, "static init: acc noise density [(m/s^2)^2/Hz] static = "
+                      << accDensityStatic.transpose() << ", floor = " << accDensityFloor.transpose()
+                      << ", used = " << accDensity.transpose());
+        LOG(INFO, "static init: gyro noise density [(rad/s)^2/Hz] static = "
+                      << gyroDensityStatic.transpose() << ", floor = " << gyroDensityFloor.transpose()
+                      << ", used = " << gyroDensity.transpose());
 
         /* At rest, the accelerometer measures only gravity, so any difference between the measured and the
          * assumed gravity magnitude is accelerometer bias. Only the part along gravity is observable here,
@@ -185,7 +218,7 @@ namespace mapping
                                           << " m/s^2, initial accelerometer bias = " << accBiasMean.transpose());
         gtsam::imuBias::ConstantBias priorImuBias{accBiasMean, gyroBiasMean};
         // modifies imuFrontend_: calibrates preintegrator noise and resets with computed bias
-        imuFrontend_.initializeFromStatic(accVariance, gyroVariance, priorImuBias);
+        imuFrontend_.initializeFromStatic(accDensity, gyroDensity, priorImuBias);
         states_.setCurrentBias(priorImuBias);
         gtsam::NavState x0{w_T_i0, gtsam::Vector3::Zero()};
         // build prior factors for the first keyframe

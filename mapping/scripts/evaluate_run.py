@@ -6,8 +6,14 @@ Reads `trajectory.tum`, `telemetry.csv` and `run.yaml` from a run directory (ben
 
 - `errors.csv`: telemetry left-joined with the error columns, one row per keyframe
 - `overview.png`: error curves and one panel per stage on a shared time axis
+- `gyro_consistency.yaml`: mean gyro gap for the static phase and up to `--gyro-until`
 
-and prints a summary: the first time the absolute error passes `--threshold`, and the telemetry row at that time.
+and prints a summary: the gyro gap, the first time the absolute error passes `--threshold`, and the telemetry row at
+that time.
+
+Gyro gap (`gyro_gap_deg`): for each pair of consecutive keyframes, the angle between the estimated relative rotation
+and the relative rotation from the integrated raw gyro (bias = mean gyro over the first `--gyro-bias-seconds`).
+The gyro is read from the bag in `run.yaml` (`input.bag`, `input.topic_imu`). Both rotations are in the IMU frame.
 
 Two matches:
 - evo matches estimate to ground truth by nearest timestamp (`--t-max-diff`)
@@ -32,6 +38,8 @@ import yaml  # noqa: E402
 from evo.core import lie_algebra, sync  # noqa: E402
 from evo.core.trajectory import PoseTrajectory3D  # noqa: E402
 from evo.tools import file_interface  # noqa: E402
+from rosbags.highlevel import AnyReader, AnyReaderError  # noqa: E402
+from rosbags.typesys import Stores, get_typestore  # noqa: E402
 
 ERROR_COLUMNS = ["ape_trans", "ape_rot_deg", "rpe_trans", "rpe_rot_deg"]
 
@@ -46,6 +54,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--segment", type=float, default=1.0, help="segment length [s] for the relative error")
     parser.add_argument("--threshold", type=float, default=1.0, help="absolute translation error threshold [m]")
+    parser.add_argument(
+        "--gyro-bias-seconds", type=float, default=2.0, help="gyro bias = mean gyro over the first N seconds of the bag"
+    )
+    parser.add_argument(
+        "--static-end",
+        type=float,
+        default=None,
+        help="end of the static phase [s since bag start], default: first time the gyro rate passes "
+        "--static-rate-threshold",
+    )
+    parser.add_argument(
+        "--static-rate-threshold",
+        type=float,
+        default=0.05,
+        help="rate [rad/s] (0.25 s moving mean of |gyro - bias|) that ends the static phase",
+    )
+    parser.add_argument("--gyro-until", type=float, default=14.0, help="second gyro gap mean: t < N s since bag start")
     return parser.parse_args()
 
 
@@ -107,6 +132,98 @@ def relative_errors(est: PoseTrajectory3D, ref: PoseTrajectory3D, segment: float
         trans[j] = np.linalg.norm(e[:3, 3])
         rot[j] = rotation_angle_deg(e[None, :3, :3])[0]
     return trans, rot
+
+
+class GyroUnavailable(Exception):
+    """The run has no readable gyro input, so the gyro gap cannot be computed."""
+
+
+def load_gyro(bag: Path, topic: str) -> tuple[np.ndarray, np.ndarray]:
+    """Header timestamps [s] and angular velocities [rad/s] (N x 3) of the IMU topic, sorted by time."""
+    stamps, rates = [], []
+    with AnyReader([bag], default_typestore=get_typestore(Stores.ROS2_HUMBLE)) as reader:
+        connections = [c for c in reader.connections if c.topic == topic]
+        if not connections:
+            raise GyroUnavailable(f"topic {topic} not found in {bag}")
+        for connection, _, raw in reader.messages(connections=connections):
+            msg = reader.deserialize(raw, connection.msgtype)
+            stamps.append(msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec)
+            w = msg.angular_velocity
+            rates.append((w.x, w.y, w.z))
+    order = np.argsort(stamps, kind="stable")
+    return np.asarray(stamps)[order], np.asarray(rates)[order]
+
+
+def so3_exp(phi: np.ndarray) -> np.ndarray:
+    angle = np.linalg.norm(phi)
+    k = np.array([[0.0, -phi[2], phi[1]], [phi[2], 0.0, -phi[0]], [-phi[1], phi[0], 0.0]])
+    if angle < 1e-10:
+        return np.eye(3) + k
+    k /= angle
+    return np.eye(3) + np.sin(angle) * k + (1.0 - np.cos(angle)) * k @ k
+
+
+def integrate_gyro(stamps: np.ndarray, rates: np.ndarray, t_a: float, t_b: float) -> np.ndarray:
+    """Rotation from t_a to t_b, each sample held constant until the next one (zero-order hold)."""
+    rot = np.eye(3)
+    k = max(int(np.searchsorted(stamps, t_a, side="right")) - 1, 0)
+    while k < len(stamps) and stamps[k] < t_b:
+        t_next = stamps[k + 1] if k + 1 < len(stamps) else t_b
+        dt = min(t_next, t_b) - max(stamps[k], t_a)
+        if dt > 0:
+            rot = rot @ so3_exp(rates[k] * dt)
+        k += 1
+    return rot
+
+
+def gyro_gap(run_dir: Path, info: dict, args: argparse.Namespace, bag_start: float) -> tuple[pd.DataFrame, dict]:
+    """Per keyframe pair: angle [deg] between the estimated and the gyro relative rotation.
+
+    One row per keyframe j > 0 of `trajectory.tum`, for the pair (j-1, j). Returns the rows and the summary values.
+    """
+    inp = info.get("input") or {}
+    if "bag" not in inp or "topic_imu" not in inp:
+        raise GyroUnavailable("run.yaml has no input.bag / input.topic_imu")
+    try:
+        stamps, rates = load_gyro(Path(inp["bag"]), str(inp["topic_imu"]))
+    except (OSError, AnyReaderError) as e:
+        raise GyroUnavailable(f"cannot read bag {inp['bag']}: {e}") from e
+    bias = rates[stamps < stamps[0] + args.gyro_bias_seconds].mean(axis=0)
+    rates = rates - bias
+
+    static_end = args.static_end
+    if static_end is None:
+        # moving mean of the rate magnitude over 0.25 s, by sample count from the median period
+        n = max(int(round(0.25 / np.median(np.diff(stamps)))), 1)
+        rate = np.convolve(np.linalg.norm(rates, axis=1), np.ones(n) / n, mode="same")
+        moving = np.flatnonzero(rate > args.static_rate_threshold)
+        static_end = (stamps[moving[0]] if len(moving) else stamps[-1]) - bag_start
+
+    # same parser as compute_errors, so t matches the telemetry / errors key exactly
+    est = file_interface.read_tum_trajectory_file(str(run_dir / "trajectory.tum"))
+    t = est.timestamps
+    rot = np.asarray(est.poses_se3)[:, :3, :3]
+    gaps = np.full(len(t), np.nan)
+    for j in range(1, len(t)):
+        d_est = rot[j - 1].T @ rot[j]
+        d_gyro = integrate_gyro(stamps, rates, t[j - 1], t[j])
+        gaps[j] = rotation_angle_deg((d_gyro.T @ d_est)[None])[0]
+    rows = pd.DataFrame({"t": t[1:], "gyro_gap_deg": gaps[1:]})
+
+    t_rel = rows["t"] - bag_start
+    static = rows.loc[t_rel <= static_end, "gyro_gap_deg"]
+    until = rows.loc[t_rel < args.gyro_until, "gyro_gap_deg"]
+    summary = {
+        "gyro_bias": [float(v) for v in bias],
+        "gyro_bias_seconds": float(args.gyro_bias_seconds),
+        "static_end": float(static_end),
+        "static_pairs": int(static.count()),
+        "static_mean_deg": float(static.mean()),
+        "until": float(args.gyro_until),
+        "until_pairs": int(until.count()),
+        "until_mean_deg": float(until.mean()),
+    }
+    return rows, summary
 
 
 def compute_errors(run_dir: Path, gt_path: Path, args: argparse.Namespace) -> pd.DataFrame:
@@ -175,10 +292,11 @@ def plot_overview(df: pd.DataFrame, path: Path, title: str, threshold: float) ->
     ax.set_title("trajectory error")
 
     ax = axes[1]
-    for col in ["imu_pred_dpos", "imu_pred_drot", "vel_norm", "ba_norm", "bg_norm"]:
-        ax.plot(t, df[col], label=col)
+    for col in ["imu_pred_dpos", "imu_pred_drot", "vel_norm", "ba_norm", "bg_norm", "gyro_gap_deg"]:
+        if col in df:
+            ax.plot(t, df[col], label=col)
     ax.set_yscale("log")
-    ax.legend(loc="upper left", ncol=5)
+    ax.legend(loc="upper left", ncol=6)
     ax.set_title("IMU")
 
     ax = axes[2]
@@ -223,8 +341,16 @@ def plot_overview(df: pd.DataFrame, path: Path, title: str, threshold: float) ->
     plt.close(fig)
 
 
-def print_summary(df: pd.DataFrame, label: str, threshold: float) -> None:
+def print_summary(df: pd.DataFrame, label: str, threshold: float, gyro: dict | None) -> None:
     print(f"run: {label}")
+    if gyro is None:
+        print("gyro gap: not available")
+    else:
+        print(
+            f"gyro gap (estimate vs gyro per keyframe): static (t <= {gyro['static_end']:.2f} s) "
+            f"{gyro['static_mean_deg']:.3f} deg over {gyro['static_pairs']} pairs, "
+            f"t < {gyro['until']:g} s {gyro['until_mean_deg']:.3f} deg over {gyro['until_pairs']} pairs"
+        )
     print(f"keyframes: {len(df)}, lost tracking: {int((df['lost_tracking'] == 1).sum())}")
     print(f"keyframes with error: {int(df['ape_trans'].notna().sum())}")
     print(f"abs. translation error: max {df['ape_trans'].max():.3f} m, mean {df['ape_trans'].mean():.3f} m")
@@ -253,14 +379,25 @@ def main() -> int:
     df = join(telemetry, errors)
     bag_start = float((info.get("time") or {}).get("bag_start", df["t"].iloc[0]))
     df.insert(df.columns.get_loc("t") + 1, "t_rel", df["t"] - bag_start)
+    gyro = None
+    try:
+        gyro_rows, gyro = gyro_gap(run_dir, info, args, bag_start)
+        df = df.merge(gyro_rows, on="t", how="left", validate="many_to_one")
+    except GyroUnavailable as e:
+        print(f"warning: no gyro gap ({e}), continuing without it", file=sys.stderr)
 
     out_dir = run_dir / "eval"
     out_dir.mkdir(exist_ok=True)
     # floats in shortest round-trip form, the time key as in trajectory.tum / telemetry.csv
     df.assign(t=df["t"].map(lambda v: f"{v:.9f}")).to_csv(out_dir / "errors.csv", index=False, na_rep="nan")
     plot_overview(df, out_dir / "overview.png", f"{run_dir.name}: {label}", args.threshold)
-    print(f"wrote {out_dir / 'errors.csv'} and {out_dir / 'overview.png'}")
-    print_summary(df, label, args.threshold)
+    written = [out_dir / "errors.csv", out_dir / "overview.png"]
+    if gyro is not None:
+        with open(out_dir / "gyro_consistency.yaml", "w") as f:
+            yaml.safe_dump(gyro, f, sort_keys=False)
+        written.append(out_dir / "gyro_consistency.yaml")
+    print("wrote " + ", ".join(str(p) for p in written))
+    print_summary(df, label, args.threshold, gyro)
     return 0
 
 

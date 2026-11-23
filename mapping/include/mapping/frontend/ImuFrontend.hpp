@@ -26,10 +26,10 @@ namespace mapping
         /// @brief Bootstrap the IMU preintegrator with values from static intialization.
         /// @details Values are obtained from the assumption that over the static period,
         /// all non-zero readings represent sensor noise.
-        /// @param accVariance Variance of the accelerometer noise over the static period.
-        /// @param gyroVariance Variance of the gyroscope noise over the static period.
+        /// @param accNoiseDensity Per-axis continuous-time accelerometer white noise density [(m/s^2)^2/Hz].
+        /// @param gyroNoiseDensity Per-axis continuous-time gyroscope white noise density [(rad/s)^2/Hz].
         /// @param initialBias Initial bias estimate from the static period (accelerometer and gyroscope).
-        void initializeFromStatic(const double &accVariance, const double &gyroVariance,
+        void initializeFromStatic(const Eigen::Vector3d &accNoiseDensity, const Eigen::Vector3d &gyroNoiseDensity,
                                   const gtsam::imuBias::ConstantBias &initialBias);
 
         /// @brief Gravity magnitude [m/s^2] that the preintegrator assumes in the navigation frame.

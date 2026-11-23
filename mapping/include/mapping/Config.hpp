@@ -175,6 +175,26 @@ namespace mapping
         check(config.isam2_relinearize_threshold, GT, 0.0, "isam2_relinearize_threshold");
     }
 
+    /// @brief IMU noise parameters
+    struct ImuFrontendConfig
+    {
+        /// Lower bound per axis for the continuous-time white noise densities that the static initialization
+        /// estimates. Use the sensor datasheet values, as the static estimate lacks vibration and comes after the
+        /// sensor's internal filter. Zero disables the floor.
+        Eigen::Vector3d accelerometer_noise_density_floor{0, 0, 0}; // [(m/s^2)^2/Hz]
+        Eigen::Vector3d gyroscope_noise_density_floor{0, 0, 0};     // [(rad/s)^2/Hz]
+    };
+
+    inline void declare_config(ImuFrontendConfig &config)
+    {
+        using namespace config;
+        name("ImuFrontendConfig");
+        field(config.accelerometer_noise_density_floor, "accelerometer_noise_density_floor", "(m/s^2)^2/Hz");
+        field(config.gyroscope_noise_density_floor, "gyroscope_noise_density_floor", "(rad/s)^2/Hz");
+        check(config.accelerometer_noise_density_floor.minCoeff(), GE, 0.0, "accelerometer_noise_density_floor");
+        check(config.gyroscope_noise_density_floor.minCoeff(), GE, 0.0, "gyroscope_noise_density_floor");
+    }
+
     /// @brief Point cloud filtering parameters
     struct PointFilterConfig
     {
@@ -427,6 +447,7 @@ namespace mapping
     struct MappingConfig
     {
         BackendConfig backend;
+        ImuFrontendConfig imu_frontend;
         LidarFrontendConfig lidar_frontend;
         CameraFrontendConfig camera_frontend;
         PointFilterConfig point_filter;
@@ -440,6 +461,7 @@ namespace mapping
         using namespace config;
         name("MappingConfig");
         field(config.backend, "backend");
+        field(config.imu_frontend, "imu_frontend");
         field(config.lidar_frontend, "lidar_frontend");
         field(config.camera_frontend, "camera_frontend");
         field(config.point_filter, "point_filter");

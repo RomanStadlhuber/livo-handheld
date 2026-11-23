@@ -217,7 +217,7 @@ namespace mapping
                 planeThicknessCovariance += std::pow(thickness, 2.0);
             planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
             clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-            // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
+            // floor for the front-end gating test only, the factor noise model uses factorVariance()
             clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
         }
     }
@@ -233,7 +233,7 @@ namespace mapping
             planeThicknessCovariance += std::pow(thickness, 2.0);
         planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
         clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-        // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
+        // floor for the front-end gating test only, the factor noise model uses factorVariance()
         clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
     }
 
@@ -306,9 +306,8 @@ namespace mapping
                 // cluster parameters from new track
                 const std::shared_ptr<Eigen::Vector3d> clusterCenter = clusterCenters_[clusterId];
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
-                // add sensor-noise floor to the plane-fit variance for the factor noise model.
-                // kept out of clusterSigmas_ so the front-end gating test remains unaffected.
-                const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
+                // factor variance is kept apart from clusterSigmas_, so the front-end gating test is not affected
+                const double adaptiveSigma = factorVariance(clusterId);
                 // retrieve the live factor iff it is still present and confirmed to be our cluster's factor
                 // (slot reuse via findUnusedFactorSlots=true can put a different factor at a stale index)
                 boost::shared_ptr<PointToPlaneFactor> livePtpFactor;
@@ -394,7 +393,7 @@ namespace mapping
                 const std::shared_ptr<Eigen::Vector3d> clusterNormal = clusterNormals_[clusterId];
                 // NOTE: when (re-) creating the factor, sensor noise must be re added
                 // (equivalent to "J S Jt + P" in MSCKF)
-                const double adaptiveSigma = clusterSigmas_[clusterId] + SENSOR_VARIANCE;
+                const double adaptiveSigma = factorVariance(clusterId);
                 // 1: Remove old factor from smoother (if still present and confirmed ours)
                 const gtsam::FactorIndex factorKey = clusterFactorIdxMap_.at(clusterId);
                 const auto &existingPtr = currentSmootherFactors[factorKey];
@@ -463,7 +462,7 @@ namespace mapping
     {
         // collect sigmas and thickness values across valid clusters to inspect
         // the dynamic range of the noise model at runtime
-        std::vector<double> sigmas, clusterThicknessValues;
+        std::vector<double> sigmas, factorVariances, clusterThicknessValues;
         std::size_t numTracked = 0, numIdle = 0, numShifted = 0;
         sigmas.reserve(clusters_.size());
         clusterThicknessValues.reserve(clusters_.size());
@@ -472,6 +471,7 @@ namespace mapping
             if (!isClusterValid(clusterId))
                 continue;
             sigmas.push_back(clusterSigmas_.at(clusterId));
+            factorVariances.push_back(factorVariance(clusterId));
             clusterThicknessValues.push_back(clusterPlaneThickness_.at(clusterId));
             switch (clusterStates_.at(clusterId))
             {
@@ -495,11 +495,13 @@ namespace mapping
             return std::make_tuple(v.front(), v[n / 2], v[idxP95], v.back());
         };
         auto const [sMin, sMed, sP95, sMax] = stats(sigmas);
+        auto const [fMin, fMed, fP95, fMax] = stats(factorVariances);
         auto const [tMin, tMed, tP95, tMax] = stats(clusterThicknessValues);
         LOG_MULTI(DEBUG,
                   STREAM("cluster summary (valid=" << sigmas.size() << " tracked=" << numTracked << " idle=" << numIdle
                                                    << " shifted=" << numShifted << ")"),
                   STREAM("sigmas    [m^4]: min=" << sMin << " median=" << sMed << " p95=" << sP95 << " max=" << sMax),
+                  STREAM("factor var[m^4]: min=" << fMin << " median=" << fMed << " p95=" << fP95 << " max=" << fMax),
                   STREAM("thickness [m^2]: min=" << tMin << " median=" << tMed << " p95=" << tP95 << " max=" << tMax));
     }
 

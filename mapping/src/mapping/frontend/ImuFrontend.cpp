@@ -25,18 +25,24 @@ namespace mapping
         // bias value from:
         // https://github.com/hku-mars/FAST_LIO/blob/7cc4175de6f8ba2edf34bab02a42195b141027e9/include/use-ikfom.hpp#L35
         params->integrationCovariance = gtsam::I_3x3 * 1e-8;
+        /* GTSAM 4.2 adds biasAccOmegaInt to the acc and gyro covariance in every preintegration step.
+         * Its default I_6x6 then adds about dt [rad^2] of rotation variance and hides the sensor noise densities.
+         * 1e-8 is hand-picked: it adds per step like a noise density, ~17 % on the BMI085 gyro floor (6e-8).
+         */
+        params->biasAccOmegaInt = gtsam::I_6x6 * 1e-8;
         const gtsam::Vector6 commonBias{gtsam::Vector6::Ones() * 0.0001};
         gtsam::imuBias::ConstantBias priorImuBias{commonBias};
         preintegrator_ = gtsam::PreintegratedCombinedMeasurements(params, priorImuBias);
     }
 
-    void ImuFrontend::initializeFromStatic(const double &accVariance, const double &gyroVariance,
+    void ImuFrontend::initializeFromStatic(const Eigen::Vector3d &accNoiseDensity,
+                                           const Eigen::Vector3d &gyroNoiseDensity,
                                            const gtsam::imuBias::ConstantBias &initialBias)
     {
         if (isInitialized_)
             throw std::runtime_error("::: [ERROR] Tried to initialize (static) IMU frontend twice. :::");
-        preintegrator_.params()->accelerometerCovariance = gtsam::I_3x3 * accVariance;
-        preintegrator_.params()->gyroscopeCovariance = gtsam::I_3x3 * gyroVariance;
+        preintegrator_.params()->accelerometerCovariance = accNoiseDensity.asDiagonal();
+        preintegrator_.params()->gyroscopeCovariance = gyroNoiseDensity.asDiagonal();
         preintegrator_.resetIntegrationAndSetBias(initialBias);
         isInitialized_ = true;
     }

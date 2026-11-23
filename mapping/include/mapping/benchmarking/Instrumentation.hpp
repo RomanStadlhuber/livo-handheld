@@ -43,7 +43,7 @@ namespace mapping
             ///
             /// Information matrix for `eig_*_min`: sum over `Tracked` clusters with a point in this keyframe of
             /// `J^T J / s`, `J = [(p x n)^T, n^T]`, `p` the point and `n` the cluster normal in the keyframe IMU frame,
-            /// `s = clusterSigmas_` (a variance, despite the name). Rotation block first, as in `gtsam::Pose3`.
+            /// `s = FeatureManager::factorVariance`. Rotation block first, as in `gtsam::Pose3`.
             void collect(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states,
                          const FeatureManager &featureManager, const Smoother &smoother) noexcept;
         } // namespace instrumentation

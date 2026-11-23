@@ -133,7 +133,8 @@ Waits until the LiDAR buffer spans at least `init_time_window` seconds, then:
 2. Build a gravity-aligned initial pose.
 3. Stack and transform all buffered scans into an initial submap.
 4. Seed premature clusters from the initial submap.
-5. Calibrate the IMU preintegrator from static noise statistics.
+5. Calibrate the IMU preintegrator from static noise statistics: per-axis sample variance times the median
+   sample period gives the continuous-time noise density, bounded below by `imu_frontend.*_noise_density_floor`.
 6. Set prior factors for \f$ X_0, V_0, B_0 \f$.
 
 ### Tracking
