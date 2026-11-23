@@ -385,7 +385,8 @@ It writes into `<run dir>/eval/`:
 - `gyro_consistency.yaml`: mean gyro gap for the static phase and for `t < --gyro-until`. The gyro gap
   (column `gyro_gap_deg`) is the angle between the estimated rotation from the previous keyframe and the rotation from
   the integrated raw gyro (bias = mean of the first `--gyro-bias-seconds`). The script reads the gyro from
-  `input.bag` / `input.topic_imu` in `run.yaml`, so the bag must be readable at that path
+  `input.bag` / `input.topic_imu` in `run.yaml`. If the bag is not readable at that path, the script prints a warning
+  and writes the other files without the gyro gap
 
 On stdout it prints the gyro gap means, the first time the absolute error passes `--threshold`, and the telemetry row at that time.
 Plot title and summary show the commit, dirty flag and config name from `run.yaml`.

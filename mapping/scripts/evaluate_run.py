@@ -38,7 +38,7 @@ import yaml  # noqa: E402
 from evo.core import lie_algebra, sync  # noqa: E402
 from evo.core.trajectory import PoseTrajectory3D  # noqa: E402
 from evo.tools import file_interface  # noqa: E402
-from rosbags.highlevel import AnyReader  # noqa: E402
+from rosbags.highlevel import AnyReader, AnyReaderError  # noqa: E402
 from rosbags.typesys import Stores, get_typestore  # noqa: E402
 
 ERROR_COLUMNS = ["ape_trans", "ape_rot_deg", "rpe_trans", "rpe_rot_deg"]
@@ -134,13 +134,17 @@ def relative_errors(est: PoseTrajectory3D, ref: PoseTrajectory3D, segment: float
     return trans, rot
 
 
+class GyroUnavailable(Exception):
+    """The run has no readable gyro input, so the gyro gap cannot be computed."""
+
+
 def load_gyro(bag: Path, topic: str) -> tuple[np.ndarray, np.ndarray]:
     """Header timestamps [s] and angular velocities [rad/s] (N x 3) of the IMU topic, sorted by time."""
     stamps, rates = [], []
     with AnyReader([bag], default_typestore=get_typestore(Stores.ROS2_HUMBLE)) as reader:
         connections = [c for c in reader.connections if c.topic == topic]
         if not connections:
-            raise SystemExit(f"error: topic {topic} not found in {bag}")
+            raise GyroUnavailable(f"topic {topic} not found in {bag}")
         for connection, _, raw in reader.messages(connections=connections):
             msg = reader.deserialize(raw, connection.msgtype)
             stamps.append(msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec)
@@ -179,8 +183,11 @@ def gyro_gap(run_dir: Path, info: dict, args: argparse.Namespace, bag_start: flo
     """
     inp = info.get("input") or {}
     if "bag" not in inp or "topic_imu" not in inp:
-        raise SystemExit("error: run.yaml has no input.bag / input.topic_imu, cannot compute the gyro gap")
-    stamps, rates = load_gyro(Path(inp["bag"]), str(inp["topic_imu"]))
+        raise GyroUnavailable("run.yaml has no input.bag / input.topic_imu")
+    try:
+        stamps, rates = load_gyro(Path(inp["bag"]), str(inp["topic_imu"]))
+    except (OSError, AnyReaderError) as e:
+        raise GyroUnavailable(f"cannot read bag {inp['bag']}: {e}") from e
     bias = rates[stamps < stamps[0] + args.gyro_bias_seconds].mean(axis=0)
     rates = rates - bias
 
@@ -286,7 +293,8 @@ def plot_overview(df: pd.DataFrame, path: Path, title: str, threshold: float) ->
 
     ax = axes[1]
     for col in ["imu_pred_dpos", "imu_pred_drot", "vel_norm", "ba_norm", "bg_norm", "gyro_gap_deg"]:
-        ax.plot(t, df[col], label=col)
+        if col in df:
+            ax.plot(t, df[col], label=col)
     ax.set_yscale("log")
     ax.legend(loc="upper left", ncol=6)
     ax.set_title("IMU")
@@ -333,13 +341,16 @@ def plot_overview(df: pd.DataFrame, path: Path, title: str, threshold: float) ->
     plt.close(fig)
 
 
-def print_summary(df: pd.DataFrame, label: str, threshold: float, gyro: dict) -> None:
+def print_summary(df: pd.DataFrame, label: str, threshold: float, gyro: dict | None) -> None:
     print(f"run: {label}")
-    print(
-        f"gyro gap (estimate vs gyro per keyframe): static (t <= {gyro['static_end']:.2f} s) "
-        f"{gyro['static_mean_deg']:.3f} deg over {gyro['static_pairs']} pairs, "
-        f"t < {gyro['until']:g} s {gyro['until_mean_deg']:.3f} deg over {gyro['until_pairs']} pairs"
-    )
+    if gyro is None:
+        print("gyro gap: not available")
+    else:
+        print(
+            f"gyro gap (estimate vs gyro per keyframe): static (t <= {gyro['static_end']:.2f} s) "
+            f"{gyro['static_mean_deg']:.3f} deg over {gyro['static_pairs']} pairs, "
+            f"t < {gyro['until']:g} s {gyro['until_mean_deg']:.3f} deg over {gyro['until_pairs']} pairs"
+        )
     print(f"keyframes: {len(df)}, lost tracking: {int((df['lost_tracking'] == 1).sum())}")
     print(f"keyframes with error: {int(df['ape_trans'].notna().sum())}")
     print(f"abs. translation error: max {df['ape_trans'].max():.3f} m, mean {df['ape_trans'].mean():.3f} m")
@@ -368,17 +379,24 @@ def main() -> int:
     df = join(telemetry, errors)
     bag_start = float((info.get("time") or {}).get("bag_start", df["t"].iloc[0]))
     df.insert(df.columns.get_loc("t") + 1, "t_rel", df["t"] - bag_start)
-    gyro_rows, gyro = gyro_gap(run_dir, info, args, bag_start)
-    df = df.merge(gyro_rows, on="t", how="left", validate="many_to_one")
+    gyro = None
+    try:
+        gyro_rows, gyro = gyro_gap(run_dir, info, args, bag_start)
+        df = df.merge(gyro_rows, on="t", how="left", validate="many_to_one")
+    except GyroUnavailable as e:
+        print(f"warning: no gyro gap ({e}), continuing without it", file=sys.stderr)
 
     out_dir = run_dir / "eval"
     out_dir.mkdir(exist_ok=True)
     # floats in shortest round-trip form, the time key as in trajectory.tum / telemetry.csv
     df.assign(t=df["t"].map(lambda v: f"{v:.9f}")).to_csv(out_dir / "errors.csv", index=False, na_rep="nan")
     plot_overview(df, out_dir / "overview.png", f"{run_dir.name}: {label}", args.threshold)
-    with open(out_dir / "gyro_consistency.yaml", "w") as f:
-        yaml.safe_dump(gyro, f, sort_keys=False)
-    print(f"wrote {out_dir / 'errors.csv'}, {out_dir / 'overview.png'} and {out_dir / 'gyro_consistency.yaml'}")
+    written = [out_dir / "errors.csv", out_dir / "overview.png"]
+    if gyro is not None:
+        with open(out_dir / "gyro_consistency.yaml", "w") as f:
+            yaml.safe_dump(gyro, f, sort_keys=False)
+        written.append(out_dir / "gyro_consistency.yaml")
+    print("wrote " + ", ".join(str(p) for p in written))
     print_summary(df, label, args.threshold, gyro)
     return 0
 
