@@ -8,7 +8,7 @@ backend:
   isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
 
 imu_frontend:
-  # Bosch BMI085 datasheet (rev. 1.6), output noise density:
+  # Bosch BMI085 datasheet (rev. 1.6, https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmi085-ds001.pdf), output noise density:
   # acc 105 µg/√Hz (X, Y), 135 µg/√Hz (Z) -> (n * 9.80665e-6)^2, gyro 0.014 °/s/√Hz -> (n * π/180)^2
   # the acc floor uses the larger Z value on all axes, as the mapping from chip axes to message axes is not known
   accelerometer_noise_density_floor: [1.7527e-6, 1.7527e-6, 1.7527e-6] # [(m/s^2)^2/Hz]
