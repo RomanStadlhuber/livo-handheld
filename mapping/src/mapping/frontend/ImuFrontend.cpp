@@ -27,6 +27,7 @@ namespace mapping
         params->integrationCovariance = gtsam::I_3x3 * 1e-8;
         /* GTSAM 4.2 adds biasAccOmegaInt to the acc and gyro covariance in every preintegration step.
          * Its default I_6x6 then adds about dt [rad^2] of rotation variance and hides the sensor noise densities.
+         * 1e-8 is hand-picked: it adds per step like a noise density, ~17 % on the BMI085 gyro floor (6e-8).
          */
         params->biasAccOmegaInt = gtsam::I_6x6 * 1e-8;
         const gtsam::Vector6 commonBias{gtsam::Vector6::Ones() * 0.0001};
