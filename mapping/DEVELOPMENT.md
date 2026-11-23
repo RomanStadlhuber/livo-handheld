@@ -373,7 +373,8 @@ mapping/scripts/.venv/bin/python mapping/scripts/evaluate_run.py benchmark_runs/
 
 Options: `--t-max-diff` (default 0.05 s, max. timestamp difference to match a ground-truth pose),
 `--align-seconds` (default 5 s, SE(3) alignment on the start of the run only, no global alignment),
-`--segment` (default 1 s, segment length of the relative error), `--threshold` (default 1 m).
+`--segment` (default 1 s, segment length of the relative error), `--threshold` (default 1 m),
+`--gyro-bias-seconds` (default 2 s), `--static-end` (default: detected from the gyro rate), `--gyro-until` (default 14 s).
 
 It writes into `<run dir>/eval/`:
 
@@ -381,8 +382,12 @@ It writes into `<run dir>/eval/`:
   Keyframes without a matched pose (e.g. lost tracking) keep their row with `nan` errors
 - `overview.png`: error curves on top, then one panel per stage (IMU, LiDAR frontend, geometry, backend).
   Red lines mark lost tracking, orange lines the recovery keyframe after it
+- `gyro_consistency.yaml`: mean gyro gap for the static phase and for `t < --gyro-until`. The gyro gap
+  (column `gyro_gap_deg`) is the angle between the estimated rotation from the previous keyframe and the rotation from
+  the integrated raw gyro (bias = mean of the first `--gyro-bias-seconds`). The script reads the gyro from
+  `input.bag` / `input.topic_imu` in `run.yaml`, so the bag must be readable at that path
 
-On stdout it prints the first time the absolute error passes `--threshold`, and the telemetry row at that time.
+On stdout it prints the gyro gap means, the first time the absolute error passes `--threshold`, and the telemetry row at that time.
 Plot title and summary show the commit, dirty flag and config name from `run.yaml`.
 A run directory written from the container belongs to `root`. Give it to your user first
 (`sudo chown -R $USER benchmark_runs/<name>`) so the script can create `eval/`.

@@ -3,3 +3,4 @@ pandas>=2.0
 matplotlib>=3.7
 numpy>=1.24
 pyyaml>=6.0
+rosbags>=0.10
