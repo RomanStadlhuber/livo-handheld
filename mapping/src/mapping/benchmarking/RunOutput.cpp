@@ -129,14 +129,20 @@ namespace mapping
         return true;
     }
 
-    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &recorder, const MappingConfig &config,
-                        RunInfo info, std::string &error)
+    bool writeRunOutput(const std::string &dir, const TrajectoryRecorder &trajectory,
+                        const benchmarking::TelemetryRecorder &telemetry, const MappingConfig &config, RunInfo info,
+                        std::string &error)
     {
         const fs::path root(dir);
         bool ok = true;
-        if (!recorder.writeTum((root / "trajectory.tum").string(), info.bagStart))
+        if (!trajectory.writeTum((root / "trajectory.tum").string(), info.bagStart))
         {
             appendError(error, "failed to write '" + (root / "trajectory.tum").string() + "'");
+            ok = false;
+        }
+        if (!telemetry.writeCsv((root / "telemetry.csv").string(), info.bagStart))
+        {
+            appendError(error, "failed to write '" + (root / "telemetry.csv").string() + "'");
             ok = false;
         }
         if (!writeConfigYaml(root / "config.yaml", config))
@@ -146,7 +152,7 @@ namespace mapping
         }
         if (!ok)
             info.exitCode = 1;
-        if (!writeRunYaml(root / "run.yaml", info, recorder.size()))
+        if (!writeRunYaml(root / "run.yaml", info, trajectory.size()))
         {
             appendError(error, "failed to write '" + (root / "run.yaml").string() + "'");
             ok = false;

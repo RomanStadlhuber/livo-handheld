@@ -8,15 +8,19 @@
 /// @brief Home of the benchmark call-point macros, like `LOG` in `logging.hpp`.
 /// @details Each macro has two definitions: the real one under `MAPPING_BENCHMARKING`,
 /// and one that expands to nothing otherwise. So the production binary has no telemetry code
-/// and no runtime cost. No macro is defined yet. The telemetry follow-up adds `BENCH_KEYFRAME_PROBE`,
-/// the single call point in `MappingSystem::track()`.
+/// and no runtime cost.
 #ifdef MAPPING_BENCHMARKING
 
-// benchmark build: call-point macros forward to the benchmarking module
+#include <mapping/benchmarking/KeyframeProbe.hpp>
+
+/// @brief Record the telemetry row of a new keyframe when the enclosing scope exits.
+/// @details Place it in `MappingSystem::track()` right after the keyframe is created, see `KeyframeProbe`.
+#define BENCH_KEYFRAME_PROBE(idxKeyframe)                                                                              \
+    const ::mapping::benchmarking::KeyframeProbe benchKeyframeProbe_ { *this, (idxKeyframe) }
 
 #else
 
-// production build: the same macros expand to nothing
+#define BENCH_KEYFRAME_PROBE(idxKeyframe)
 
 #endif
 

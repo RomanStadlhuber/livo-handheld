@@ -95,8 +95,20 @@ namespace mapping
                                    const std::shared_ptr<Eigen::Vector3d> &planeCenter,
                                    const gtsam::SharedNoiseModel &noiseModel);
 
-        /// @brief Diagnostic usage for evaluating error. Use for debugging.
-        double evaluateErrorDiagnostic(const gtsam::Values &values) const;
+        /// @brief Result of `evaluateErrorDiagnostic`.
+        struct ErrorDiagnostic
+        {
+            /// @brief Unweighted error `0.5 * r^2 / sigma^2`, without the robust kernel.
+            double error;
+            /// @brief IRLS weight `w(r)` of the robust kernel at the whitened residual, `1` without a robust kernel.
+            double weight;
+        };
+
+        /// @brief Error of the factor for diagnostics (e.g. telemetry). The optimizer never calls it.
+        /// @details Uses the same residual `r` as `linearize()`. `unwhitenedError` stays disabled, so
+        /// `NoiseModelFactor::error()` cannot enter the optimizer by accident.
+        /// The robust-weighted error that `linearize()` solves for is `weight * error`.
+        ErrorDiagnostic evaluateErrorDiagnostic(const gtsam::Values &values) const;
 
         void print(const std::string &s = "",
                    const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
