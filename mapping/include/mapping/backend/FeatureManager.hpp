@@ -112,10 +112,11 @@ namespace mapping
          */
 
         std::map<ClusterId, std::map<uint32_t, std::size_t>> clusters_;
-        /// @brief The thickness of each added cluster track
+        /// @brief The thickness of each added cluster track, mean squared point-to-plane distance [m^2]
         std::map<ClusterId, std::vector<double>> clusterPlaneThicknessHistory_;
-        /// @brief The thickness of a clusters fitted plane, used for validation and modelling noise characteristics.
+        /// @brief Mean of the squared thickness history [m^4], used for validation and modelling noise characteristics.
         std::map<ClusterId, double> clusterPlaneThickness_;
+        /// @brief `clusterPlaneThickness_` plus a `1e-4` floor [m^4], used for the front-end gating test only.
         std::map<ClusterId, double> clusterSigmas_;
         std::map<ClusterId, ClusterState> clusterStates_;
         /// @brief Cached cluster centroids and normals for fast access during tracking and formulating smoothing
@@ -146,11 +147,12 @@ namespace mapping
         // Plane thickness alone only captures fit quality, not LiDAR ranging noise
         // or residual pose uncertainty at evaluation time.
         static constexpr double SENSOR_VARIANCE = 1.6e-7; // [m^4] (variance!)
-        /// @brief Variance [m^4] of the point-to-plane factor noise model of a cluster.
-        /// @note Differs from `clusterSigmas_`, which the front-end gating test uses.
+        /// @brief Variance [m^4] of the point-to-plane factor noise model of a cluster: `mean(thickness^2)` plus
+        /// `SENSOR_VARIANCE`, without the `1e-4` floor (see BA-LINS eq. 14, MSC-LIO).
+        /// @note Differs from `clusterSigmas_`, which keeps the floor for the front-end gating test.
         double factorVariance(const ClusterId clusterId) const
         {
-            return clusterSigmas_.at(clusterId) + SENSOR_VARIANCE;
+            return clusterPlaneThickness_.at(clusterId) + SENSOR_VARIANCE;
         }
         /// @brief Add or update the factor index mapping for a given cluster id.
         /// @param clusterId Id of the cluster.

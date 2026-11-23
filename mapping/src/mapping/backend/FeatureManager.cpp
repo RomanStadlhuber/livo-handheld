@@ -217,7 +217,7 @@ namespace mapping
                 planeThicknessCovariance += std::pow(thickness, 2.0);
             planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
             clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-            // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
+            // floor for the front-end gating test only, the factor noise model uses factorVariance()
             clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
         }
     }
@@ -233,7 +233,7 @@ namespace mapping
             planeThicknessCovariance += std::pow(thickness, 2.0);
         planeThicknessCovariance /= static_cast<double>(clusterPlaneThicknessHistory_[clusterId].size());
         clusterPlaneThickness_[clusterId] = planeThicknessCovariance;
-        // offset avoids near-zero variance for perfectly planar surfaces (numerical stability)
+        // floor for the front-end gating test only, the factor noise model uses factorVariance()
         clusterSigmas_[clusterId] = planeThicknessCovariance + 1e-4;
     }
 
