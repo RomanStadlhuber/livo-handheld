@@ -28,7 +28,7 @@ namespace mapping
             const gtsam::Point3 &t = pose.translation();
             const gtsam::Quaternion q = pose.rotation().toQuaternion();
             std::string timestamp;
-            appendBagTime(timestamp, stamped.timestamp, timeOffset);
+            benchmarking::appendBagTime(timestamp, stamped.timestamp, timeOffset);
             file << timestamp << ' ' << t.x() << ' ' << t.y() << ' ' << t.z() << ' ' << q.x() << ' ' << q.y() << ' '
                  << q.z() << ' ' << q.w() << '\n';
         }
