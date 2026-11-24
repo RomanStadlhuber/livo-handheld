@@ -6,12 +6,12 @@
 
 #include <gtsam/inference/Ordering.h>
 #include <gtsam/inference/Symbol.h>
-#include <gtsam/linear/GaussianBayesNet.h>
 #include <gtsam/linear/GaussianFactorGraph.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
 
 #include <Eigen/Eigenvalues>
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <iterator>
@@ -87,75 +87,145 @@ namespace mapping
                     return false;
                 }
 
-                /// @brief Linearize the factors at `estimate` and eliminate `margKeys` (Schur complement).
-                /// @return The remaining information on the Markov blanket.
-                gtsam::GaussianFactorGraph::shared_ptr
-                blanketInformation(const std::vector<gtsam::NonlinearFactor::shared_ptr> &factors,
-                                   const gtsam::Values &estimate, const gtsam::KeySet &margKeys)
+                /// @brief Relative threshold for an eigenvalue of a symmetric matrix to count as zero (rank) or as
+                /// negative (indefinite), relative to the largest absolute eigenvalue.
+                constexpr double kRankTol = 1e-12;
+                constexpr double kNegTol = 1e-9;
+
+                /// @brief Information on the Markov blanket after the Schur complement of the marginalized keys.
+                struct BlanketInformation
+                {
+                    /// @brief Symmetrized Schur complement `L_bb - L_bm L_mm^+ L_mb` on the blanket keys.
+                    gtsam::Matrix information;
+                    /// @brief Offset and dimension of each blanket key in `information`.
+                    std::map<gtsam::Key, std::pair<Eigen::Index, size_t>> blanket;
+                    /// @brief Condition number of `L_mm`, `inf` if it is not positive definite, `nan` if empty.
+                    double mmCond = field::NaN;
+                    /// @brief Smallest eigenvalue of the full symmetrized Hessian, divided by its largest one.
+                    double hessMinEig = field::NaN;
+                    /// @brief False if `L_mm` is rank deficient or the full Hessian is indefinite.
+                    bool valid = true;
+                };
+
+                /// @brief Linearize the factors at `estimate`, build the dense Hessian with the marginalized keys
+                /// first, and form the Schur complement onto the other keys explicitly. `L_mm` is inverted through its
+                /// eigendecomposition (pseudo-inverse with relative threshold `kRankTol`), so a near-singular `L_mm`
+                /// shows in `mmCond` and `valid` and does not blow up the result.
+                BlanketInformation blanketInformation(const std::vector<gtsam::NonlinearFactor::shared_ptr> &factors,
+                                                      const gtsam::Values &estimate, const gtsam::KeySet &margKeys)
                 {
                     gtsam::GaussianFactorGraph linear;
                     for (const gtsam::NonlinearFactor::shared_ptr &factor : factors)
                         linear.push_back(factor->linearize(estimate));
+                    const std::map<gtsam::Key, size_t> dims = linear.getKeyDimMap();
                     gtsam::Ordering ordering;
-                    const gtsam::KeySet linearKeys = linear.keys();
-                    for (const gtsam::Key key : margKeys)
-                        if (linearKeys.count(key))
+                    Eigen::Index nm = 0;
+                    for (const auto &[key, dim] : dims)
+                        if (margKeys.count(key))
+                        {
                             ordering.push_back(key);
-                    return linear.eliminatePartialSequential(ordering).second;
+                            nm += static_cast<Eigen::Index>(dim);
+                        }
+                    BlanketInformation result;
+                    Eigen::Index offset = 0;
+                    for (const auto &[key, dim] : dims)
+                        if (!margKeys.count(key))
+                        {
+                            ordering.push_back(key);
+                            result.blanket[key] = {offset, dim};
+                            offset += static_cast<Eigen::Index>(dim);
+                        }
+                    const Eigen::Index nb = offset;
+                    gtsam::Matrix hessian = linear.hessian(ordering).first;
+                    hessian = 0.5 * (hessian + hessian.transpose()).eval();
+
+                    const Eigen::VectorXd eigFull =
+                        Eigen::SelfAdjointEigenSolver<gtsam::Matrix>(hessian, Eigen::EigenvaluesOnly).eigenvalues();
+                    const double maxAbsFull = eigFull.size() > 0 ? eigFull.cwiseAbs().maxCoeff() : 0.0;
+                    if (maxAbsFull > 0.0)
+                        result.hessMinEig = eigFull.minCoeff() / maxAbsFull;
+                    if (eigFull.size() > 0 && eigFull.minCoeff() < -kNegTol * maxAbsFull)
+                        result.valid = false;
+
+                    if (nm == 0)
+                    {
+                        result.information = hessian;
+                        return result;
+                    }
+                    const Eigen::SelfAdjointEigenSolver<gtsam::Matrix> eigMm(hessian.topLeftCorner(nm, nm));
+                    const Eigen::VectorXd &lambda = eigMm.eigenvalues(); // ascending
+                    const double maxMm = lambda.maxCoeff(), minMm = lambda.minCoeff();
+                    result.mmCond = minMm > 0.0 ? maxMm / minMm : std::numeric_limits<double>::infinity();
+                    const double threshold = kRankTol * std::max(maxMm, 0.0);
+                    if (maxMm <= 0.0 || minMm <= threshold)
+                        result.valid = false;
+                    Eigen::VectorXd lambdaInv = Eigen::VectorXd::Zero(nm);
+                    for (Eigen::Index i = 0; i < nm; i++)
+                        if (lambda(i) > threshold && lambda(i) > 0.0)
+                            lambdaInv(i) = 1.0 / lambda(i);
+                    // L_bm L_mm^+ L_mb = (L_bm V) diag(1/lambda) (L_bm V)^T
+                    const gtsam::Matrix bmV = hessian.bottomLeftCorner(nb, nm) * eigMm.eigenvectors();
+                    gtsam::Matrix schur =
+                        hessian.bottomRightCorner(nb, nb) - bmV * lambdaInv.asDiagonal() * bmV.transpose();
+                    result.information = 0.5 * (schur + schur.transpose());
+                    return result;
                 }
 
-                /// @brief Pose keys `X(j)` in the graph, ascending.
-                gtsam::KeyVector poseKeys(const gtsam::GaussianFactorGraph &graph)
+                /// @brief Pose keys `X(j)` on the blanket, ascending.
+                gtsam::KeyVector poseKeys(const BlanketInformation &info)
                 {
                     gtsam::KeyVector keys;
-                    for (const gtsam::Key key : graph.keys())
+                    for (const auto &[key, _] : info.blanket)
                         if (gtsam::Symbol(key).chr() == 'x')
                             keys.push_back(key);
                     return keys;
                 }
 
                 /// @brief Smallest eigenvalue of the rotation and translation blocks of the joint information of
-                /// `poses` (all `3 n` rotation or translation rows, incl. the cross-pose blocks). All other keys of
-                /// `graph` are held fixed. A pose that is not in `graph` has no information, so both values are 0.
-                void setJointMinEigenvalues(const gtsam::GaussianFactorGraph &graph, const gtsam::KeyVector &poses,
-                                            double &rot, double &trans)
+                /// `poses` (all `3 n` rotation or translation rows, incl. the cross-pose blocks). All other blanket
+                /// keys are held fixed. A pose that is not on the blanket has no information, so both values are 0.
+                /// Both values are `nan` if `info` is not valid, or if the block is indefinite beyond rounding
+                /// (eigenvalue below `-kNegTol` times the largest absolute one). A smaller negative value is rounding
+                /// noise and is clamped to 0.
+                void setJointMinEigenvalues(const BlanketInformation &info, const gtsam::KeyVector &poses, double &rot,
+                                            double &trans)
                 {
-                    const std::map<gtsam::Key, size_t> dims = graph.getKeyDimMap();
-                    gtsam::Ordering ordering;
-                    std::map<gtsam::Key, Eigen::Index> offsets;
-                    Eigen::Index offset = 0;
-                    for (const auto &[key, dim] : dims)
+                    if (!info.valid)
                     {
-                        ordering.push_back(key);
-                        offsets[key] = offset;
-                        offset += static_cast<Eigen::Index>(dim);
+                        rot = trans = field::NaN;
+                        return;
                     }
                     std::vector<Eigen::Index> rotIdx, transIdx;
                     for (const gtsam::Key key : poses)
                     {
-                        const auto it = offsets.find(key);
-                        if (it == offsets.end() || dims.at(key) != 6)
+                        const auto it = info.blanket.find(key);
+                        if (it == info.blanket.end() || it->second.second != 6)
                         {
                             rot = trans = 0.0;
                             return;
                         }
                         for (Eigen::Index i = 0; i < 3; i++)
                         {
-                            rotIdx.push_back(it->second + i);
-                            transIdx.push_back(it->second + 3 + i);
+                            rotIdx.push_back(it->second.first + i);
+                            transIdx.push_back(it->second.first + 3 + i);
                         }
                     }
-                    const gtsam::Matrix hessian = graph.hessian(ordering).first;
-                    const auto minEigenvalue = [&hessian](const std::vector<Eigen::Index> &idx)
+                    const gtsam::Matrix &information = info.information;
+                    const auto minEigenvalue = [&information](const std::vector<Eigen::Index> &idx)
                     {
                         const Eigen::Index n = static_cast<Eigen::Index>(idx.size());
+                        if (n == 0)
+                            return field::NaN;
                         gtsam::Matrix block(n, n);
                         for (Eigen::Index r = 0; r < n; r++)
                             for (Eigen::Index c = 0; c < n; c++)
-                                block(r, c) = hessian(idx[r], idx[c]);
-                        return Eigen::SelfAdjointEigenSolver<gtsam::Matrix>(block, Eigen::EigenvaluesOnly)
-                            .eigenvalues()
-                            .minCoeff();
+                                block(r, c) = information(idx[r], idx[c]);
+                        const Eigen::VectorXd eig =
+                            Eigen::SelfAdjointEigenSolver<gtsam::Matrix>(block, Eigen::EigenvaluesOnly).eigenvalues();
+                        const double minEig = eig.minCoeff();
+                        if (minEig >= 0.0)
+                            return minEig;
+                        return minEig < -kNegTol * eig.cwiseAbs().maxCoeff() ? field::NaN : 0.0;
                     };
                     rot = minEigenvalue(rotIdx);
                     trans = minEigenvalue(transIdx);
@@ -333,10 +403,11 @@ namespace mapping
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
                     if (factor && touchesAny(*factor, margKeys))
                         factors.push_back(factor);
-                const gtsam::GaussianFactorGraph::shared_ptr remaining =
-                    blanketInformation(factors, states.getSmootherEstimate(), margKeys);
-                blanketPoses = poseKeys(*remaining);
-                setJointMinEigenvalues(*remaining, blanketPoses, row.marg_ref_info_rot, row.marg_ref_info_trans);
+                const BlanketInformation info = blanketInformation(factors, states.getSmootherEstimate(), margKeys);
+                blanketPoses = poseKeys(info);
+                row.marg_ref_mm_cond = info.mmCond;
+                row.marg_ref_hess_min_eig = info.hessMinEig;
+                setJointMinEigenvalues(info, blanketPoses, row.marg_ref_info_rot, row.marg_ref_info_trans);
             }
 
             void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
@@ -392,8 +463,10 @@ namespace mapping
                 const uint32_t idxKeyframe = static_cast<uint32_t>(*row.kf);
                 if (!values.exists(X(idxKeyframe)))
                     values.insert(X(idxKeyframe), *states.getKeyframeImuPoses().at(idxKeyframe));
-                const gtsam::GaussianFactorGraph::shared_ptr remaining = blanketInformation(factors, values, margKeys);
-                setJointMinEigenvalues(*remaining, blanketPoses, row.marg_cur_info_rot, row.marg_cur_info_trans);
+                const BlanketInformation info = blanketInformation(factors, values, margKeys);
+                row.marg_cur_mm_cond = info.mmCond;
+                row.marg_cur_hess_min_eig = info.hessMinEig;
+                setJointMinEigenvalues(info, blanketPoses, row.marg_cur_info_rot, row.marg_cur_info_trans);
             }
 
             void collect(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states,

@@ -87,9 +87,15 @@
 /// - `marg_w`: robust kernel weight of the source `PointToPlaneFactor` of each custom marginalization factor
 /// - `marg_kf`: the oldest keyframe that the smoother marginalizes in this update
 /// - `marg_ref_info_rot`, `marg_ref_info_trans`, `marg_cur_info_rot`, `marg_cur_info_trans`: information on the
-///   Markov blanket of the marginalized keyframes. The factors of each set are linearized at the smoother estimate,
-///   and `X`, `V`, `B` of the marginalized keyframes are eliminated (Schur complement).
-///   The value is the smallest eigenvalue of the joint rotation / translation block (`3 n x 3 n`, with the
+///   Markov blanket of the marginalized keyframes. The factors of each set are linearized at the smoother estimate.
+///   The dense Hessian `L` of the linear factors is built once, with `X`, `V`, `B` of the marginalized keyframes (`m`)
+///   first and the blanket keys (`b`) after, and symmetrized. The Schur complement `L_bb - L_bm L_mm^+ L_mb` is formed
+///   explicitly. `L_mm^+` is the pseudo-inverse from the eigendecomposition of `L_mm` (eigenvalues below `1e-12`
+///   times the largest one are dropped). The result is symmetrized before the eigen solve.
+///   The value is `nan` if `L_mm` is rank deficient (smallest eigenvalue at or below `1e-12` times the largest), if
+///   the full Hessian has an eigenvalue below `-1e-9 * max|eig|`, or if the selected block of the Schur complement
+///   has such an eigenvalue. A negative eigenvalue above this bound is rounding noise and is written as 0.
+///   Otherwise the value is the smallest eigenvalue of the joint rotation / translation block (`3 n x 3 n`, with the
 ///   cross-pose blocks) of the remaining information on the `n` blanket poses of `_ref`. All other variables are held
 ///   fixed. So the value also sees the coupling between the blanket poses.
 ///   `_ref`: all factors in the smoother that touch a marginalized keyframe before the marginalization (full
@@ -98,6 +104,11 @@
 ///   marginals and the absorbed LiDAR factors), plus the factors that `createAndUpdateFactors` rebuilds for the
 ///   clusters of the removed factors. The rebuilt factors keep the information of the other points of the cluster.
 ///   They can also hold a point of the new keyframe (pose from the IMU propagation); its pose is held fixed.
+/// - `marg_ref_mm_cond`, `marg_cur_mm_cond`: condition number of `L_mm` of the `_ref` / `_cur` factor set (largest
+///   divided by smallest eigenvalue). `inf` if `L_mm` is not positive definite, `nan` without marginalization.
+/// - `marg_ref_hess_min_eig`, `marg_cur_hess_min_eig`: smallest eigenvalue of the full symmetrized Hessian `L` of the
+///   `_ref` / `_cur` factor set before the elimination, divided by its largest absolute eigenvalue. A value below
+///   `-1e-9` means that the linearized factors themselves are indefinite (not a problem of the elimination).
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
     X(Index, kf)                                                                                                       \
     X(Time, t)                                                                                                         \
@@ -143,7 +154,11 @@
     X(Real, marg_ref_info_rot)                                                                                         \
     X(Real, marg_ref_info_trans)                                                                                       \
     X(Real, marg_cur_info_rot)                                                                                         \
-    X(Real, marg_cur_info_trans)
+    X(Real, marg_cur_info_trans)                                                                                       \
+    X(Real, marg_ref_mm_cond)                                                                                          \
+    X(Real, marg_cur_mm_cond)                                                                                          \
+    X(Real, marg_ref_hess_min_eig)                                                                                     \
+    X(Real, marg_cur_hess_min_eig)
 
 namespace mapping
 {
