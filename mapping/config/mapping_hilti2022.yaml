@@ -2,6 +2,7 @@
 # based on mapping_hilti.yaml (2023), with the 2022 extrinsics from
 # calibration/calibration_files/lidar_calibration.yaml
 backend:
+  # alternative: geman_mcclure 2.0 (exp14: APE 1 m at 15.3 s vs 20.1 s, but final APE 47 m vs 113 m)
   lidar_kernel:
     type: huber # none | huber | geman_mcclure | cauchy
     threshold: 1.345 # [whitened units], kernel sweep on exp14 (ticket #7)
