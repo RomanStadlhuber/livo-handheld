@@ -130,8 +130,7 @@ namespace mapping
         /// @brief Robust kernel for point-to-plane factors, built from the config.
         /// see also: https://gtsam.org/doxygen/a03860.html
         /// The threshold is in whitened units, as the residual is whitened before the kernel is applied.
-        gtsam::noiseModel::mEstimator::Base::shared_ptr kernel_{
-            boost::make_shared<gtsam::noiseModel::mEstimator::Null>()};
+        gtsam::noiseModel::mEstimator::Base::shared_ptr kernel_{gtsam::noiseModel::mEstimator::Huber::Create(1.345)};
 
     public:
         /// @brief Build the robust kernel of the LiDAR factors from the config.

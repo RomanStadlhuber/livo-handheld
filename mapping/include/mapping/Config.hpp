@@ -180,10 +180,11 @@ namespace mapping
     /// @brief Robust kernel of the LiDAR factors. The threshold acts on the norm of the whitened residual.
     struct LidarKernelConfig
     {
-        std::string type = "none"; // none | huber | geman_mcclure | cauchy
-        double threshold = 1.345;  // [whitened units], ignored for "none"
-        /// Parsed from `type` at config load.
-        LidarKernelType kernel_type = LidarKernelType::None;
+        // Default from the exp14 kernel sweep (ticket #7): Huber 1.345 passes APE 1 m latest.
+        std::string type = "huber"; // none | huber | geman_mcclure | cauchy
+        double threshold = 1.345;   // [whitened units], ignored for "none"
+        /// Parsed from `type` in `declare_config` only. Set `type` through a config load, not directly.
+        LidarKernelType kernel_type = LidarKernelType::Huber;
     };
 
     inline void declare_config(LidarKernelConfig &config)
