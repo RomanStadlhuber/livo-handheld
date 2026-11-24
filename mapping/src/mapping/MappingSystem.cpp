@@ -18,6 +18,8 @@ SETUP_LOGS(DEBUG, "MappingSystem");
 
 namespace mapping
 {
+    // [m], voxel size of the odometry-only global map that is published when bundle adjustment is disabled
+    constexpr double GLOBAL_MAP_VOXEL_SIZE = 0.05;
 
     MappingSystem::MappingSystem() : MappingSystem(MappingConfig()) {}
 
@@ -38,10 +40,9 @@ namespace mapping
         }
         else
             LOG(DEBUG, "bundle adjustment disabled, scan-to-map registration is skipped");
-        // marginalized submaps are only consumed by BA or the global map accumulator,
-        // collecting them otherwise would grow memory unbounded
-        globalMap_ = config_.publish_global_map ? std::make_shared<open3d::geometry::PointCloud>() : nullptr;
-        states_.setCollectMarginalizedSubmaps(config_.bundle_adjustment.enabled || config_.publish_global_map);
+        // marginalized submaps are consumed by BA, or by the global map accumulator when BA is disabled
+        globalMap_ = config_.bundle_adjustment.enabled ? nullptr : std::make_shared<open3d::geometry::PointCloud>();
+        states_.setCollectMarginalizedSubmaps(true);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
@@ -318,7 +319,7 @@ namespace mapping
             // marginalized clouds are already in world frame (BA undoes the pose to get the body frame)
             for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
                 *globalMap_ += *poseAndCloud.second;
-            globalMap_ = globalMap_->VoxelDownSample(config_.global_map_voxel_size);
+            globalMap_ = globalMap_->VoxelDownSample(GLOBAL_MAP_VOXEL_SIZE);
         }
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking

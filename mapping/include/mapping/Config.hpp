@@ -509,10 +509,6 @@ namespace mapping
         ExtrinsicsConfig extrinsics;
         IntrinsicsConfig intrinsics;
         BundleAdjustmentConfig bundle_adjustment;
-        // accumulate marginalized submaps into a world-frame map for publishing when BA is disabled
-        // (with BA enabled the BA map is published regardless)
-        bool publish_global_map = true;
-        double global_map_voxel_size = 0.05; // [m], voxel size of the accumulated global map
     };
 
     inline void declare_config(MappingConfig &config)
@@ -527,9 +523,6 @@ namespace mapping
         field(config.extrinsics, "extrinsics");
         field(config.intrinsics, "intrinsics");
         field(config.bundle_adjustment, "bundle_adjustment");
-        field(config.publish_global_map, "publish_global_map");
-        field(config.global_map_voxel_size, "global_map_voxel_size", "m");
-        check(config.global_map_voxel_size, GT, 0.0, "global_map_voxel_size");
     }
 
 } // namespace mapping

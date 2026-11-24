@@ -96,10 +96,6 @@ intrinsics:
       - 0.000114465
       - -0.00185591
 
-# publish the global map on /mapping/map even if BA is disabled (default true)
-publish_global_map: true
-global_map_voxel_size: 0.05 # [m]
-
 bundle_adjustment:
   enabled: false # run the BA thread & scan-to-map registration (default false)
   submap_min_distance: 0.6      # [m], min travel from last accepted submap
