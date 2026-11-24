@@ -171,6 +171,7 @@ namespace mapping
         {
             /// @brief `removeKeyframeFromClusters`: number of marginalization factors, summed whitened information
             /// `sum(H^T H)` of their `X(k)` blocks (rotation first), and the kernel weight of each source factor.
+            /// Sums over all keyframes that are marginalized before the same `createAndUpdateFactors` call.
             std::size_t numMargFactors = 0;
             Eigen::Matrix<double, 6, 6> margInformation = Eigen::Matrix<double, 6, 6>::Zero();
             std::vector<double> margWeights;
@@ -182,9 +183,10 @@ namespace mapping
         };
         /// @brief Benchmark build only: stats of the last `createAndUpdateFactors` call, together with the stats of all
         /// `removeKeyframeFromClusters` calls before it.
-        KeyframeFactorStats lastKeyframeFactorStats_;
+        const KeyframeFactorStats &lastKeyframeFactorStats() const { return lastKeyframeFactorStats_; }
 
     private:
+        KeyframeFactorStats lastKeyframeFactorStats_;
         /// @brief Benchmark build only: accumulates the stats until `createAndUpdateFactors` moves them to
         /// `lastKeyframeFactorStats_`.
         KeyframeFactorStats pendingKeyframeFactorStats_;

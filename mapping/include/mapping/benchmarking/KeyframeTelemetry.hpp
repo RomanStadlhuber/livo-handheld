@@ -67,21 +67,27 @@
 /// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
 ///   `ShiftedIdle`
 ///
-/// Marginalization, `nan` at keyframes without a marginalization:
+/// Marginalization, `nan` at keyframes without a marginalization. If one update marginalizes more than one keyframe
+/// (e.g. after a gap), each value covers all of them together:
 /// - `marg_n`: custom marginalization factors that `removeKeyframeFromClusters` creates
 ///   (`PointToPlaneFactor::createMarginalizationFactor`, unary on the marginalized pose)
 /// - `marg_info_rot`, `marg_info_trans`: smallest eigenvalue of the rotation and translation blocks of the summed
-///   whitened information `sum(H^T H)` of these factors (incl. the robust kernel weight)
+///   whitened information `sum(H^T H)` of these factors (incl. the robust kernel weight). With more than one
+///   marginalized keyframe, the blocks of the different poses are added into one matrix.
 /// - `marg_w`: robust kernel weight of the source `PointToPlaneFactor` of each custom marginalization factor
 /// - `marg_kf`: the oldest keyframe that the smoother marginalizes in this update
 /// - `marg_ref_info_rot`, `marg_ref_info_trans`, `marg_cur_info_rot`, `marg_cur_info_trans`: information on the
-///   Markov blanket of the marginalized keyframes. All factors that touch `X`, `V`, `B` of a marginalized keyframe are
-///   linearized at the smoother estimate, and these variables are eliminated (Schur complement).
-///   The value is the smallest eigenvalue of the rotation / translation block of the sum of the diagonal pose blocks
-///   of the remaining information matrix.
-///   `_ref`: the factors in the smoother before the marginalization (full `PointToPlaneFactor`, IMU, older marginals).
-///   `_cur`: the factors that iSAM2 really marginalizes (current scheme: custom unary factors, IMU, older marginals and
-///   the absorbed LiDAR factors).
+///   Markov blanket of the marginalized keyframes. The factors of each set are linearized at the smoother estimate,
+///   and `X`, `V`, `B` of the marginalized keyframes are eliminated (Schur complement).
+///   The value is the smallest eigenvalue of the joint rotation / translation block (`3 n x 3 n`, with the
+///   cross-pose blocks) of the remaining information on the `n` blanket poses of `_ref`. All other variables are held
+///   fixed. So the value also sees the coupling between the blanket poses.
+///   `_ref`: all factors in the smoother that touch a marginalized keyframe before the marginalization (full
+///   `PointToPlaneFactor` with all keys, IMU, older marginals).
+///   `_cur`: the current scheme. The factors that iSAM2 really marginalizes (custom unary factors, IMU, older
+///   marginals and the absorbed LiDAR factors), plus the factors that `createAndUpdateFactors` rebuilds for the
+///   clusters of the removed factors. The rebuilt factors keep the information of the other points of the cluster.
+///   They can also hold a point of the new keyframe (pose from the IMU propagation); its pose is held fixed.
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
     X(Index, kf)                                                                                                       \
     X(Time, t)                                                                                                         \

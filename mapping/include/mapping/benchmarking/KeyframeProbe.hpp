@@ -52,6 +52,8 @@ namespace mapping
             gtsam::Pose3 imuPropagated_;
             /// @brief Keyframes that the smoother marginalizes in the update of this keyframe.
             std::vector<uint32_t> marginalizedKeyframes_;
+            /// @brief Pose keys on the Markov blanket of the marginalized keyframes, see `snapshotMarginalization`.
+            gtsam::KeyVector blanketPoses_;
         };
     } // namespace benchmarking
 } // namespace mapping

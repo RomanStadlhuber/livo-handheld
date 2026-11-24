@@ -38,17 +38,19 @@ namespace mapping
                                                         uint32_t slidingWindowSize);
 
             /// @brief Call before `removeKeyframeFromClusters`. Sets `marg_kf` and `marg_ref_info_*`.
-            /// @param referenceInformation Set to the blanket information of the reference (Schur complement of
-            /// all factors in the smoother), see `KeyframeTelemetry.hpp`.
-            void snapshotMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                         const States &states, const Smoother &smoother);
+            /// @param blanketPoses Set to the pose keys on the Markov blanket of the reference (Schur complement of
+            /// all factors in the smoother), see `KeyframeTelemetry.hpp`. `collectMarginalization` uses the same keys.
+            void snapshotMarginalization(KeyframeTelemetry &row, gtsam::KeyVector &blanketPoses,
+                                         const std::vector<uint32_t> &keyframes, const States &states,
+                                         const Smoother &smoother);
 
             /// @brief Call right before the smoother update. Sets `marg_cur_info_*`, `lidar_fac_marg_*`.
             /// @param newFactors, factorsToRemove The factors that the update adds and removes (without the IMU
             /// factor of the new keyframe, which does not touch the marginalized keyframes).
             void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                        const States &states, const FeatureManager &featureManager,
-                                        const Smoother &smoother, const gtsam::NonlinearFactorGraph &newFactors,
+                                        const gtsam::KeyVector &blanketPoses, const States &states,
+                                        const FeatureManager &featureManager, const Smoother &smoother,
+                                        const gtsam::NonlinearFactorGraph &newFactors,
                                         const gtsam::FactorIndices &factorsToRemove);
 
             /// @brief Fill the post-update columns of `row` (`row.kf` must be set).

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <exception>
 #include <iterator>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -85,10 +86,11 @@ namespace mapping
                     return false;
                 }
 
-                /// @brief Linearize the factors at `estimate`, eliminate `margKeys` and sum the diagonal pose blocks of
-                /// the remaining information on the Markov blanket.
-                Matrix6 blanketPoseInformation(const std::vector<gtsam::NonlinearFactor::shared_ptr> &factors,
-                                               const gtsam::Values &estimate, const gtsam::KeySet &margKeys)
+                /// @brief Linearize the factors at `estimate` and eliminate `margKeys` (Schur complement).
+                /// @return The remaining information on the Markov blanket.
+                gtsam::GaussianFactorGraph::shared_ptr
+                blanketInformation(const std::vector<gtsam::NonlinearFactor::shared_ptr> &factors,
+                                   const gtsam::Values &estimate, const gtsam::KeySet &margKeys)
                 {
                     gtsam::GaussianFactorGraph linear;
                     for (const gtsam::NonlinearFactor::shared_ptr &factor : factors)
@@ -98,12 +100,64 @@ namespace mapping
                     for (const gtsam::Key key : margKeys)
                         if (linearKeys.count(key))
                             ordering.push_back(key);
-                    const auto [bayesNet, remaining] = linear.eliminatePartialSequential(ordering);
-                    Matrix6 information = Matrix6::Zero();
-                    for (const auto &[key, block] : remaining->hessianBlockDiagonal())
-                        if (gtsam::Symbol(key).chr() == 'x' && block.rows() == 6)
-                            information += block;
-                    return information;
+                    return linear.eliminatePartialSequential(ordering).second;
+                }
+
+                /// @brief Pose keys `X(j)` in the graph, ascending.
+                gtsam::KeyVector poseKeys(const gtsam::GaussianFactorGraph &graph)
+                {
+                    gtsam::KeyVector keys;
+                    for (const gtsam::Key key : graph.keys())
+                        if (gtsam::Symbol(key).chr() == 'x')
+                            keys.push_back(key);
+                    return keys;
+                }
+
+                /// @brief Smallest eigenvalue of the rotation and translation blocks of the joint information of
+                /// `poses` (all `3 n` rotation or translation rows, incl. the cross-pose blocks). All other keys of
+                /// `graph` are held fixed. A pose that is not in `graph` has no information, so both values are 0.
+                void setJointMinEigenvalues(const gtsam::GaussianFactorGraph &graph, const gtsam::KeyVector &poses,
+                                            double &rot, double &trans)
+                {
+                    const std::map<gtsam::Key, size_t> dims = graph.getKeyDimMap();
+                    gtsam::Ordering ordering;
+                    std::map<gtsam::Key, Eigen::Index> offsets;
+                    Eigen::Index offset = 0;
+                    for (const auto &[key, dim] : dims)
+                    {
+                        ordering.push_back(key);
+                        offsets[key] = offset;
+                        offset += static_cast<Eigen::Index>(dim);
+                    }
+                    std::vector<Eigen::Index> rotIdx, transIdx;
+                    for (const gtsam::Key key : poses)
+                    {
+                        const auto it = offsets.find(key);
+                        if (it == offsets.end() || dims.at(key) != 6)
+                        {
+                            rot = trans = 0.0;
+                            return;
+                        }
+                        for (Eigen::Index i = 0; i < 3; i++)
+                        {
+                            rotIdx.push_back(it->second + i);
+                            transIdx.push_back(it->second + 3 + i);
+                        }
+                    }
+                    const gtsam::Matrix hessian = graph.hessian(ordering).first;
+                    const auto minEigenvalue = [&hessian](const std::vector<Eigen::Index> &idx)
+                    {
+                        const Eigen::Index n = static_cast<Eigen::Index>(idx.size());
+                        gtsam::Matrix block(n, n);
+                        for (Eigen::Index r = 0; r < n; r++)
+                            for (Eigen::Index c = 0; c < n; c++)
+                                block(r, c) = hessian(idx[r], idx[c]);
+                        return Eigen::SelfAdjointEigenSolver<gtsam::Matrix>(block, Eigen::EigenvaluesOnly)
+                            .eigenvalues()
+                            .minCoeff();
+                    };
+                    rot = minEigenvalue(rotIdx);
+                    trans = minEigenvalue(transIdx);
                 }
 
                 void collectImu(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states)
@@ -194,12 +248,14 @@ namespace mapping
                     row.cov_trans_trace = cov.bottomRightCorner<3, 3>().trace();
 
                     // stats of removeKeyframeFromClusters / createAndUpdateFactors for this keyframe
-                    const FeatureManager::KeyframeFactorStats &stats = featureManager.lastKeyframeFactorStats_;
+                    const FeatureManager::KeyframeFactorStats &stats = featureManager.lastKeyframeFactorStats();
                     row.lidar_fac_removed = stats.numFactorsRemoved;
                     row.lidar_fac_readded = stats.numFactorsUpdated;
                     row.lidar_fac_new = stats.numFactorsAdded;
                     row.clusters_pruned = stats.numPruned;
                     row.clusters_shifted_idle = stats.numShiftedIdle;
+                    if (!row.marg_kf)
+                        return; // no marginalization in this update, the marginalization columns stay nan
                     row.marg_n = stats.numMargFactors;
                     row.marg_w = makeStats(stats.margWeights);
                     if (stats.numMargFactors > 0)
@@ -241,9 +297,11 @@ namespace mapping
                 return keyframes;
             }
 
-            void snapshotMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                         const States &states, const Smoother &smoother)
+            void snapshotMarginalization(KeyframeTelemetry &row, gtsam::KeyVector &blanketPoses,
+                                         const std::vector<uint32_t> &keyframes, const States &states,
+                                         const Smoother &smoother)
             {
+                blanketPoses.clear();
                 if (keyframes.empty())
                     return;
                 row.marg_kf = keyframes.front();
@@ -252,13 +310,16 @@ namespace mapping
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
                     if (factor && touchesAny(*factor, margKeys))
                         factors.push_back(factor);
-                const Matrix6 information = blanketPoseInformation(factors, states.getSmootherEstimate(), margKeys);
-                setMinEigenvalues(information, row.marg_ref_info_rot, row.marg_ref_info_trans);
+                const gtsam::GaussianFactorGraph::shared_ptr remaining =
+                    blanketInformation(factors, states.getSmootherEstimate(), margKeys);
+                blanketPoses = poseKeys(*remaining);
+                setJointMinEigenvalues(*remaining, blanketPoses, row.marg_ref_info_rot, row.marg_ref_info_trans);
             }
 
             void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                        const States &states, const FeatureManager &featureManager,
-                                        const Smoother &smoother, const gtsam::NonlinearFactorGraph &newFactors,
+                                        const gtsam::KeyVector &blanketPoses, const States &states,
+                                        const FeatureManager &featureManager, const Smoother &smoother,
+                                        const gtsam::NonlinearFactorGraph &newFactors,
                                         const gtsam::FactorIndices &factorsToRemove)
             {
                 row.lidar_fac_marg_pruned = 0;
@@ -270,13 +331,23 @@ namespace mapping
                 const gtsam::NonlinearFactorGraph &smootherFactors = smoother.getFactors();
                 // the factors on the marginalized keys after the update, as iSAM2 sees them when it marginalizes
                 std::vector<gtsam::NonlinearFactor::shared_ptr> factors;
+                // clusters whose removed factor touched a marginalized key: their rebuilt factor (without the
+                // marginalized keyframes) carries the information of the other points of the cluster
+                std::set<uint32_t> rebuiltClusters;
                 for (gtsam::FactorIndex i = 0; i < smootherFactors.size(); i++)
                 {
                     const gtsam::NonlinearFactor::shared_ptr &factor = smootherFactors[i];
-                    if (!factor || removed.count(i) || !touchesAny(*factor, margKeys))
+                    if (!factor || !touchesAny(*factor, margKeys))
                         continue;
+                    const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+                    if (removed.count(i))
+                    {
+                        if (ptp)
+                            rebuiltClusters.insert(ptp->clusterId_);
+                        continue;
+                    }
                     factors.push_back(factor);
-                    if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
+                    if (ptp)
                     {
                         const auto itState = featureManager.clusterStates_.find(ptp->clusterId_);
                         if (itState == featureManager.clusterStates_.end() || itState->second == ClusterState::Pruned)
@@ -286,10 +357,20 @@ namespace mapping
                     }
                 }
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : newFactors)
-                    if (factor && touchesAny(*factor, margKeys))
+                {
+                    if (!factor)
+                        continue;
+                    const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+                    if (touchesAny(*factor, margKeys) || (ptp && rebuiltClusters.count(ptp->clusterId_)))
                         factors.push_back(factor);
-                const Matrix6 information = blanketPoseInformation(factors, states.getSmootherEstimate(), margKeys);
-                setMinEigenvalues(information, row.marg_cur_info_rot, row.marg_cur_info_trans);
+                }
+                // a rebuilt factor can hold the point of the new keyframe, which is not in the estimate yet
+                gtsam::Values values = states.getSmootherEstimate();
+                const uint32_t idxKeyframe = static_cast<uint32_t>(*row.kf);
+                if (!values.exists(X(idxKeyframe)))
+                    values.insert(X(idxKeyframe), *states.getKeyframeImuPoses().at(idxKeyframe));
+                const gtsam::GaussianFactorGraph::shared_ptr remaining = blanketInformation(factors, values, margKeys);
+                setJointMinEigenvalues(*remaining, blanketPoses, row.marg_cur_info_rot, row.marg_cur_info_trans);
             }
 
             void collect(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states,
