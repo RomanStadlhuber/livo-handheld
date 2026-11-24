@@ -98,6 +98,11 @@ namespace mapping
         /// Empty when bundle adjustment is disabled.
         std::map<uint32_t, ActiveSubmap> getAllActiveSubmaps() const;
 
+        /// @brief Return the odometry-only global map in world frame (marginalized + sliding-window submaps).
+        /// @details Used when bundle adjustment is disabled. Returns nullptr if `publish_global_map` is false.
+        /// The marginalized part is already voxelized with `global_map_voxel_size`.
+        std::shared_ptr<open3d::geometry::PointCloud> getGlobalMapCloud() const;
+
         /// @brief Get the current (possibly optimized) IMU-to-LiDAR extrinsic calibration.
         gtsam::Pose3 getImuToLidarExtrinsic() const { return states_.getImuToLidarExtrinsic(); }
         /// @brief Get the current (possibly optimized) temporal offset [s].
@@ -164,6 +169,8 @@ namespace mapping
         FeatureManager featureManager_;
         Smoother smoother_;
         std::unique_ptr<BundleAdjustment> bundleAdjustment_;
+        // world-frame map of marginalized submaps, only filled when BA is disabled and `publish_global_map` is set
+        std::shared_ptr<open3d::geometry::PointCloud> globalMap_;
 
         // configuration and cached extrinsic
         MappingConfig config_;

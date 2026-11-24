@@ -435,6 +435,14 @@ private:
                 globalMapMsg.header.stamp = stamp;
                 pubGlobalMap_->publish(globalMapMsg);
             }
+            // BA disabled: publish the odometry-only map (already voxelized by MappingSystem, no re-voxelization)
+            else if (auto pcdOdometryMap = slam_.getGlobalMapCloud(); pcdOdometryMap && !pcdOdometryMap->IsEmpty())
+            {
+                sensor_msgs::msg::PointCloud2 globalMapMsg;
+                open3d_conversions::open3dToRos(*pcdOdometryMap, globalMapMsg, "map");
+                globalMapMsg.header.stamp = stamp;
+                pubGlobalMap_->publish(globalMapMsg);
+            }
         }
 
         std::map<mapping::ClusterId, mapping::PointCluster> clusters = slam_.getCurrentClusters();

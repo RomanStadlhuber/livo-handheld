@@ -38,8 +38,10 @@ namespace mapping
         }
         else
             LOG(DEBUG, "bundle adjustment disabled, scan-to-map registration is skipped");
-        // marginalized submaps are only consumed by BA, collecting them without BA would grow memory unbounded
-        states_.setCollectMarginalizedSubmaps(config_.bundle_adjustment.enabled);
+        // marginalized submaps are only consumed by BA or the global map accumulator,
+        // collecting them otherwise would grow memory unbounded
+        globalMap_ = config_.publish_global_map ? std::make_shared<open3d::geometry::PointCloud>() : nullptr;
+        states_.setCollectMarginalizedSubmaps(config_.bundle_adjustment.enabled || config_.publish_global_map);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
@@ -311,6 +313,13 @@ namespace mapping
         if (bundleAdjustment_)
             for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
                 bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
+        else if (globalMap_ && !newlyMarginalized.empty())
+        {
+            // marginalized clouds are already in world frame (BA undoes the pose to get the body frame)
+            for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
+                *globalMap_ += *poseAndCloud.second;
+            globalMap_ = globalMap_->VoxelDownSample(config_.global_map_voxel_size);
+        }
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
         const bool isTracking =
@@ -564,6 +573,18 @@ namespace mapping
         if (!bundleAdjustment_)
             return {};
         return bundleAdjustment_->getAllActiveSubmaps();
+    }
+
+    std::shared_ptr<open3d::geometry::PointCloud> MappingSystem::getGlobalMapCloud() const
+    {
+        if (!globalMap_)
+            return nullptr;
+        // copy, the sliding-window submaps (world frame, not yet marginalized) are appended to the copy only
+        auto map = std::make_shared<open3d::geometry::PointCloud>(*globalMap_);
+        for (const auto &[_, submap] : states_.getKeyframeSubmaps())
+            if (submap)
+                *map += *submap;
+        return map;
     }
 
     void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }
