@@ -5,6 +5,7 @@
 #ifndef MAPPING_CONFIG_HPP_
 #define MAPPING_CONFIG_HPP_
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -152,9 +153,62 @@ namespace mapping
         check(config.knn_neighbors, GT, 0, "knn_neighbors");
     }
 
+    /// @brief Robust kernel types for the LiDAR point-to-plane factors
+    enum class LidarKernelType
+    {
+        None,
+        Huber,
+        GemanMcClure,
+        Cauchy
+    };
+
+    /// @brief Parse a kernel name ("none", "huber", "geman_mcclure", "cauchy").
+    /// @return The kernel type, or `std::nullopt` for an unknown name.
+    inline std::optional<LidarKernelType> parseLidarKernelType(const std::string &name)
+    {
+        if (name == "none")
+            return LidarKernelType::None;
+        if (name == "huber")
+            return LidarKernelType::Huber;
+        if (name == "geman_mcclure")
+            return LidarKernelType::GemanMcClure;
+        if (name == "cauchy")
+            return LidarKernelType::Cauchy;
+        return std::nullopt;
+    }
+
+    /// @brief Robust kernel of the LiDAR factors. The threshold acts on the norm of the whitened residual.
+    struct LidarKernelConfig
+    {
+        // Default from the exp14 kernel sweep (ticket #7): Huber 1.345 passes APE 1 m latest.
+        std::string type = "huber"; // none | huber | geman_mcclure | cauchy
+        double threshold = 1.345;   // [whitened units], ignored for "none"
+        /// Parsed from `type` in `declare_config` only. Set `type` through a config load, not directly.
+        LidarKernelType kernel_type = LidarKernelType::Huber;
+    };
+
+    inline void declare_config(LidarKernelConfig &config)
+    {
+        using namespace config;
+        name("LidarKernelConfig");
+        field(config.type, "type");
+        field(config.threshold, "threshold");
+        const auto parsed = parseLidarKernelType(config.type);
+        checkCondition(parsed.has_value(),
+                       "lidar_kernel.type must be one of: none, huber, geman_mcclure, cauchy (got '" + config.type +
+                           "')");
+        if (parsed)
+        {
+            config.kernel_type = *parsed;
+            if (*parsed != LidarKernelType::None)
+                check(config.threshold, GT, 0.0, "threshold");
+        }
+    }
+
     /// @brief Backend optimization parameters
     struct BackendConfig
     {
+        LidarKernelConfig lidar_kernel;
         size_t sliding_window_size = 7; // [keyframes]
         double init_time_window = 2.0;  // [sec.]
         size_t solver_iterations = 2;
@@ -165,6 +219,7 @@ namespace mapping
     {
         using namespace config;
         name("BackendConfig");
+        field(config.lidar_kernel, "lidar_kernel");
         field(config.sliding_window_size, "sliding_window_size", "keyframes");
         field(config.init_time_window, "init_time_window", "s");
         field(config.solver_iterations, "solver_iterations");

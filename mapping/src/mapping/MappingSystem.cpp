@@ -18,6 +18,8 @@ SETUP_LOGS(DEBUG, "MappingSystem");
 
 namespace mapping
 {
+    // [m], voxel size of the odometry-only global map that is published when bundle adjustment is disabled
+    constexpr double GLOBAL_MAP_VOXEL_SIZE = 0.05;
 
     MappingSystem::MappingSystem() : MappingSystem(MappingConfig()) {}
 
@@ -38,13 +40,15 @@ namespace mapping
         }
         else
             LOG(DEBUG, "bundle adjustment disabled, scan-to-map registration is skipped");
-        // marginalized submaps are only consumed by BA, collecting them without BA would grow memory unbounded
-        states_.setCollectMarginalizedSubmaps(config_.bundle_adjustment.enabled);
+        // marginalized submaps are consumed by BA, or by the global map accumulator when BA is disabled
+        globalMap_ = config_.bundle_adjustment.enabled ? nullptr : std::make_shared<open3d::geometry::PointCloud>();
+        states_.setCollectMarginalizedSubmaps(true);
         imu_T_lidar_ = config_.extrinsics.imu_T_lidar.toPose3();
         states_.setImuToLidarExtrinsic(imu_T_lidar_);
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
         states_.setTemporalOffset(config_.extrinsics.imu_t_lidar);
         smoother_.reset(config_);
+        featureManager_.setLidarKernel(config_.backend.lidar_kernel);
         featureManager_.setCalibrationKeys(
             config_.extrinsics.temporal_calibration_enabled ? boost::optional<gtsam::Key>(T(0)) : boost::none,
             config_.extrinsics.extrinsic_calibration_enabled ? boost::optional<gtsam::Key>(E(0)) : boost::none);
@@ -310,6 +314,13 @@ namespace mapping
         if (bundleAdjustment_)
             for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
                 bundleAdjustment_->accumulateSubmap(kfIdx, poseAndCloud.first, poseAndCloud.second);
+        else if (globalMap_ && !newlyMarginalized.empty())
+        {
+            // marginalized clouds are already in world frame (BA undoes the pose to get the body frame)
+            for (auto &[kfIdx, poseAndCloud] : newlyMarginalized)
+                *globalMap_ += *poseAndCloud.second;
+            globalMap_ = globalMap_->VoxelDownSample(GLOBAL_MAP_VOXEL_SIZE);
+        }
 
         // modifies featureManager_: updates cluster states, parameters and point associations via KNN tracking
         const bool isTracking =
@@ -563,6 +574,18 @@ namespace mapping
         if (!bundleAdjustment_)
             return {};
         return bundleAdjustment_->getAllActiveSubmaps();
+    }
+
+    std::shared_ptr<open3d::geometry::PointCloud> MappingSystem::getGlobalMapCloud() const
+    {
+        if (!globalMap_)
+            return nullptr;
+        // copy, the sliding-window submaps (world frame, not yet marginalized) are appended to the copy only
+        auto map = std::make_shared<open3d::geometry::PointCloud>(*globalMap_);
+        for (const auto &[_, submap] : states_.getKeyframeSubmaps())
+            if (submap)
+                *map += *submap;
+        return map;
     }
 
     void MappingSystem::setCollectMarginalizedSubmaps(bool enable) { states_.setCollectMarginalizedSubmaps(enable); }

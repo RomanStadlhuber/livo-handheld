@@ -21,6 +21,27 @@ namespace mapping
         clusterFactorIdxMap_.reserve(5000);
     }
 
+    void FeatureManager::setLidarKernel(const LidarKernelConfig &config)
+    {
+        namespace me = gtsam::noiseModel::mEstimator;
+        switch (config.kernel_type)
+        {
+        case LidarKernelType::Huber:
+            kernel_ = me::Huber::Create(config.threshold);
+            break;
+        case LidarKernelType::GemanMcClure:
+            kernel_ = me::GemanMcClure::Create(config.threshold);
+            break;
+        case LidarKernelType::Cauchy:
+            kernel_ = me::Cauchy::Create(config.threshold);
+            break;
+        case LidarKernelType::None:
+        default:
+            kernel_ = boost::make_shared<me::Null>();
+            break;
+        }
+    }
+
     void FeatureManager::reset()
     {
         clusters_.clear();

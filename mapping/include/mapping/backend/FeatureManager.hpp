@@ -127,20 +127,14 @@ namespace mapping
         // factor management for what's passed to the smoother
         gtsam::NonlinearFactorGraph newSmootherFactors_;
         gtsam::FactorIndices factorsToRemove_;
-        /// @brief Robust kernel for point-to-plane factors
+        /// @brief Robust kernel for point-to-plane factors, built from the config.
         /// see also: https://gtsam.org/doxygen/a03860.html
-        gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr kernel_{
-            gtsam::noiseModel::mEstimator::GemanMcClure::shared_ptr(
-                new gtsam::noiseModel::mEstimator::GemanMcClure(0.5))};
-        // NOTE: for Huber loss, default k = 1.345 which is in standard-deviations,
-        // as the residual is already whitened before applying the kernel!!
-        // https://gtsam.org/doxygen/a04439.html
-        /*gtsam::noiseModel::mEstimator::Huber::shared_ptr kernel_{
-            gtsam::noiseModel::mEstimator::Huber::shared_ptr(new gtsam::noiseModel::mEstimator::Huber())}; */
-        /* gtsam::noiseModel::mEstimator::Null::shared_ptr kernel_{
-            gtsam::noiseModel::mEstimator::Null::shared_ptr(new gtsam::noiseModel::mEstimator::Null())}; */
+        /// The threshold is in whitened units, as the residual is whitened before the kernel is applied.
+        gtsam::noiseModel::mEstimator::Base::shared_ptr kernel_{gtsam::noiseModel::mEstimator::Huber::Create(1.345)};
 
     public:
+        /// @brief Build the robust kernel of the LiDAR factors from the config.
+        void setLidarKernel(const LidarKernelConfig &config);
         /// @brief Set optional calibration keys for temporal and extrinsic calibration.
         void setCalibrationKeys(boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey);
         // Sensor + pose noise floor added to plane-fit variance.
