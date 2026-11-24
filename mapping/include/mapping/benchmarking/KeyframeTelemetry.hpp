@@ -33,7 +33,6 @@
 ///   pose of the current keyframe (magnitude of smoother correction)
 /// - `vel_norm` `[m/s]`, `ba_norm`, `bg_norm`: optimized velocity, accelerometer and gyroscope bias norms
 /// - `pts_submap`: points in the keyframe submap after the voxel filter
-/// - `voxel_size`: adaptive voxel size when the keyframe is created (`States::getVoxelSize()`)
 /// - `clusters_valid`: `numValidClusters` of `LidarFrontend::trackScanPointsToClusters` at the current keyframe,
 ///   `nan` when it returned false (see `LidarFrontend::keyframeNumValidClusters`)
 /// - `thickness`: newest plane thickness history entry of the `Tracked` clusters with a point in the current
@@ -49,11 +48,40 @@
 ///   Pick the "rejected" threshold in the evaluation, it depends on the kernel and its scale.
 /// - `lidar_var` `[m^4]`: variance of the noise model (without the robust kernel) per `PointToPlaneFactor`
 ///   in the smoother
-/// - `err_marg_sum`: summed error of all `LinearContainerFactor` (marginalization) in the smoother.
-///   Combines the built-in iSAM2 fixed-lag marginalization factors and the custom marginalization factors
-///   that the system adds (e.g. `PointToPlaneFactor::createMarginalizationFactor`)
 /// - `cov_rot_trace`, `cov_trans_trace`: trace of the rotation and translation blocks of the marginal covariance
 ///   of `X(kf)`
+///
+/// LiDAR factor accounting of the smoother update at this keyframe. The counts satisfy
+/// `lidar_fac_after = lidar_fac_before - lidar_fac_removed + lidar_fac_readded + lidar_fac_new
+///  - lidar_fac_marg_pruned - lidar_fac_marg_lost`.
+/// - `lidar_fac_before`, `lidar_fac_after`: `PointToPlaneFactor` in the smoother before the marginalization of this
+///   keyframe and after the smoother update
+/// - `lidar_fac_removed`: factors that `createAndUpdateFactors` passes to the smoother for removal
+/// - `lidar_fac_readded`: factors that `createAndUpdateFactors` rebuilds for a cluster with a removed factor
+///   (`Tracked` with a live factor, `ShiftedIdle`)
+/// - `lidar_fac_new`: factors that `createAndUpdateFactors` creates for a cluster without a live factor
+/// - `lidar_fac_marg_pruned`, `lidar_fac_marg_lost`: factors on a marginalized keyframe that are not removed by
+///   `createAndUpdateFactors`, so the iSAM2 marginalization absorbs them with all their keys.
+///   `_pruned`: the cluster is `Pruned` (fewer than 3 points left). `_lost`: the cluster is still alive, but has no
+///   factor after the update (e.g. `ShiftedIdle` overwritten with `Idle` by a failed track).
+/// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
+///   `ShiftedIdle`
+///
+/// Marginalization, `nan` at keyframes without a marginalization:
+/// - `marg_n`: custom marginalization factors that `removeKeyframeFromClusters` creates
+///   (`PointToPlaneFactor::createMarginalizationFactor`, unary on the marginalized pose)
+/// - `marg_info_rot`, `marg_info_trans`: smallest eigenvalue of the rotation and translation blocks of the summed
+///   whitened information `sum(H^T H)` of these factors (incl. the robust kernel weight)
+/// - `marg_w`: robust kernel weight of the source `PointToPlaneFactor` of each custom marginalization factor
+/// - `marg_kf`: the oldest keyframe that the smoother marginalizes in this update
+/// - `marg_ref_info_rot`, `marg_ref_info_trans`, `marg_cur_info_rot`, `marg_cur_info_trans`: information on the
+///   Markov blanket of the marginalized keyframes. All factors that touch `X`, `V`, `B` of a marginalized keyframe are
+///   linearized at the smoother estimate, and these variables are eliminated (Schur complement).
+///   The value is the smallest eigenvalue of the rotation / translation block of the sum of the diagonal pose blocks
+///   of the remaining information matrix.
+///   `_ref`: the factors in the smoother before the marginalization (full `PointToPlaneFactor`, IMU, older marginals).
+///   `_cur`: the factors that iSAM2 really marginalizes (current scheme: custom unary factors, IMU, older marginals and
+///   the absorbed LiDAR factors).
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
     X(Index, kf)                                                                                                       \
     X(Time, t)                                                                                                         \
@@ -67,7 +95,6 @@
     X(Real, ba_norm)                                                                                                   \
     X(Real, bg_norm)                                                                                                   \
     X(Index, pts_submap)                                                                                               \
-    X(Real, voxel_size)                                                                                                \
     X(Index, clusters_valid)                                                                                           \
     X(Stats, thickness)                                                                                                \
     X(Real, eig_rot_min)                                                                                               \
@@ -76,9 +103,26 @@
     X(Stats, err_lidar)                                                                                                \
     X(Stats, w_lidar)                                                                                                  \
     X(Stats, lidar_var)                                                                                                \
-    X(Real, err_marg_sum)                                                                                              \
     X(Real, cov_rot_trace)                                                                                             \
-    X(Real, cov_trans_trace)
+    X(Real, cov_trans_trace)                                                                                           \
+    X(Index, lidar_fac_before)                                                                                         \
+    X(Index, lidar_fac_after)                                                                                          \
+    X(Index, lidar_fac_removed)                                                                                        \
+    X(Index, lidar_fac_readded)                                                                                        \
+    X(Index, lidar_fac_new)                                                                                            \
+    X(Index, lidar_fac_marg_pruned)                                                                                    \
+    X(Index, lidar_fac_marg_lost)                                                                                      \
+    X(Index, clusters_pruned)                                                                                          \
+    X(Index, clusters_shifted_idle)                                                                                    \
+    X(Index, marg_n)                                                                                                   \
+    X(Real, marg_info_rot)                                                                                             \
+    X(Real, marg_info_trans)                                                                                           \
+    X(Stats, marg_w)                                                                                                   \
+    X(Index, marg_kf)                                                                                                  \
+    X(Real, marg_ref_info_rot)                                                                                         \
+    X(Real, marg_ref_info_trans)                                                                                       \
+    X(Real, marg_cur_info_rot)                                                                                         \
+    X(Real, marg_cur_info_trans)
 
 namespace mapping
 {

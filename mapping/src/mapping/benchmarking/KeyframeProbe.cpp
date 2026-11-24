@@ -13,21 +13,57 @@ namespace mapping
 {
     namespace benchmarking
     {
+        namespace
+        {
+            /// @brief Run a probe step, log and continue if it throws.
+            template <typename Fn> void runStep(const char *step, uint64_t idxKeyframe, Fn &&fn) noexcept
+            {
+                try
+                {
+                    fn();
+                }
+                catch (const std::exception &e)
+                {
+                    LOG(WARN, "keyframe " << idxKeyframe << ": telemetry " << step << " failed: " << e.what());
+                }
+                catch (...)
+                {
+                    LOG(WARN, "keyframe " << idxKeyframe << ": telemetry " << step << " failed");
+                }
+            }
+        } // namespace
+
         KeyframeProbe::KeyframeProbe(MappingSystem &system, uint32_t idxKeyframe) noexcept : system_(system)
         {
             row_.kf = idxKeyframe;
-            try
-            {
-                instrumentation::snapshot(row_, imuPropagated_, system_.states_, idxKeyframe);
-            }
-            catch (const std::exception &e)
-            {
-                LOG(WARN, "keyframe " << idxKeyframe << ": telemetry snapshot failed: " << e.what());
-            }
-            catch (...)
-            {
-                LOG(WARN, "keyframe " << idxKeyframe << ": telemetry snapshot failed");
-            }
+            runStep(
+                "snapshot", idxKeyframe, [&]
+                { instrumentation::snapshot(row_, imuPropagated_, system_.states_, system_.smoother_, idxKeyframe); });
+        }
+
+        void KeyframeProbe::beforeMarginalization() noexcept
+        {
+            runStep("marginalization snapshot", *row_.kf,
+                    [&]
+                    {
+                        marginalizedKeyframes_ = instrumentation::marginalizedKeyframes(
+                            system_.states_, static_cast<uint32_t>(*row_.kf),
+                            static_cast<uint32_t>(system_.config_.backend.sliding_window_size));
+                        instrumentation::snapshotMarginalization(row_, marginalizedKeyframes_, system_.states_,
+                                                                 system_.smoother_);
+                    });
+        }
+
+        void KeyframeProbe::beforeSmootherUpdate(const gtsam::NonlinearFactorGraph &newFactors,
+                                                 const gtsam::FactorIndices &factorsToRemove) noexcept
+        {
+            runStep("marginalization", *row_.kf,
+                    [&]
+                    {
+                        instrumentation::collectMarginalization(row_, marginalizedKeyframes_, system_.states_,
+                                                                system_.featureManager_, system_.smoother_, newFactors,
+                                                                factorsToRemove);
+                    });
         }
 
         KeyframeProbe::~KeyframeProbe()

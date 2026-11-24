@@ -20,6 +20,7 @@
 #include <utility>
 #include <list>
 #include <set>
+#include <vector>
 
 namespace mapping
 {
@@ -51,6 +52,8 @@ namespace mapping
         ///
         /// NOTE: will also create a set of factors to use for marginalization.
         /// @param idxKeyframe Index of the keyframe to be marginalized.
+        /// @param markovBlanket Smoother estimate of the poses `X(idxKeyframe..)` and calibration variables.
+        /// @param currentSmootherFactors The current factor graph of the smoother.
         void removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket,
                                         const gtsam::NonlinearFactorGraph &currentSmootherFactors);
         /// @brief Add a new point to a cluster when it is successfully tracked against it.
@@ -161,6 +164,31 @@ namespace mapping
         {
             return clusterFactorIdxMap_.find(clusterId) != clusterFactorIdxMap_.end();
         };
+
+#ifdef MAPPING_BENCHMARKING
+        /// @brief Benchmark build only: what the feature manager did to the LiDAR factors for one keyframe.
+        struct KeyframeFactorStats
+        {
+            /// @brief `removeKeyframeFromClusters`: number of marginalization factors, summed whitened information
+            /// `sum(H^T H)` of their `X(k)` blocks (rotation first), and the kernel weight of each source factor.
+            std::size_t numMargFactors = 0;
+            Eigen::Matrix<double, 6, 6> margInformation = Eigen::Matrix<double, 6, 6>::Zero();
+            std::vector<double> margWeights;
+            /// @brief `removeKeyframeFromClusters`: clusters set to `Pruned` / `ShiftedIdle`.
+            std::size_t numPruned = 0, numShiftedIdle = 0;
+            /// @brief `createAndUpdateFactors`: fresh factors, re-added factors (old factor removed and rebuilt),
+            /// and factor indices passed to the smoother for removal.
+            std::size_t numFactorsAdded = 0, numFactorsUpdated = 0, numFactorsRemoved = 0;
+        };
+        /// @brief Benchmark build only: stats of the last `createAndUpdateFactors` call, together with the stats of all
+        /// `removeKeyframeFromClusters` calls before it.
+        KeyframeFactorStats lastKeyframeFactorStats_;
+
+    private:
+        /// @brief Benchmark build only: accumulates the stats until `createAndUpdateFactors` moves them to
+        /// `lastKeyframeFactorStats_`.
+        KeyframeFactorStats pendingKeyframeFactorStats_;
+#endif
 
     private:
         boost::optional<gtsam::Key> dtKey_;

@@ -16,11 +16,21 @@
 /// @brief Record the telemetry row of a new keyframe when the enclosing scope exits.
 /// @details Place it in `MappingSystem::track()` right after the keyframe is created, see `KeyframeProbe`.
 #define BENCH_KEYFRAME_PROBE(idxKeyframe)                                                                              \
-    const ::mapping::benchmarking::KeyframeProbe benchKeyframeProbe_ { *this, (idxKeyframe) }
+    ::mapping::benchmarking::KeyframeProbe benchKeyframeProbe_ { *this, (idxKeyframe) }
+
+/// @brief Record the marginalization reference before the keyframes leave the clusters, after `BENCH_KEYFRAME_PROBE`.
+#define BENCH_BEFORE_MARGINALIZATION() benchKeyframeProbe_.beforeMarginalization()
+
+/// @brief Record the marginalization of the current scheme right before the smoother update, after
+/// `BENCH_KEYFRAME_PROBE`.
+#define BENCH_BEFORE_SMOOTHER_UPDATE(newFactors, factorsToRemove)                                                      \
+    benchKeyframeProbe_.beforeSmootherUpdate((newFactors), (factorsToRemove))
 
 #else
 
 #define BENCH_KEYFRAME_PROBE(idxKeyframe)
+#define BENCH_BEFORE_MARGINALIZATION()
+#define BENCH_BEFORE_SMOOTHER_UPDATE(newFactors, factorsToRemove)
 
 #endif
 

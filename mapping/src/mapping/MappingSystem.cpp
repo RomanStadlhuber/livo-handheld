@@ -306,6 +306,7 @@ namespace mapping
          * Modifies featureManager_ (creates marginalization factors, removes associations)
          * and states_ (removes marginalized keyframes, optionally archives submaps).
          */
+        BENCH_BEFORE_MARGINALIZATION();
         marginalizeKeyframesOutsideSlidingWindow(idxKeyframe);
 
         // drain newly marginalized submaps into the BA pipeline
@@ -355,6 +356,7 @@ namespace mapping
             featureFactors.add(*registrationPrior);
 
         gtsam::CombinedImuFactor imuFactor = imuFrontend_.createPreintegrationFactor(idxKeyframe - 1, idxKeyframe);
+        BENCH_BEFORE_SMOOTHER_UPDATE(featureFactors, factorsToRemove);
 
         /* Run iSAM2 update, extract state estimate, and update all keyframe submap poses.
          * Modifies states_: smootherEstimate, currentState, currentBias,

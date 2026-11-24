@@ -8,8 +8,10 @@
 #include <mapping/benchmarking/KeyframeTelemetry.hpp>
 
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace mapping
 {
@@ -22,6 +24,8 @@ namespace mapping
         /// `BENCH_KEYFRAME_PROBE` right after the keyframe is created.
         /// @details
         /// - constructor: snapshot of the values that the update overwrites (IMU-propagated pose, trigger values)
+        /// - `beforeMarginalization()`, `beforeSmootherUpdate()`: marginalization columns, called by
+        ///   `BENCH_BEFORE_MARGINALIZATION` / `BENCH_BEFORE_SMOOTHER_UPDATE`. Never throw.
         /// - destructor: runs on every exit of `track()`, also the early lost-tracking return.
         ///   Collects the post-update columns and pushes the row into the telemetry queue of the system,
         ///   see `MappingSystem::takeTelemetry()`. Never throws.
@@ -33,6 +37,12 @@ namespace mapping
             KeyframeProbe(MappingSystem &system, uint32_t idxKeyframe) noexcept;
             ~KeyframeProbe();
 
+            /// @brief Call before the keyframes outside the sliding window are removed from the clusters.
+            void beforeMarginalization() noexcept;
+            /// @brief Call right before the smoother update with the LiDAR factors that it adds and removes.
+            void beforeSmootherUpdate(const gtsam::NonlinearFactorGraph &newFactors,
+                                      const gtsam::FactorIndices &factorsToRemove) noexcept;
+
             KeyframeProbe(const KeyframeProbe &) = delete;
             KeyframeProbe &operator=(const KeyframeProbe &) = delete;
 
@@ -40,6 +50,8 @@ namespace mapping
             MappingSystem &system_;
             KeyframeTelemetry row_;
             gtsam::Pose3 imuPropagated_;
+            /// @brief Keyframes that the smoother marginalizes in the update of this keyframe.
+            std::vector<uint32_t> marginalizedKeyframes_;
         };
     } // namespace benchmarking
 } // namespace mapping

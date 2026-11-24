@@ -10,9 +10,12 @@
 #include <mapping/backend/Smoother.hpp>
 #include <mapping/benchmarking/KeyframeTelemetry.hpp>
 
+#include <Eigen/Core>
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace mapping
 {
@@ -24,10 +27,29 @@ namespace mapping
         namespace instrumentation
         {
             /// @brief Read the values that the update overwrites, right after the keyframe is created.
-            /// @details Sets `kf`, `t`, `trigger_*`, `pts_submap` and `voxel_size`.
+            /// @details Sets `kf`, `t`, `trigger_*`, `pts_submap` and `lidar_fac_before`.
             /// @param imuPropagated Set to the IMU-propagated pose of the new keyframe.
             void snapshot(KeyframeTelemetry &row, gtsam::Pose3 &imuPropagated, const States &states,
-                          uint32_t idxKeyframe);
+                          const Smoother &smoother, uint32_t idxKeyframe);
+
+            /// @brief Keyframes that the smoother marginalizes in the update of `idxKeyframe`:
+            /// `X(j)` in the smoother estimate with `j + slidingWindowSize < idxKeyframe`, ascending.
+            std::vector<uint32_t> marginalizedKeyframes(const States &states, uint32_t idxKeyframe,
+                                                        uint32_t slidingWindowSize);
+
+            /// @brief Call before `removeKeyframeFromClusters`. Sets `marg_kf` and `marg_ref_info_*`.
+            /// @param referenceInformation Set to the blanket information of the reference (Schur complement of
+            /// all factors in the smoother), see `KeyframeTelemetry.hpp`.
+            void snapshotMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
+                                         const States &states, const Smoother &smoother);
+
+            /// @brief Call right before the smoother update. Sets `marg_cur_info_*`, `lidar_fac_marg_*`.
+            /// @param newFactors, factorsToRemove The factors that the update adds and removes (without the IMU
+            /// factor of the new keyframe, which does not touch the marginalized keyframes).
+            void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
+                                        const States &states, const FeatureManager &featureManager,
+                                        const Smoother &smoother, const gtsam::NonlinearFactorGraph &newFactors,
+                                        const gtsam::FactorIndices &factorsToRemove);
 
             /// @brief Fill the post-update columns of `row` (`row.kf` must be set).
             /// @details Each column group (IMU, frontend, geometry, backend) is collected on its own.
@@ -36,7 +58,7 @@ namespace mapping
             /// IMU and backend columns stay `nan` when `row.lost_tracking` is set.
             ///
             /// Per-factor error:
-            /// - `CombinedImuFactor`, `LinearContainerFactor`: `factor->error(estimate)`
+            /// - `CombinedImuFactor`: `factor->error(estimate)`
             /// - `PointToPlaneFactor`: `evaluateErrorDiagnostic(estimate)`, the unweighted error (`err_lidar`)
             ///   and the IRLS weight of the robust kernel (`w_lidar`) at the same residual that `linearize` uses.
             ///   Its `unwhitenedError` throws by design, so `factor->error()` is not available.
