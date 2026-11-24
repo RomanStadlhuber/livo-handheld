@@ -198,10 +198,13 @@ namespace mapping
                     pendingKeyframeFactorStats_.numPruned++;
 #endif
                 }
-                else if (clusterStates_[clusterId] == ClusterState::Idle)
+                else if (clusterStates_[clusterId] == ClusterState::Idle ||
+                         clusterStates_[clusterId] == ClusterState::Tracked)
                 {
                     // shift cluster associations, means that the entire factor needs to be replaced
-                    // to reflect the removed keyframe association
+                    // to reflect the removed keyframe association. A Tracked cluster is shifted as well: a failed
+                    // track would otherwise set it Idle and leave the factor on the marginalized keyframe alive.
+                    // A successful track sets it back to Tracked, which rebuilds the factor too.
                     clusterStates_[clusterId] = ClusterState::ShiftedIdle;
 #ifdef MAPPING_BENCHMARKING
                     pendingKeyframeFactorStats_.numShiftedIdle++;

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -243,11 +244,28 @@ namespace mapping
                     row.w_lidar = makeStats(std::move(wLidar));
                     row.lidar_var = makeStats(std::move(varLidar));
                     row.lidar_fac_after = countLidarFactors(smoother.getFactors());
-                    std::size_t numFixed = 0;
+                    std::size_t numFixed = 0, numWindow = 0, numFixedVb = 0;
+                    double fixedFirst = std::numeric_limits<double>::quiet_NaN();
+                    double fixedLast = fixedFirst;
+                    const gtsam::KeySet &fixedKeys = smoother.getFixedVariables();
                     for (const auto &[k, _] : states.getKeyframeImuPoses())
-                        if (smoother.getFixedVariables().exists(X(k)))
+                    {
+                        numWindow++;
+                        if (fixedKeys.exists(X(k)))
+                        {
                             numFixed++;
+                            if (std::isnan(fixedFirst))
+                                fixedFirst = static_cast<double>(k); // map is ordered by k
+                            fixedLast = static_cast<double>(k);
+                        }
+                        if (fixedKeys.exists(V(k)) || fixedKeys.exists(B(k)))
+                            numFixedVb++;
+                    }
                     row.n_fixed_kf = numFixed;
+                    row.n_window_kf = numWindow;
+                    row.fixed_kf_first = fixedFirst;
+                    row.fixed_kf_last = fixedLast;
+                    row.n_fixed_vb = numFixedVb;
                     const gtsam::Matrix cov = smoother.marginalCovariance(X(static_cast<uint32_t>(*row.kf)));
                     row.cov_rot_trace = cov.topLeftCorner<3, 3>().trace();
                     row.cov_trans_trace = cov.bottomRightCorner<3, 3>().trace();
