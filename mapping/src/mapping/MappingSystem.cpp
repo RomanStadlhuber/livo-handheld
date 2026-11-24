@@ -45,6 +45,7 @@ namespace mapping
         states_.setImuToCameraExtrinsic(config_.extrinsics.imu_T_camera.toPose3());
         states_.setTemporalOffset(config_.extrinsics.imu_t_lidar);
         smoother_.reset(config_);
+        featureManager_.setLidarKernel(config_.backend.lidar_kernel);
         featureManager_.setCalibrationKeys(
             config_.extrinsics.temporal_calibration_enabled ? boost::optional<gtsam::Key>(T(0)) : boost::none,
             config_.extrinsics.extrinsic_calibration_enabled ? boost::optional<gtsam::Key>(E(0)) : boost::none);
