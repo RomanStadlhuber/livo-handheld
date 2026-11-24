@@ -75,6 +75,13 @@ namespace mapping
         {
             auto const &[clusterId, clusterPointIdxs] = cluster;
             const ClusterState clusterState = featureManager.clusterStates_.at(clusterId);
+            // a failed track sets the cluster Idle, but keeps ShiftedIdle: createAndUpdateFactors must still rebuild
+            // the factor without the marginalized keyframe
+            const auto failTrack = [&]
+            {
+                if (clusterState != ClusterState::ShiftedIdle)
+                    featureManager.clusterStates_[clusterId] = ClusterState::Idle;
+            };
             // --- ignore pruned clusters ---
             if (clusterState == ClusterState::Pruned)
                 continue;
@@ -111,7 +118,7 @@ namespace mapping
 #endif
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
-                featureManager.clusterStates_[clusterId] = ClusterState::Idle;
+                failTrack();
                 featureManager.updateClusterParameters(
                     states, clusterId, false, config); // update cluster, keep thickness (no new KF association)
                 continue;
@@ -132,7 +139,7 @@ namespace mapping
 #endif
                 if (clusterState == ClusterState::Premature) // don't update premature clusters
                     continue;
-                featureManager.clusterStates_[clusterId] = ClusterState::Idle;
+                failTrack();
                 featureManager.updateClusterParameters(
                     states, clusterId, false, config); // update cluster, keep thickness (no new KF association)
                 continue;
@@ -152,7 +159,7 @@ namespace mapping
 #ifdef ENABLE_DBG_CMP
                     stats.rejGating++;
 #endif
-                    featureManager.clusterStates_[clusterId] = ClusterState::Idle;
+                    failTrack();
                     featureManager.updateClusterParameters(
                         states, clusterId, false, config); // update cluster, keep thickness (no new KF association)
                     continue;
@@ -201,7 +208,7 @@ namespace mapping
                 // associations
                 if (clusterState == ClusterState::Premature) // must not go from premature to idle
                     continue;
-                featureManager.clusterStates_[clusterId] = ClusterState::Idle; // idle - no valid track in newest KF
+                failTrack();                                                   // idle - no valid track in newest KF
                 featureManager.removePointFromCluster(clusterId, idxKeyframe); // remove latest association
                 featureManager.updateClusterParameters(
                     states, clusterId, false,

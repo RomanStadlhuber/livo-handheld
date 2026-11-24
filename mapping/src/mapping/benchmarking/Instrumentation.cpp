@@ -243,6 +243,11 @@ namespace mapping
                     row.w_lidar = makeStats(std::move(wLidar));
                     row.lidar_var = makeStats(std::move(varLidar));
                     row.lidar_fac_after = countLidarFactors(smoother.getFactors());
+                    std::size_t numFixed = 0;
+                    for (const auto &[k, _] : states.getKeyframeImuPoses())
+                        if (smoother.getFixedVariables().exists(X(k)))
+                            numFixed++;
+                    row.n_fixed_kf = numFixed;
                     const gtsam::Matrix cov = smoother.marginalCovariance(X(static_cast<uint32_t>(*row.kf)));
                     row.cov_rot_trace = cov.topLeftCorner<3, 3>().trace();
                     row.cov_trans_trace = cov.bottomRightCorner<3, 3>().trace();

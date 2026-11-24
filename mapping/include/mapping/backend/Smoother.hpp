@@ -73,6 +73,9 @@ namespace mapping
 #ifdef MAPPING_BENCHMARKING
         /// @brief Marginal covariance of a variable in the current graph (benchmark build only, for telemetry).
         gtsam::Matrix marginalCovariance(const gtsam::Key key) const { return smoother_.marginalCovariance(key); }
+
+        /// @brief A relay to `ISAM2::getFixedVariables()`: the keys that iSAM2 never relinearizes again.
+        const gtsam::KeySet &getFixedVariables() const { return smoother_.getISAM2().getFixedVariables(); }
 #endif
 
     private:

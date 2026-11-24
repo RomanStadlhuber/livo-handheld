@@ -67,6 +67,11 @@
 /// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
 ///   `ShiftedIdle`
 ///
+/// - `n_fixed_kf`: number of keyframes in the sliding window whose pose key `X(k)` is in
+///   `ISAM2::getFixedVariables()` after the update. Recorded at every keyframe. iSAM2 never relinearizes these
+///   variables again until they are marginalized, so a stale linearization point stays in the smoother.
+///   Expected: 1 (`X(k+1)` of the IMU factor).
+///
 /// Marginalization, `nan` at keyframes without a marginalization. If one update marginalizes more than one keyframe
 /// (e.g. after a gap), each value covers all of them together:
 /// - `marg_n`: custom marginalization factors that `removeKeyframeFromClusters` creates
@@ -120,6 +125,7 @@
     X(Index, lidar_fac_marg_lost)                                                                                      \
     X(Index, clusters_pruned)                                                                                          \
     X(Index, clusters_shifted_idle)                                                                                    \
+    X(Index, n_fixed_kf)                                                                                               \
     X(Index, marg_n)                                                                                                   \
     X(Real, marg_info_rot)                                                                                             \
     X(Real, marg_info_trans)                                                                                           \
