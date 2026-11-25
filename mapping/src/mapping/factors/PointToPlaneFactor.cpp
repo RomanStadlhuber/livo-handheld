@@ -37,11 +37,12 @@ namespace mapping
         const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points, const std::shared_ptr<Eigen::Vector3d> &planeNormal,
         const std::shared_ptr<Eigen::Vector3d> &planeCenter, const gtsam::SharedNoiseModel &noiseModel,
         const uint32_t &clusterId, boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey,
-        const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists)
+        const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists,
+        const std::vector<Eigen::Vector3d> &anchorPoints)
         : NoiseModelFactor(noiseModel, buildFullKeys(poseKeys, dtKey, extrinsicKey)), imu_T_lidar_(imu_T_lidar),
           lidar_points_(lidar_points), planeNormal_(planeNormal), planeCenter_(planeCenter),
           adaptiveNoiseModel_(noiseModel), clusterId_(clusterId), numPoseKeys_(poseKeys.size()), dtKey_(dtKey),
-          extrinsicKey_(extrinsicKey), keyframeTwists_(keyframeTwists)
+          extrinsicKey_(extrinsicKey), keyframeTwists_(keyframeTwists), anchorPoints_(anchorPoints)
     {
     }
 
@@ -128,7 +129,7 @@ namespace mapping
     std::pair<gtsam::Vector, std::vector<gtsam::Matrix>>
     PointToPlaneFactor::computeErrorAndJacobians(const gtsam::Values &values) const
     {
-        const double meanFactor = 1.0 / static_cast<double>(lidar_points_.size());
+        const double meanFactor = 1.0 / static_cast<double>(lidar_points_.size() + anchorPoints_.size());
         std::vector<gtsam::Matrix> Hs;
         // the number of jacobians required based on the keys associated with this factor
         // needs to be extended i.e. when using system calibration
@@ -213,6 +214,9 @@ namespace mapping
                 H_ext_accum.block<1, 3>(0, 3) += 2 * meanFactor * r_i * nT * w_R_l;
             }
         }
+        // constant anchor points of marginalized keyframes: residual only, no Jacobian
+        for (const Eigen::Vector3d &anchor : anchorPoints_)
+            errorVec(0) += std::pow(planeNormal_->dot(anchor - *planeCenter_), 2);
         errorVec *= meanFactor;
 
         // --- Append calibration Jacobians after pose loop ---
@@ -242,9 +246,9 @@ namespace mapping
 
     gtsam::NonlinearFactor::shared_ptr PointToPlaneFactor::clone() const
     {
-        return boost::make_shared<PointToPlaneFactor>(gtsam::KeyVector(keys().begin(), keys().begin() + numPoseKeys_),
-                                                      imu_T_lidar_, lidar_points_, planeNormal_, planeCenter_,
-                                                      noiseModel(), clusterId_, dtKey_, extrinsicKey_, keyframeTwists_);
+        return boost::make_shared<PointToPlaneFactor>(
+            gtsam::KeyVector(keys().begin(), keys().begin() + numPoseKeys_), imu_T_lidar_, lidar_points_, planeNormal_,
+            planeCenter_, noiseModel(), clusterId_, dtKey_, extrinsicKey_, keyframeTwists_, anchorPoints_);
     }
 
     void PointToPlaneFactor::print(const std::string &s, const gtsam::KeyFormatter &keyFormatter) const
@@ -257,7 +261,7 @@ namespace mapping
         std::cout << "\n\tCluster Id: " << clusterId_ << "\n"
                   << "\tPlane normal: [" << planeNormal_->transpose() << "]\n"
                   << "\tPlane center: [" << planeCenter_->transpose() << "]\n"
-                  << "\tTotal points: " << lidar_points_.size() << "\n"
+                  << "\tTotal points: " << lidar_points_.size() << " (+" << anchorPoints_.size() << " anchors)\n"
                   << "\tNoise model: ";
         adaptiveNoiseModel_->print("");
     }

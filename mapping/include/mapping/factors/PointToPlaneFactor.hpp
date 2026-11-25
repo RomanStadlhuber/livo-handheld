@@ -41,13 +41,14 @@ namespace mapping
                            const gtsam::SharedNoiseModel &noiseModel, const uint32_t &clusterId);
 
         /// @brief Extended constructor with optional calibration keys for temporal and extrinsic calibration.
-        PointToPlaneFactor(
-            const gtsam::KeyVector &poseKeys, const gtsam::Pose3 &imu_T_lidar,
-            const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
-            const std::shared_ptr<Eigen::Vector3d> &planeNormal, const std::shared_ptr<Eigen::Vector3d> &planeCenter,
-            const gtsam::SharedNoiseModel &noiseModel, const uint32_t &clusterId, boost::optional<gtsam::Key> dtKey,
-            boost::optional<gtsam::Key> extrinsicKey,
-            const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists = {});
+        PointToPlaneFactor(const gtsam::KeyVector &poseKeys, const gtsam::Pose3 &imu_T_lidar,
+                           const std::map<gtsam::Key, Eigen::Vector3d> &lidar_points,
+                           const std::shared_ptr<Eigen::Vector3d> &planeNormal,
+                           const std::shared_ptr<Eigen::Vector3d> &planeCenter,
+                           const gtsam::SharedNoiseModel &noiseModel, const uint32_t &clusterId,
+                           boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey,
+                           const std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> &keyframeTwists = {},
+                           const std::vector<Eigen::Vector3d> &anchorPoints = {});
 
         /// @brief Evaluate unwhitened error for all poses involved in this factor
         /// @param values Current estimates of all variables in the factor graph
@@ -154,6 +155,9 @@ namespace mapping
         /// Stored as (angular_velocity, linear_velocity) in IMU frame.
         /// Only populated when temporal calibration is enabled.
         std::map<gtsam::Key, std::pair<Eigen::Vector3d, Eigen::Vector3d>> keyframeTwists_;
+        /// @brief Constant world points of marginalized keyframes ("anchors"), no key and no Jacobian.
+        /// They count in the mean (`N`) and add `(n.(p_a - c))^2` to the residual. Empty by default.
+        std::vector<Eigen::Vector3d> anchorPoints_;
     };
 
 } // namespace mapping

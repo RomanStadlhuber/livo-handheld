@@ -234,6 +234,11 @@ namespace mapping
                     row.lidar_fac_new = stats.numFactorsAdded;
                     row.clusters_pruned = stats.numPruned;
                     row.clusters_shifted_idle = stats.numShiftedIdle;
+                    std::vector<double> anchorCounts;
+                    for (const auto &[clusterId, anchors] : featureManager.clusterAnchors_)
+                        if (!anchors.empty())
+                            anchorCounts.push_back(static_cast<double>(anchors.size()));
+                    row.anchor_pts = makeStats(std::move(anchorCounts));
                     if (!row.marg_kf)
                         return; // no marginalization in this update, the marginalization columns stay nan
                     row.marg_n = stats.numMargFactors;

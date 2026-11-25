@@ -66,6 +66,9 @@
 ///   factor after the update (e.g. `ShiftedIdle` overwritten with `Idle` by a failed track).
 /// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
 ///   `ShiftedIdle`
+/// - `anchor_pts` (`Stats`): number of anchors (constant world points of marginalized keyframes,
+///   `backend.marginalization_anchor`) per cluster, over the clusters with at least one anchor, at the end of the
+///   keyframe. Empty (`n` = 0) when the switch is off.
 ///
 /// Fixed variables of iSAM2 after the smoother update, recorded at every keyframe:
 /// - `n_fixed_kf`: number of keyframes in the sliding window whose pose key `X(k)` is in
@@ -156,6 +159,7 @@
     X(Real, fixed_kf_first)                                                                                            \
     X(Real, fixed_kf_last)                                                                                             \
     X(Index, n_fixed_vb)                                                                                               \
+    X(Stats, anchor_pts)                                                                                               \
     X(Index, marg_n)                                                                                                   \
     X(Real, marg_info_rot)                                                                                             \
     X(Real, marg_info_trans)                                                                                           \

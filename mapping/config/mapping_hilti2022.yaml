@@ -10,6 +10,7 @@ backend:
   init_time_window: 2.0 # [sec.]
   solver_iterations: 2
   isam2_relinearize_threshold: 0.01 # frobenius norm for relinearization on state variables
+  marginalization_anchor: false # experimental: keep marginalized cluster points as constant anchors instead of a unary factor
 
 imu_frontend:
   # Bosch BMI085 datasheet (rev. 1.6, https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmi085-ds001.pdf), output noise density:
