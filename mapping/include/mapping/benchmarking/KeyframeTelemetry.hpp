@@ -97,9 +97,12 @@
 ///   - `rebuild_info_ratio`: `sum ||A'_j||^2 / sum ||A_j||^2` over all compared clusters and their common poses
 ///     (after / before). Below 1: the rebuilt factors carry less information on the remaining poses.
 ///   - `rebuild_jac_ratio`: per cluster `||J'|| / ||J||` on the common poses (plane refit, residual `r_j`, `1/N`)
-///   - Split by cluster state at the smoother update (after `createAndUpdateFactors`). `Tracked`: the plane was refit
-///     at this keyframe. `Idle`: the cluster was shifted without a refit (`createAndUpdateFactors` sets `ShiftedIdle`
-///     back to `Idle`). A cluster in any other state counts in the totals only.
+///   - Split by cluster state at the smoother update (after `createAndUpdateFactors`). Both groups get a plane refit
+///     in `LidarFrontend::trackScanPointsToClusters` after the marginalized point is removed. `Tracked`: the track
+///     succeeded, the plane is refit with the point of the new keyframe. `Idle` ("shifted"): the track failed, the
+///     plane is refit from the remaining points only (`updateClusterParameters` without a new point), and
+///     `createAndUpdateFactors` sets `ShiftedIdle` back to `Idle`. A cluster in any other state counts in the totals
+///     only.
 ///     - `rebuild_n_tracked`, `rebuild_n_shifted`: compared clusters of the group
 ///     - `rebuild_info_ratio_tracked`, `rebuild_info_ratio_shifted`: `rebuild_info_ratio` of the group, `nan` if the
 ///       group is empty
