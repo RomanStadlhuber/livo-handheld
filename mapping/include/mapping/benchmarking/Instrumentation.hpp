@@ -51,22 +51,20 @@ namespace mapping
             std::vector<uint32_t> marginalizedKeyframes(const States &states, uint32_t idxKeyframe,
                                                         uint32_t slidingWindowSize);
 
-            /// @brief Call before `removeKeyframeFromClusters`. Sets `marg_kf` and `marg_ref_info_*`.
-            /// @param blanketPoses Set to the pose keys on the Markov blanket of the reference (Schur complement of
-            /// all factors in the smoother), see `KeyframeTelemetry.hpp`. `collectMarginalization` uses the same keys.
+            /// @brief Call before `removeKeyframeFromClusters`. Sets `marg_kf`.
             /// @param rebuildBaseline Set to the rows of every `PointToPlaneFactor` on a marginalized keyframe, before
             /// the rebuild. `collectMarginalization` compares the rebuilt factors with them (`rebuild_*`).
-            void snapshotMarginalization(KeyframeTelemetry &row, gtsam::KeyVector &blanketPoses,
-                                         ClusterRowsMap &rebuildBaseline, const std::vector<uint32_t> &keyframes,
-                                         const States &states, const Smoother &smoother);
+            void snapshotMarginalization(KeyframeTelemetry &row, ClusterRowsMap &rebuildBaseline,
+                                         const std::vector<uint32_t> &keyframes, const States &states,
+                                         const Smoother &smoother);
 
-            /// @brief Call right before the smoother update. Sets `marg_cur_info_*`, `lidar_fac_marg_*`, `rebuild_*`.
+            /// @brief Call right before the smoother update. Sets `lidar_fac_marg_*`, `rebuild_*`.
             /// @param newFactors, factorsToRemove The factors that the update adds and removes (without the IMU
             /// factor of the new keyframe, which does not touch the marginalized keyframes).
             void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                        const gtsam::KeyVector &blanketPoses, const ClusterRowsMap &rebuildBaseline,
-                                        const States &states, const FeatureManager &featureManager,
-                                        const Smoother &smoother, const gtsam::NonlinearFactorGraph &newFactors,
+                                        const ClusterRowsMap &rebuildBaseline, const States &states,
+                                        const FeatureManager &featureManager, const Smoother &smoother,
+                                        const gtsam::NonlinearFactorGraph &newFactors,
                                         const gtsam::FactorIndices &factorsToRemove);
 
             /// @brief Fill the post-update columns of `row` (`row.kf` must be set).

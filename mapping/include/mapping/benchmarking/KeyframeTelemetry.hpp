@@ -86,29 +86,6 @@
 ///   marginalized keyframe, the blocks of the different poses are added into one matrix.
 /// - `marg_w`: robust kernel weight of the source `PointToPlaneFactor` of each custom marginalization factor
 /// - `marg_kf`: the oldest keyframe that the smoother marginalizes in this update
-/// - `marg_ref_info_rot`, `marg_ref_info_trans`, `marg_cur_info_rot`, `marg_cur_info_trans`: information on the
-///   Markov blanket of the marginalized keyframes. The factors of each set are linearized at the smoother estimate.
-///   The dense Hessian `L` of the linear factors is built once, with `X`, `V`, `B` of the marginalized keyframes (`m`)
-///   first and the blanket keys (`b`) after, and symmetrized. The Schur complement `L_bb - L_bm L_mm^+ L_mb` is formed
-///   explicitly. `L_mm^+` is the pseudo-inverse from the eigendecomposition of `L_mm` (eigenvalues below `1e-12`
-///   times the largest one are dropped). The result is symmetrized before the eigen solve.
-///   The value is `nan` if `L_mm` is rank deficient (smallest eigenvalue at or below `1e-12` times the largest), if
-///   the full Hessian has an eigenvalue below `-1e-9 * max|eig|`, or if the selected block of the Schur complement
-///   has such an eigenvalue. A negative eigenvalue above this bound is rounding noise and is written as 0.
-///   Otherwise the value is the smallest eigenvalue of the joint rotation / translation block (`3 n x 3 n`, with the
-///   cross-pose blocks) of the remaining information on the `n` blanket poses of `_ref`. All other variables are held
-///   fixed. So the value also sees the coupling between the blanket poses.
-///   `_ref`: all factors in the smoother that touch a marginalized keyframe before the marginalization (full
-///   `PointToPlaneFactor` with all keys, IMU, older marginals).
-///   `_cur`: the current scheme. The factors that iSAM2 really marginalizes (custom unary factors, IMU, older
-///   marginals and the absorbed LiDAR factors), plus the factors that `createAndUpdateFactors` rebuilds for the
-///   clusters of the removed factors. The rebuilt factors keep the information of the other points of the cluster.
-///   They can also hold a point of the new keyframe (pose from the IMU propagation); its pose is held fixed.
-/// - `marg_ref_mm_cond`, `marg_cur_mm_cond`: condition number of `L_mm` of the `_ref` / `_cur` factor set (largest
-///   divided by smallest eigenvalue). `inf` if `L_mm` is not positive definite, `nan` without marginalization.
-/// - `marg_ref_hess_min_eig`, `marg_cur_hess_min_eig`: smallest eigenvalue of the full symmetrized Hessian `L` of the
-///   `_ref` / `_cur` factor set before the elimination, divided by its largest absolute eigenvalue. A value below
-///   `-1e-9` means that the linearized factors themselves are indefinite (not a problem of the elimination).
 /// - Rebuild comparison: does the rebuild of a cluster factor without the marginalized keyframe weaken the rows that
 ///   stay on the other poses? For each cluster whose factor on a marginalized keyframe is removed and rebuilt in this
 ///   update: the old factor is linearized before `removeKeyframeFromClusters`, the rebuilt factor right before the
@@ -120,6 +97,20 @@
 ///   - `rebuild_info_ratio`: `sum ||A'_j||^2 / sum ||A_j||^2` over all compared clusters and their common poses
 ///     (after / before). Below 1: the rebuilt factors carry less information on the remaining poses.
 ///   - `rebuild_jac_ratio`: per cluster `||J'|| / ||J||` on the common poses (plane refit, residual `r_j`, `1/N`)
+///   - Split by cluster state at the smoother update (after `createAndUpdateFactors`). `Tracked`: the plane was refit
+///     at this keyframe. `Idle`: the cluster was shifted without a refit (`createAndUpdateFactors` sets `ShiftedIdle`
+///     back to `Idle`). A cluster in any other state counts in the totals only.
+///     - `rebuild_n_tracked`, `rebuild_n_shifted`: compared clusters of the group
+///     - `rebuild_info_ratio_tracked`, `rebuild_info_ratio_shifted`: `rebuild_info_ratio` of the group, `nan` if the
+///       group is empty
+///     - `rebuild_jac_ratio_tracked`, `rebuild_jac_ratio_shifted`: `rebuild_jac_ratio` of the group
+///   - `rebuild_n_collapsed`: compared clusters with `||J'|| / ||J|| < 1e-6` (collapsed)
+///   - `rebuild_collapsed_pts`: per collapsed cluster the number of pose keys `X(j)` of the rebuilt factor
+///     (= points, one per keyframe)
+///   - `rebuild_marg_share`: share of the cluster information that sits on the marginalized keyframe (the part that
+///     goes into the unary factor). `sum_c w/sigma^2 ||J_c,k||^2 / sum_c w/sigma^2 (||J_c,k||^2 + sum_j ||J_c,j||^2)`
+///     over the compared clusters `c` (old factor), `k` the marginalized pose keys, `j` the common poses of the ratios.
+///     `nan` if the denominator is 0.
 ///   - `rebuild_sigma_ratio`: per cluster `sigma / sigma'` (noise model, plane thickness history)
 ///   - `rebuild_w_ratio`: per cluster `sqrt(w' / w)` (robust kernel)
 ///   The product of the three per-cluster factors is the per-cluster row ratio `||A'|| / ||A||`.
@@ -165,19 +156,20 @@
     X(Real, marg_info_trans)                                                                                           \
     X(Stats, marg_w)                                                                                                   \
     X(Index, marg_kf)                                                                                                  \
-    X(Real, marg_ref_info_rot)                                                                                         \
-    X(Real, marg_ref_info_trans)                                                                                       \
-    X(Real, marg_cur_info_rot)                                                                                         \
-    X(Real, marg_cur_info_trans)                                                                                       \
-    X(Real, marg_ref_mm_cond)                                                                                          \
-    X(Real, marg_cur_mm_cond)                                                                                          \
-    X(Real, marg_ref_hess_min_eig)                                                                                     \
-    X(Real, marg_cur_hess_min_eig)                                                                                     \
     X(Index, rebuild_n)                                                                                                \
+    X(Index, rebuild_n_tracked)                                                                                        \
+    X(Index, rebuild_n_shifted)                                                                                        \
     X(Real, rebuild_info_ratio)                                                                                        \
+    X(Real, rebuild_info_ratio_tracked)                                                                                \
+    X(Real, rebuild_info_ratio_shifted)                                                                                \
     X(Stats, rebuild_jac_ratio)                                                                                        \
+    X(Stats, rebuild_jac_ratio_tracked)                                                                                \
+    X(Stats, rebuild_jac_ratio_shifted)                                                                                \
     X(Stats, rebuild_sigma_ratio)                                                                                      \
-    X(Stats, rebuild_w_ratio)
+    X(Stats, rebuild_w_ratio)                                                                                          \
+    X(Index, rebuild_n_collapsed)                                                                                      \
+    X(Stats, rebuild_collapsed_pts)                                                                                    \
+    X(Real, rebuild_marg_share)
 
 namespace mapping
 {

@@ -4,9 +4,7 @@
 #include <mapping/factors/PointToPlaneFactor.hpp>
 #include <mapping/logging.hpp>
 
-#include <gtsam/inference/Ordering.h>
 #include <gtsam/inference/Symbol.h>
-#include <gtsam/linear/GaussianFactorGraph.h>
 #include <gtsam/linear/JacobianFactor.h>
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
@@ -18,7 +16,6 @@
 #include <exception>
 #include <iterator>
 #include <limits>
-#include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -64,6 +61,9 @@ namespace mapping
                     trans = eigTrans.eigenvalues().minCoeff();
                 }
 
+                /// @brief A rebuilt cluster with `||J'|| / ||J||` below this value counts as collapsed.
+                constexpr double kCollapsedJacRatio = 1e-6;
+
                 std::size_t countLidarFactors(const gtsam::NonlinearFactorGraph &factors)
                 {
                     std::size_t n = 0;
@@ -90,90 +90,6 @@ namespace mapping
                     return false;
                 }
 
-                /// @brief Relative threshold for an eigenvalue of a symmetric matrix to count as zero (rank) or as
-                /// negative (indefinite), relative to the largest absolute eigenvalue.
-                constexpr double kRankTol = 1e-12;
-                constexpr double kNegTol = 1e-9;
-
-                /// @brief Information on the Markov blanket after the Schur complement of the marginalized keys.
-                struct BlanketInformation
-                {
-                    /// @brief Symmetrized Schur complement `L_bb - L_bm L_mm^+ L_mb` on the blanket keys.
-                    gtsam::Matrix information;
-                    /// @brief Offset and dimension of each blanket key in `information`.
-                    std::map<gtsam::Key, std::pair<Eigen::Index, size_t>> blanket;
-                    /// @brief Condition number of `L_mm`, `inf` if it is not positive definite, `nan` if empty.
-                    double mmCond = field::NaN;
-                    /// @brief Smallest eigenvalue of the full symmetrized Hessian, divided by its largest one.
-                    double hessMinEig = field::NaN;
-                    /// @brief False if `L_mm` is rank deficient or the full Hessian is indefinite.
-                    bool valid = true;
-                };
-
-                /// @brief Linearize the factors at `estimate`, build the dense Hessian with the marginalized keys
-                /// first, and form the Schur complement onto the other keys explicitly. `L_mm` is inverted through its
-                /// eigendecomposition (pseudo-inverse with relative threshold `kRankTol`), so a near-singular `L_mm`
-                /// shows in `mmCond` and `valid` and does not blow up the result.
-                BlanketInformation blanketInformation(const std::vector<gtsam::NonlinearFactor::shared_ptr> &factors,
-                                                      const gtsam::Values &estimate, const gtsam::KeySet &margKeys)
-                {
-                    gtsam::GaussianFactorGraph linear;
-                    for (const gtsam::NonlinearFactor::shared_ptr &factor : factors)
-                        linear.push_back(factor->linearize(estimate));
-                    const std::map<gtsam::Key, size_t> dims = linear.getKeyDimMap();
-                    gtsam::Ordering ordering;
-                    Eigen::Index nm = 0;
-                    for (const auto &[key, dim] : dims)
-                        if (margKeys.count(key))
-                        {
-                            ordering.push_back(key);
-                            nm += static_cast<Eigen::Index>(dim);
-                        }
-                    BlanketInformation result;
-                    Eigen::Index offset = 0;
-                    for (const auto &[key, dim] : dims)
-                        if (!margKeys.count(key))
-                        {
-                            ordering.push_back(key);
-                            result.blanket[key] = {offset, dim};
-                            offset += static_cast<Eigen::Index>(dim);
-                        }
-                    const Eigen::Index nb = offset;
-                    gtsam::Matrix hessian = linear.hessian(ordering).first;
-                    hessian = 0.5 * (hessian + hessian.transpose()).eval();
-
-                    const Eigen::VectorXd eigFull =
-                        Eigen::SelfAdjointEigenSolver<gtsam::Matrix>(hessian, Eigen::EigenvaluesOnly).eigenvalues();
-                    const double maxAbsFull = eigFull.size() > 0 ? eigFull.cwiseAbs().maxCoeff() : 0.0;
-                    if (maxAbsFull > 0.0)
-                        result.hessMinEig = eigFull.minCoeff() / maxAbsFull;
-                    if (eigFull.size() > 0 && eigFull.minCoeff() < -kNegTol * maxAbsFull)
-                        result.valid = false;
-
-                    if (nm == 0)
-                    {
-                        result.information = hessian;
-                        return result;
-                    }
-                    const Eigen::SelfAdjointEigenSolver<gtsam::Matrix> eigMm(hessian.topLeftCorner(nm, nm));
-                    const Eigen::VectorXd &lambda = eigMm.eigenvalues(); // ascending
-                    const double maxMm = lambda.maxCoeff(), minMm = lambda.minCoeff();
-                    result.mmCond = minMm > 0.0 ? maxMm / minMm : std::numeric_limits<double>::infinity();
-                    const double threshold = kRankTol * std::max(maxMm, 0.0);
-                    if (maxMm <= 0.0 || minMm <= threshold)
-                        result.valid = false;
-                    Eigen::VectorXd lambdaInv = Eigen::VectorXd::Zero(nm);
-                    for (Eigen::Index i = 0; i < nm; i++)
-                        if (lambda(i) > threshold && lambda(i) > 0.0)
-                            lambdaInv(i) = 1.0 / lambda(i);
-                    // L_bm L_mm^+ L_mb = (L_bm V) diag(1/lambda) (L_bm V)^T
-                    const gtsam::Matrix bmV = hessian.bottomLeftCorner(nb, nm) * eigMm.eigenvectors();
-                    gtsam::Matrix schur =
-                        hessian.bottomRightCorner(nb, nb) - bmV * lambdaInv.asDiagonal() * bmV.transpose();
-                    result.information = 0.5 * (schur + schur.transpose());
-                    return result;
-                }
-
                 /// @brief Rows of a `PointToPlaneFactor` at `values`. `linearize` whitens the Jacobian as
                 /// `A = sqrt(w) / sigma * J`, so `J` is recovered from `A` with the noise sigma and the kernel weight.
                 /// Empty if the noise model is not Gaussian or the kernel weight is 0.
@@ -198,66 +114,6 @@ namespace mapping
                         if (gtsam::Symbol(*it).chr() == 'x')
                             rows.jacobians[*it] = jacobian->getA(it) * unwhiten;
                     return rows;
-                }
-
-                /// @brief Pose keys `X(j)` on the blanket, ascending.
-                gtsam::KeyVector poseKeys(const BlanketInformation &info)
-                {
-                    gtsam::KeyVector keys;
-                    for (const auto &[key, _] : info.blanket)
-                        if (gtsam::Symbol(key).chr() == 'x')
-                            keys.push_back(key);
-                    return keys;
-                }
-
-                /// @brief Smallest eigenvalue of the rotation and translation blocks of the joint information of
-                /// `poses` (all `3 n` rotation or translation rows, incl. the cross-pose blocks). All other blanket
-                /// keys are held fixed. A pose that is not on the blanket has no information, so both values are 0.
-                /// Both values are `nan` if `info` is not valid, or if the block is indefinite beyond rounding
-                /// (eigenvalue below `-kNegTol` times the largest absolute one). A smaller negative value is rounding
-                /// noise and is clamped to 0.
-                void setJointMinEigenvalues(const BlanketInformation &info, const gtsam::KeyVector &poses, double &rot,
-                                            double &trans)
-                {
-                    if (!info.valid)
-                    {
-                        rot = trans = field::NaN;
-                        return;
-                    }
-                    std::vector<Eigen::Index> rotIdx, transIdx;
-                    for (const gtsam::Key key : poses)
-                    {
-                        const auto it = info.blanket.find(key);
-                        if (it == info.blanket.end() || it->second.second != 6)
-                        {
-                            rot = trans = 0.0;
-                            return;
-                        }
-                        for (Eigen::Index i = 0; i < 3; i++)
-                        {
-                            rotIdx.push_back(it->second.first + i);
-                            transIdx.push_back(it->second.first + 3 + i);
-                        }
-                    }
-                    const gtsam::Matrix &information = info.information;
-                    const auto minEigenvalue = [&information](const std::vector<Eigen::Index> &idx)
-                    {
-                        const Eigen::Index n = static_cast<Eigen::Index>(idx.size());
-                        if (n == 0)
-                            return field::NaN;
-                        gtsam::Matrix block(n, n);
-                        for (Eigen::Index r = 0; r < n; r++)
-                            for (Eigen::Index c = 0; c < n; c++)
-                                block(r, c) = information(idx[r], idx[c]);
-                        const Eigen::VectorXd eig =
-                            Eigen::SelfAdjointEigenSolver<gtsam::Matrix>(block, Eigen::EigenvaluesOnly).eigenvalues();
-                        const double minEig = eig.minCoeff();
-                        if (minEig >= 0.0)
-                            return minEig;
-                        return minEig < -kNegTol * eig.cwiseAbs().maxCoeff() ? field::NaN : 0.0;
-                    };
-                    rot = minEigenvalue(rotIdx);
-                    trans = minEigenvalue(transIdx);
                 }
 
                 void collectImu(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states)
@@ -419,35 +275,26 @@ namespace mapping
                 return keyframes;
             }
 
-            void snapshotMarginalization(KeyframeTelemetry &row, gtsam::KeyVector &blanketPoses,
-                                         ClusterRowsMap &rebuildBaseline, const std::vector<uint32_t> &keyframes,
-                                         const States &states, const Smoother &smoother)
+            void snapshotMarginalization(KeyframeTelemetry &row, ClusterRowsMap &rebuildBaseline,
+                                         const std::vector<uint32_t> &keyframes, const States &states,
+                                         const Smoother &smoother)
             {
-                blanketPoses.clear();
                 rebuildBaseline.clear();
                 if (keyframes.empty())
                     return;
                 row.marg_kf = keyframes.front();
                 const gtsam::KeySet margKeys = navStateKeys(keyframes);
-                std::vector<gtsam::NonlinearFactor::shared_ptr> factors;
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
                     if (factor && touchesAny(*factor, margKeys))
-                        factors.push_back(factor);
-                for (const gtsam::NonlinearFactor::shared_ptr &factor : factors)
-                    if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
-                        if (std::optional<ClusterRows> rows = clusterRows(*ptp, states.getSmootherEstimate()))
-                            rebuildBaseline[ptp->clusterId_] = std::move(*rows);
-                const BlanketInformation info = blanketInformation(factors, states.getSmootherEstimate(), margKeys);
-                blanketPoses = poseKeys(info);
-                row.marg_ref_mm_cond = info.mmCond;
-                row.marg_ref_hess_min_eig = info.hessMinEig;
-                setJointMinEigenvalues(info, blanketPoses, row.marg_ref_info_rot, row.marg_ref_info_trans);
+                        if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
+                            if (std::optional<ClusterRows> rows = clusterRows(*ptp, states.getSmootherEstimate()))
+                                rebuildBaseline[ptp->clusterId_] = std::move(*rows);
             }
 
             void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                        const gtsam::KeyVector &blanketPoses, const ClusterRowsMap &rebuildBaseline,
-                                        const States &states, const FeatureManager &featureManager,
-                                        const Smoother &smoother, const gtsam::NonlinearFactorGraph &newFactors,
+                                        const ClusterRowsMap &rebuildBaseline, const States &states,
+                                        const FeatureManager &featureManager, const Smoother &smoother,
+                                        const gtsam::NonlinearFactorGraph &newFactors,
                                         const gtsam::FactorIndices &factorsToRemove)
             {
                 row.lidar_fac_marg_pruned = 0;
@@ -457,8 +304,6 @@ namespace mapping
                 const gtsam::KeySet margKeys = navStateKeys(keyframes);
                 const std::set<gtsam::FactorIndex> removed(factorsToRemove.begin(), factorsToRemove.end());
                 const gtsam::NonlinearFactorGraph &smootherFactors = smoother.getFactors();
-                // the factors on the marginalized keys after the update, as iSAM2 sees them when it marginalizes
-                std::vector<gtsam::NonlinearFactor::shared_ptr> factors;
                 // clusters whose removed factor touched a marginalized key: their rebuilt factor (without the
                 // marginalized keyframes) carries the information of the other points of the cluster
                 std::set<uint32_t> rebuiltClusters;
@@ -474,7 +319,6 @@ namespace mapping
                             rebuiltClusters.insert(ptp->clusterId_);
                         continue;
                     }
-                    factors.push_back(factor);
                     if (ptp)
                     {
                         const auto itState = featureManager.clusterStates_.find(ptp->clusterId_);
@@ -490,15 +334,21 @@ namespace mapping
                 if (!values.exists(X(idxKeyframe)))
                     values.insert(X(idxKeyframe), *states.getKeyframeImuPoses().at(idxKeyframe));
                 // rebuild comparison: rows of each rebuilt factor vs. its removed factor, on their common pose keys
-                double massBefore = 0.0, massAfter = 0.0;
-                std::vector<double> jacRatio, sigmaRatio, weightRatio;
+                // total, `Tracked` (plane refit at this keyframe) and shifted (`Idle` after `createAndUpdateFactors`,
+                // shifted without a refit); any other state counts in the total only
+                struct Group
+                {
+                    double massBefore = 0.0, massAfter = 0.0;
+                    std::vector<double> jacRatio;
+                };
+                Group total, tracked, shifted;
+                std::vector<double> sigmaRatio, weightRatio, collapsedPts;
+                double margMass = 0.0, margBlanketMass = 0.0;
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : newFactors)
                 {
                     if (!factor)
                         continue;
                     const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
-                    if (touchesAny(*factor, margKeys) || (ptp && rebuiltClusters.count(ptp->clusterId_)))
-                        factors.push_back(factor);
                     if (!ptp || !rebuiltClusters.count(ptp->clusterId_))
                         continue;
                     const auto itBefore = rebuildBaseline.find(ptp->clusterId_);
@@ -509,31 +359,64 @@ namespace mapping
                         continue;
                     const ClusterRows &before = itBefore->second;
                     double jBefore = 0.0, jAfter = 0.0; // squared norms on the common pose keys
+                    double jMarg = 0.0;                 // squared norm on the marginalized pose keys
                     for (const auto &[key, J] : before.jacobians)
                     {
                         const auto itAfter = after->jacobians.find(key);
-                        if (margKeys.count(key) || itAfter == after->jacobians.end())
+                        if (margKeys.count(key))
+                        {
+                            jMarg += J.squaredNorm();
+                            continue;
+                        }
+                        if (itAfter == after->jacobians.end())
                             continue;
                         jBefore += J.squaredNorm();
                         jAfter += itAfter->second.squaredNorm();
                     }
                     if (!(jBefore > 0.0))
                         continue;
-                    massBefore += before.weight / (before.sigma * before.sigma) * jBefore;
-                    massAfter += after->weight / (after->sigma * after->sigma) * jAfter;
-                    jacRatio.push_back(std::sqrt(jAfter / jBefore));
+                    const double infoBefore = before.weight / (before.sigma * before.sigma);
+                    const double massBefore = infoBefore * jBefore;
+                    const double massAfter = after->weight / (after->sigma * after->sigma) * jAfter;
+                    const double jacRatio = std::sqrt(jAfter / jBefore);
+                    margMass += infoBefore * jMarg;
+                    margBlanketMass += infoBefore * (jMarg + jBefore);
+                    const auto addTo = [&](Group &group)
+                    {
+                        group.massBefore += massBefore;
+                        group.massAfter += massAfter;
+                        group.jacRatio.push_back(jacRatio);
+                    };
+                    addTo(total);
+                    if (const auto itState = featureManager.clusterStates_.find(ptp->clusterId_);
+                        itState != featureManager.clusterStates_.end())
+                    {
+                        if (itState->second == ClusterState::Tracked)
+                            addTo(tracked);
+                        else if (itState->second == ClusterState::Idle)
+                            addTo(shifted);
+                    }
+                    if (jacRatio < kCollapsedJacRatio)
+                        collapsedPts.push_back(static_cast<double>(after->jacobians.size()));
                     sigmaRatio.push_back(before.sigma / after->sigma);
                     weightRatio.push_back(std::sqrt(after->weight / before.weight));
                 }
-                row.rebuild_n = jacRatio.size();
-                row.rebuild_info_ratio = massBefore > 0.0 ? massAfter / massBefore : field::NaN;
-                row.rebuild_jac_ratio = makeStats(std::move(jacRatio));
+                const auto infoRatio = [](const Group &group)
+                { return group.massBefore > 0.0 ? group.massAfter / group.massBefore : field::NaN; };
+                row.rebuild_n = total.jacRatio.size();
+                row.rebuild_n_tracked = tracked.jacRatio.size();
+                row.rebuild_n_shifted = shifted.jacRatio.size();
+                row.rebuild_info_ratio = infoRatio(total);
+                row.rebuild_info_ratio_tracked = infoRatio(tracked);
+                row.rebuild_info_ratio_shifted = infoRatio(shifted);
+                row.rebuild_jac_ratio = makeStats(std::move(total.jacRatio));
+                row.rebuild_jac_ratio_tracked = makeStats(std::move(tracked.jacRatio));
+                row.rebuild_jac_ratio_shifted = makeStats(std::move(shifted.jacRatio));
                 row.rebuild_sigma_ratio = makeStats(std::move(sigmaRatio));
                 row.rebuild_w_ratio = makeStats(std::move(weightRatio));
-                const BlanketInformation info = blanketInformation(factors, values, margKeys);
-                row.marg_cur_mm_cond = info.mmCond;
-                row.marg_cur_hess_min_eig = info.hessMinEig;
-                setJointMinEigenvalues(info, blanketPoses, row.marg_cur_info_rot, row.marg_cur_info_trans);
+                row.rebuild_n_collapsed = collapsedPts.size();
+                row.rebuild_collapsed_pts = makeStats(std::move(collapsedPts));
+                row.rebuild_marg_share = margBlanketMass > 0.0 ? margMass / margBlanketMass : field::NaN;
             }
 
             void collect(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states,

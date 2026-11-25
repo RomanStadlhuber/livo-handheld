@@ -49,9 +49,8 @@ namespace mapping
                         marginalizedKeyframes_ = instrumentation::marginalizedKeyframes(
                             system_.states_, static_cast<uint32_t>(*row_.kf),
                             static_cast<uint32_t>(system_.config_.backend.sliding_window_size));
-                        instrumentation::snapshotMarginalization(row_, blanketPoses_, rebuildBaseline_,
-                                                                 marginalizedKeyframes_, system_.states_,
-                                                                 system_.smoother_);
+                        instrumentation::snapshotMarginalization(row_, rebuildBaseline_, marginalizedKeyframes_,
+                                                                 system_.states_, system_.smoother_);
                     });
         }
 
@@ -61,9 +60,9 @@ namespace mapping
             runStep("marginalization", *row_.kf,
                     [&]
                     {
-                        instrumentation::collectMarginalization(
-                            row_, marginalizedKeyframes_, blanketPoses_, rebuildBaseline_, system_.states_,
-                            system_.featureManager_, system_.smoother_, newFactors, factorsToRemove);
+                        instrumentation::collectMarginalization(row_, marginalizedKeyframes_, rebuildBaseline_,
+                                                                system_.states_, system_.featureManager_,
+                                                                system_.smoother_, newFactors, factorsToRemove);
                     });
         }
 
