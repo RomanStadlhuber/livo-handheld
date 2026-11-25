@@ -126,6 +126,9 @@ namespace mapping
         /// @brief Experimental: keep marginalized points as anchors instead of a unary factor
         /// (`backend.marginalization_anchor`).
         bool anchorMarginalization_{false};
+        /// @brief Maximum number of anchors per cluster (`lidar_frontend.clustering.max_points`), the oldest anchor is
+        /// dropped first. 0: no cap.
+        std::size_t maxAnchors_{0};
         /// @brief The thickness of each added cluster track, mean squared point-to-plane distance [m^2]
         std::map<ClusterId, std::vector<double>> clusterPlaneThicknessHistory_;
         /// @brief Mean of the squared thickness history [m^4], used for validation and modelling noise characteristics.

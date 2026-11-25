@@ -170,8 +170,12 @@ namespace mapping
             {
                 // --- anchor: keep the point as a constant world point (no unary factor) ---
                 if (anchorMarginalization_)
-                    clusterAnchors_[clusterId].push_back(
-                        states.getKeyframeSubmaps().at(idxKeyframe)->points_[itPoint->second]);
+                {
+                    std::vector<Eigen::Vector3d> &anchors = clusterAnchors_[clusterId];
+                    anchors.push_back(states.getKeyframeSubmaps().at(idxKeyframe)->points_[itPoint->second]);
+                    if (maxAnchors_ > 0 && anchors.size() > maxAnchors_) // drop the oldest anchor
+                        anchors.erase(anchors.begin());
+                }
                 // --- marginalization ---
                 if (!anchorMarginalization_ && hasClusterFactorIdx(clusterId))
                 {

@@ -50,6 +50,7 @@ namespace mapping
         smoother_.reset(config_);
         featureManager_.setLidarKernel(config_.backend.lidar_kernel);
         featureManager_.anchorMarginalization_ = config_.backend.marginalization_anchor;
+        featureManager_.maxAnchors_ = config_.lidar_frontend.clustering.max_points;
         featureManager_.setCalibrationKeys(
             config_.extrinsics.temporal_calibration_enabled ? boost::optional<gtsam::Key>(T(0)) : boost::none,
             config_.extrinsics.extrinsic_calibration_enabled ? boost::optional<gtsam::Key>(E(0)) : boost::none);
