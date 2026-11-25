@@ -5,6 +5,7 @@
 #ifndef MAPPING_BENCHMARKING_KEYFRAMEPROBE_HPP_
 #define MAPPING_BENCHMARKING_KEYFRAMEPROBE_HPP_
 
+#include <mapping/benchmarking/Instrumentation.hpp>
 #include <mapping/benchmarking/KeyframeTelemetry.hpp>
 
 #include <gtsam/geometry/Pose3.h>
@@ -54,6 +55,8 @@ namespace mapping
             std::vector<uint32_t> marginalizedKeyframes_;
             /// @brief Pose keys on the Markov blanket of the marginalized keyframes, see `snapshotMarginalization`.
             gtsam::KeyVector blanketPoses_;
+            /// @brief Rows of the LiDAR factors on the marginalized keyframes before the rebuild, see `rebuild_*`.
+            instrumentation::ClusterRowsMap rebuildBaseline_;
         };
     } // namespace benchmarking
 } // namespace mapping

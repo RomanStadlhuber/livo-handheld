@@ -15,6 +15,7 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
 #include <cstdint>
+#include <map>
 #include <vector>
 
 namespace mapping
@@ -26,6 +27,19 @@ namespace mapping
         /// @details Called by `KeyframeProbe`, never from the SLAM components.
         namespace instrumentation
         {
+            /// @brief Rows of one `PointToPlaneFactor` on its pose keys, for the `rebuild_*` columns.
+            struct ClusterRows
+            {
+                /// @brief Unwhitened Jacobian block `J_j` (1 x 6) per pose key `X(j)`.
+                std::map<gtsam::Key, gtsam::Matrix> jacobians;
+                /// @brief Sigma of the noise model, without the robust kernel.
+                double sigma = field::NaN;
+                /// @brief Robust kernel weight `w` at the residual of `linearize`.
+                double weight = field::NaN;
+            };
+            /// @brief `ClusterRows` per cluster id.
+            using ClusterRowsMap = std::map<uint32_t, ClusterRows>;
+
             /// @brief Read the values that the update overwrites, right after the keyframe is created.
             /// @details Sets `kf`, `t`, `trigger_*`, `pts_submap` and `lidar_fac_before`.
             /// @param imuPropagated Set to the IMU-propagated pose of the new keyframe.
@@ -40,17 +54,19 @@ namespace mapping
             /// @brief Call before `removeKeyframeFromClusters`. Sets `marg_kf` and `marg_ref_info_*`.
             /// @param blanketPoses Set to the pose keys on the Markov blanket of the reference (Schur complement of
             /// all factors in the smoother), see `KeyframeTelemetry.hpp`. `collectMarginalization` uses the same keys.
+            /// @param rebuildBaseline Set to the rows of every `PointToPlaneFactor` on a marginalized keyframe, before
+            /// the rebuild. `collectMarginalization` compares the rebuilt factors with them (`rebuild_*`).
             void snapshotMarginalization(KeyframeTelemetry &row, gtsam::KeyVector &blanketPoses,
-                                         const std::vector<uint32_t> &keyframes, const States &states,
-                                         const Smoother &smoother);
+                                         ClusterRowsMap &rebuildBaseline, const std::vector<uint32_t> &keyframes,
+                                         const States &states, const Smoother &smoother);
 
-            /// @brief Call right before the smoother update. Sets `marg_cur_info_*`, `lidar_fac_marg_*`.
+            /// @brief Call right before the smoother update. Sets `marg_cur_info_*`, `lidar_fac_marg_*`, `rebuild_*`.
             /// @param newFactors, factorsToRemove The factors that the update adds and removes (without the IMU
             /// factor of the new keyframe, which does not touch the marginalized keyframes).
             void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                        const gtsam::KeyVector &blanketPoses, const States &states,
-                                        const FeatureManager &featureManager, const Smoother &smoother,
-                                        const gtsam::NonlinearFactorGraph &newFactors,
+                                        const gtsam::KeyVector &blanketPoses, const ClusterRowsMap &rebuildBaseline,
+                                        const States &states, const FeatureManager &featureManager,
+                                        const Smoother &smoother, const gtsam::NonlinearFactorGraph &newFactors,
                                         const gtsam::FactorIndices &factorsToRemove);
 
             /// @brief Fill the post-update columns of `row` (`row.kf` must be set).

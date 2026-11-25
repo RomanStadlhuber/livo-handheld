@@ -109,6 +109,20 @@
 /// - `marg_ref_hess_min_eig`, `marg_cur_hess_min_eig`: smallest eigenvalue of the full symmetrized Hessian `L` of the
 ///   `_ref` / `_cur` factor set before the elimination, divided by its largest absolute eigenvalue. A value below
 ///   `-1e-9` means that the linearized factors themselves are indefinite (not a problem of the elimination).
+/// - Rebuild comparison: does the rebuild of a cluster factor without the marginalized keyframe weaken the rows that
+///   stay on the other poses? For each cluster whose factor on a marginalized keyframe is removed and rebuilt in this
+///   update: the old factor is linearized before `removeKeyframeFromClusters`, the rebuilt factor right before the
+///   smoother update, both at the smoother estimate. The whitened row block of pose `X(j)` is
+///   `A_j = sqrt(w) / sigma * J_j` (`w` robust kernel weight, `sigma` noise sigma, `J_j` unwhitened Jacobian).
+///   Only the pose keys in both factors count (not the marginalized keyframes, not the new keyframe).
+///   Clusters with a kernel weight of 0 are skipped.
+///   - `rebuild_n`: compared clusters
+///   - `rebuild_info_ratio`: `sum ||A'_j||^2 / sum ||A_j||^2` over all compared clusters and their common poses
+///     (after / before). Below 1: the rebuilt factors carry less information on the remaining poses.
+///   - `rebuild_jac_ratio`: per cluster `||J'|| / ||J||` on the common poses (plane refit, residual `r_j`, `1/N`)
+///   - `rebuild_sigma_ratio`: per cluster `sigma / sigma'` (noise model, plane thickness history)
+///   - `rebuild_w_ratio`: per cluster `sqrt(w' / w)` (robust kernel)
+///   The product of the three per-cluster factors is the per-cluster row ratio `||A'|| / ||A||`.
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
     X(Index, kf)                                                                                                       \
     X(Time, t)                                                                                                         \
@@ -158,7 +172,12 @@
     X(Real, marg_ref_mm_cond)                                                                                          \
     X(Real, marg_cur_mm_cond)                                                                                          \
     X(Real, marg_ref_hess_min_eig)                                                                                     \
-    X(Real, marg_cur_hess_min_eig)
+    X(Real, marg_cur_hess_min_eig)                                                                                     \
+    X(Index, rebuild_n)                                                                                                \
+    X(Real, rebuild_info_ratio)                                                                                        \
+    X(Stats, rebuild_jac_ratio)                                                                                        \
+    X(Stats, rebuild_sigma_ratio)                                                                                      \
+    X(Stats, rebuild_w_ratio)
 
 namespace mapping
 {

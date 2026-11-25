@@ -7,6 +7,8 @@
 #include <gtsam/inference/Ordering.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/GaussianFactorGraph.h>
+#include <gtsam/linear/JacobianFactor.h>
+#include <gtsam/linear/NoiseModel.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
 
 #include <Eigen/Eigenvalues>
@@ -17,6 +19,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -169,6 +172,32 @@ namespace mapping
                         hessian.bottomRightCorner(nb, nb) - bmV * lambdaInv.asDiagonal() * bmV.transpose();
                     result.information = 0.5 * (schur + schur.transpose());
                     return result;
+                }
+
+                /// @brief Rows of a `PointToPlaneFactor` at `values`. `linearize` whitens the Jacobian as
+                /// `A = sqrt(w) / sigma * J`, so `J` is recovered from `A` with the noise sigma and the kernel weight.
+                /// Empty if the noise model is not Gaussian or the kernel weight is 0.
+                std::optional<ClusterRows> clusterRows(const PointToPlaneFactor &factor, const gtsam::Values &values)
+                {
+                    gtsam::SharedNoiseModel noise = factor.noiseModel();
+                    if (const auto robust = boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(noise))
+                        noise = robust->noise();
+                    const auto gaussian = boost::dynamic_pointer_cast<gtsam::noiseModel::Gaussian>(noise);
+                    if (!gaussian)
+                        return std::nullopt;
+                    ClusterRows rows;
+                    rows.sigma = gaussian->sigmas()(0);
+                    rows.weight = factor.evaluateErrorDiagnostic(values).weight;
+                    if (!(rows.sigma > 0.0) || !(rows.weight > 0.0))
+                        return std::nullopt;
+                    const auto jacobian = boost::dynamic_pointer_cast<gtsam::JacobianFactor>(factor.linearize(values));
+                    if (!jacobian)
+                        return std::nullopt;
+                    const double unwhiten = rows.sigma / std::sqrt(rows.weight);
+                    for (auto it = jacobian->begin(); it != jacobian->end(); ++it)
+                        if (gtsam::Symbol(*it).chr() == 'x')
+                            rows.jacobians[*it] = jacobian->getA(it) * unwhiten;
+                    return rows;
                 }
 
                 /// @brief Pose keys `X(j)` on the blanket, ascending.
@@ -391,10 +420,11 @@ namespace mapping
             }
 
             void snapshotMarginalization(KeyframeTelemetry &row, gtsam::KeyVector &blanketPoses,
-                                         const std::vector<uint32_t> &keyframes, const States &states,
-                                         const Smoother &smoother)
+                                         ClusterRowsMap &rebuildBaseline, const std::vector<uint32_t> &keyframes,
+                                         const States &states, const Smoother &smoother)
             {
                 blanketPoses.clear();
+                rebuildBaseline.clear();
                 if (keyframes.empty())
                     return;
                 row.marg_kf = keyframes.front();
@@ -403,6 +433,10 @@ namespace mapping
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
                     if (factor && touchesAny(*factor, margKeys))
                         factors.push_back(factor);
+                for (const gtsam::NonlinearFactor::shared_ptr &factor : factors)
+                    if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
+                        if (std::optional<ClusterRows> rows = clusterRows(*ptp, states.getSmootherEstimate()))
+                            rebuildBaseline[ptp->clusterId_] = std::move(*rows);
                 const BlanketInformation info = blanketInformation(factors, states.getSmootherEstimate(), margKeys);
                 blanketPoses = poseKeys(info);
                 row.marg_ref_mm_cond = info.mmCond;
@@ -411,9 +445,9 @@ namespace mapping
             }
 
             void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                        const gtsam::KeyVector &blanketPoses, const States &states,
-                                        const FeatureManager &featureManager, const Smoother &smoother,
-                                        const gtsam::NonlinearFactorGraph &newFactors,
+                                        const gtsam::KeyVector &blanketPoses, const ClusterRowsMap &rebuildBaseline,
+                                        const States &states, const FeatureManager &featureManager,
+                                        const Smoother &smoother, const gtsam::NonlinearFactorGraph &newFactors,
                                         const gtsam::FactorIndices &factorsToRemove)
             {
                 row.lidar_fac_marg_pruned = 0;
@@ -450,6 +484,14 @@ namespace mapping
                             (*row.lidar_fac_marg_lost)++;
                     }
                 }
+                // a rebuilt factor can hold the point of the new keyframe, which is not in the estimate yet
+                gtsam::Values values = states.getSmootherEstimate();
+                const uint32_t idxKeyframe = static_cast<uint32_t>(*row.kf);
+                if (!values.exists(X(idxKeyframe)))
+                    values.insert(X(idxKeyframe), *states.getKeyframeImuPoses().at(idxKeyframe));
+                // rebuild comparison: rows of each rebuilt factor vs. its removed factor, on their common pose keys
+                double massBefore = 0.0, massAfter = 0.0;
+                std::vector<double> jacRatio, sigmaRatio, weightRatio;
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : newFactors)
                 {
                     if (!factor)
@@ -457,12 +499,37 @@ namespace mapping
                     const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
                     if (touchesAny(*factor, margKeys) || (ptp && rebuiltClusters.count(ptp->clusterId_)))
                         factors.push_back(factor);
+                    if (!ptp || !rebuiltClusters.count(ptp->clusterId_))
+                        continue;
+                    const auto itBefore = rebuildBaseline.find(ptp->clusterId_);
+                    if (itBefore == rebuildBaseline.end())
+                        continue;
+                    const std::optional<ClusterRows> after = clusterRows(*ptp, values);
+                    if (!after)
+                        continue;
+                    const ClusterRows &before = itBefore->second;
+                    double jBefore = 0.0, jAfter = 0.0; // squared norms on the common pose keys
+                    for (const auto &[key, J] : before.jacobians)
+                    {
+                        const auto itAfter = after->jacobians.find(key);
+                        if (margKeys.count(key) || itAfter == after->jacobians.end())
+                            continue;
+                        jBefore += J.squaredNorm();
+                        jAfter += itAfter->second.squaredNorm();
+                    }
+                    if (!(jBefore > 0.0))
+                        continue;
+                    massBefore += before.weight / (before.sigma * before.sigma) * jBefore;
+                    massAfter += after->weight / (after->sigma * after->sigma) * jAfter;
+                    jacRatio.push_back(std::sqrt(jAfter / jBefore));
+                    sigmaRatio.push_back(before.sigma / after->sigma);
+                    weightRatio.push_back(std::sqrt(after->weight / before.weight));
                 }
-                // a rebuilt factor can hold the point of the new keyframe, which is not in the estimate yet
-                gtsam::Values values = states.getSmootherEstimate();
-                const uint32_t idxKeyframe = static_cast<uint32_t>(*row.kf);
-                if (!values.exists(X(idxKeyframe)))
-                    values.insert(X(idxKeyframe), *states.getKeyframeImuPoses().at(idxKeyframe));
+                row.rebuild_n = jacRatio.size();
+                row.rebuild_info_ratio = massBefore > 0.0 ? massAfter / massBefore : field::NaN;
+                row.rebuild_jac_ratio = makeStats(std::move(jacRatio));
+                row.rebuild_sigma_ratio = makeStats(std::move(sigmaRatio));
+                row.rebuild_w_ratio = makeStats(std::move(weightRatio));
                 const BlanketInformation info = blanketInformation(factors, values, margKeys);
                 row.marg_cur_mm_cond = info.mmCond;
                 row.marg_cur_hess_min_eig = info.hessMinEig;
