@@ -42,7 +42,6 @@ namespace mapping
     struct ClusteringConfig
     {
         size_t min_points = 5;
-        size_t max_points = 20;
         double max_plane_thickness = 0.1;          // [m]
         double sampling_voxel_size = 2.5;          // [m], voxel size to use when supplementing new clusters
         uint32_t insert_lag = 2;                   // keyframe delay to use when inserting new clusters from keyframes
@@ -54,13 +53,11 @@ namespace mapping
         using namespace config;
         name("ClusteringConfig");
         field(config.min_points, "min_points");
-        field(config.max_points, "max_points");
         field(config.max_plane_thickness, "max_plane_thickness", "m");
         field(config.sampling_voxel_size, "sampling_voxel_size", "m");
         field(config.insert_lag, "insert_lag", "keyframes");
         field(config.normal_consistency_threshold, "normal_consistency_threshold");
         check(config.min_points, GT, 0, "min_points");
-        check(config.max_points, GT, config.min_points, "max_points");
         check(config.max_plane_thickness, GT, 0.0, "max_plane_thickness");
         check(config.sampling_voxel_size, GT, 0.0, "sampling_voxel_size");
         check(config.insert_lag, GE, 0, "insert_lag");
