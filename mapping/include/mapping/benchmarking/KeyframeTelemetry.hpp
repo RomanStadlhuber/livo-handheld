@@ -67,12 +67,13 @@
 /// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
 ///   `ShiftedIdle`
 ///
+/// Fixed variables of iSAM2 after the smoother update, recorded at every keyframe:
 /// - `n_fixed_kf`: number of keyframes in the sliding window whose pose key `X(k)` is in
-///   `ISAM2::getFixedVariables()` after the update. Recorded at every keyframe. iSAM2 never relinearizes these
+///   `ISAM2::getFixedVariables()` after the update. iSAM2 never relinearizes these
 ///   variables again until they are marginalized, so a stale linearization point stays in the smoother.
 ///   Expected: 1 (`X(k+1)` of the IMU factor).
 /// - `n_window_kf`: number of keyframes in the sliding window after the update (tells if `n_fixed_kf` is the whole
-/// window)
+///   window)
 /// - `fixed_kf_first`, `fixed_kf_last`: smallest and largest keyframe index `k` whose `X(k)` is in
 ///   `ISAM2::getFixedVariables()`, `nan` when none is fixed
 /// - `n_fixed_vb`: number of window keyframes whose velocity key `V(k)` or bias key `B(k)` is fixed
