@@ -108,8 +108,8 @@ namespace mapping
             /// `lidar_rcost_*` and `gt_win_*`, see `KeyframeTelemetry.hpp`. Clones only, the live factors stay
             /// unchanged. Leaves the columns `nan` when the ground truth does not cover the window.
             void collectGroundTruth(KeyframeTelemetry &row, const States &states, const Smoother &smoother,
-                                    const GroundTruth &groundTruth, double planarityThreshold,
-                                    double linearityThreshold);
+                                    const FeatureManager &featureManager, const GroundTruth &groundTruth,
+                                    double planarityThreshold, double linearityThreshold);
         } // namespace instrumentation
     } // namespace benchmarking
 } // namespace mapping

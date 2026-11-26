@@ -85,7 +85,8 @@ namespace mapping
                         [&]
                         {
                             const auto &planarity = system_.config_.lidar_frontend.planarity_check;
-                            instrumentation::collectGroundTruth(row_, states, system_.smoother_, *system_.groundTruth_,
+                            instrumentation::collectGroundTruth(row_, states, system_.smoother_,
+                                                                system_.featureManager_, *system_.groundTruth_,
                                                                 planarity.planarity, planarity.linearity);
                         });
             try

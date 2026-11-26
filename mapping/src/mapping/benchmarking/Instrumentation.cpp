@@ -248,8 +248,8 @@ namespace mapping
             } // namespace
 
             void collectGroundTruth(KeyframeTelemetry &row, const States &states, const Smoother &smoother,
-                                    const GroundTruth &groundTruth, double planarityThreshold,
-                                    double linearityThreshold)
+                                    const FeatureManager &featureManager, const GroundTruth &groundTruth,
+                                    double planarityThreshold, double linearityThreshold)
             {
                 const gtsam::Values &estimate = states.getSmootherEstimate();
                 const std::map<uint32_t, double> &stamps = states.getKeyframeTimestamps();
@@ -280,6 +280,40 @@ namespace mapping
                 row.gt_win_dpos = (gtNewest.translation() - estNewest.translation()).norm();
                 row.gt_win_drot = gtsam::Rot3::Logmap(estNewest.rotation().between(gtNewest.rotation())).norm();
                 row.gt_win_span = stamps.at(newest) - stamps.at(oldest);
+                // velocity error of the newest keyframe and the LiDAR information along it (world frame)
+                if (const std::optional<Eigen::Vector3d> gtVel = groundTruth.velocityAt(stamps.at(newest)))
+                {
+                    const Eigen::Vector3d vErr =
+                        estimate.at<gtsam::Vector3>(V(newest)) - anchor.rotation().matrix() * *gtVel;
+                    row.gt_verr = vErr.norm();
+                    const open3d::geometry::PointCloud &submap = *states.getKeyframeSubmaps().at(newest);
+                    const gtsam::Pose3 &w_T_i = *states.getKeyframeImuPoses().at(newest);
+                    const Eigen::Matrix3d w_R_i = w_T_i.rotation().matrix();
+                    Eigen::Matrix<double, 6, 6> information = Eigen::Matrix<double, 6, 6>::Zero();
+                    for (const auto &[clusterId, points] : featureManager.clusters_)
+                    {
+                        if (featureManager.clusterStates_.at(clusterId) != ClusterState::Tracked)
+                            continue;
+                        const auto itPoint = points.find(newest);
+                        if (itPoint == points.end())
+                            continue;
+                        const Eigen::Vector3d p = w_T_i.transformTo(gtsam::Point3(submap.points_.at(itPoint->second)));
+                        const Eigen::Vector3d n = w_R_i.transpose() * *featureManager.clusterNormals_.at(clusterId);
+                        Eigen::Matrix<double, 1, 6> J;
+                        J << p.cross(n).transpose(), n.transpose();
+                        information += J.transpose() * J / featureManager.factorVariance(clusterId);
+                    }
+                    // translation block in the world frame
+                    const Eigen::Matrix3d infoTrans = w_R_i * information.bottomRightCorner<3, 3>() * w_R_i.transpose();
+                    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(infoTrans);
+                    row.gt_eig_trans_max = eig.eigenvalues()(2);
+                    if (row.gt_verr > 1e-6)
+                    {
+                        const Eigen::Vector3d d = vErr.normalized();
+                        row.gt_verr_info = d.dot(infoTrans * d);
+                        row.gt_verr_cos_min = std::abs(d.dot(eig.eigenvectors().col(0)));
+                    }
+                }
 
                 // 3: per factor, refit the plane at the given poses (frozen associations) and evaluate
                 const gtsam::Pose3 imu_T_lidar = states.getImuToLidarExtrinsic();

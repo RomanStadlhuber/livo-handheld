@@ -134,6 +134,11 @@
 /// - `gt_win_span` `[s]`: time from the oldest to the newest window keyframe
 /// - `lidar_rcost_aNN_sum`: line search, sum of `rho` with refit planes at `X_a(k) = X(k) Exp(a Log(X(k)^-1 X~(k)))`,
 ///   `a = NN / 100`
+/// - `gt_verr` `[m/s]`: `|V(newest) - R_a v_gt|`, `R_a` the rotation of the anchor, `v_gt` by finite difference
+/// - `gt_verr_info`: `d^T I_t d` with `d` the unit velocity error and `I_t` the translation block (world frame) of
+///   the `eig_*` information matrix of the newest keyframe
+/// - `gt_verr_cos_min`: `|cos|` between `d` and the eigenvector of the smallest eigenvalue of `I_t`
+/// - `gt_eig_trans_max`: largest eigenvalue of `I_t`
 /// - `lidar_rcost_live_aNN_sum`: the same without the refit, with the live plane of each factor (what the solver
 ///   sees in its iterations)
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
@@ -212,7 +217,11 @@
     X(Real, lidar_rcost_live_a00_sum)                                                                                  \
     X(Real, lidar_rcost_live_a05_sum)                                                                                  \
     X(Real, lidar_rcost_live_a25_sum)                                                                                  \
-    X(Real, lidar_rcost_live_a100_sum)
+    X(Real, lidar_rcost_live_a100_sum)                                                                                 \
+    X(Real, gt_verr)                                                                                                   \
+    X(Real, gt_verr_info)                                                                                              \
+    X(Real, gt_verr_cos_min)                                                                                           \
+    X(Real, gt_eig_trans_max)
 
 namespace mapping
 {
