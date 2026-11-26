@@ -71,7 +71,8 @@ namespace mapping
                 gtsam::Values values;
             };
 
-            /// @brief Record the marginalization of the update of `idxKeyframe`. Sets `marg_kf`.
+            /// @brief Record the marginalization of the update of `idxKeyframe`. Sets `marg_kf` and the rows of
+            /// `clusters.csv`.
             /// @details Call it before the update. Fills `snapshot` with the keyframes that the update marginalizes,
             /// the LiDAR factors on them and the estimate. Steps are in the definition.
             void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,

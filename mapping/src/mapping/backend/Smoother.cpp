@@ -3,6 +3,8 @@
 #include <mapping/backend/Smoother.hpp>
 #include <mapping/logging.hpp>
 
+#include <chrono>
+
 SETUP_LOGS(INFO, "Smoother")
 
 namespace mapping
@@ -29,6 +31,7 @@ namespace mapping
         lastNewFactors_ = {};
         lastFactorsToRemove_.clear();
         lastUpdateKeyframe_.reset();
+        lastUpdateSeconds_ = std::numeric_limits<double>::quiet_NaN();
 #endif
         temporalCalibrationEnabled_ = config.extrinsics.temporal_calibration_enabled;
         extrinsicCalibrationEnabled_ = config.extrinsics.extrinsic_calibration_enabled;
@@ -130,6 +133,9 @@ namespace mapping
         // capture calibration values before update for delta logging
         const double dt_before = temporalCalibrationEnabled_ ? states.getTemporalOffset() : 0.0;
         const gtsam::Pose3 E_before = extrinsicCalibrationEnabled_ ? states.getImuToLidarExtrinsic() : gtsam::Pose3();
+#ifdef MAPPING_BENCHMARKING
+        const auto tUpdateStart = std::chrono::steady_clock::now();
+#endif
         // update estimator
         frontendArena_->execute(
             [&] { smoother_.update(newAndUpdatedFactors, newValues, newSmootherIndices, factorsToRemove); });
@@ -163,6 +169,9 @@ namespace mapping
         // calculate the estimate and update the shared state container
         // currently this is just matching legacy behavior
         frontendArena_->execute([&] { states.setSmootherEstimate(smoother_.calculateEstimate()); });
+#ifdef MAPPING_BENCHMARKING
+        lastUpdateSeconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - tUpdateStart).count();
+#endif
         states.setCurrentState(gtsam::NavState(states.getSmootherEstimate().at(X(idxKeyframe)).cast<gtsam::Pose3>(),
                                                states.getSmootherEstimate().at(V(idxKeyframe)).cast<gtsam::Vector3>()));
         states.setCurrentBias(states.getSmootherEstimate().at(B(idxKeyframe)).cast<gtsam::imuBias::ConstantBias>());

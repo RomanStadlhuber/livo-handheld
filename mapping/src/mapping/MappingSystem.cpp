@@ -49,8 +49,6 @@ namespace mapping
         states_.setTemporalOffset(config_.extrinsics.imu_t_lidar);
         smoother_.reset(config_);
         featureManager_.setLidarKernel(config_.backend.lidar_kernel);
-        featureManager_.anchorMarginalization_ = config_.backend.marginalization_anchor;
-        featureManager_.maxAnchors_ = config_.lidar_frontend.clustering.max_points;
         featureManager_.setCalibrationKeys(
             config_.extrinsics.temporal_calibration_enabled ? boost::optional<gtsam::Key>(T(0)) : boost::none,
             config_.extrinsics.extrinsic_calibration_enabled ? boost::optional<gtsam::Key>(E(0)) : boost::none);
@@ -464,8 +462,7 @@ namespace mapping
                             "marginalizing keyframe " << idxMarginalize << ", outside of sliding window");
                 // modifies featureManager_: creates marginalization factors, removes point associations, updates
                 // cluster states
-                featureManager_.removeKeyframeFromClusters(states_, idxMarginalize, markovBlanket,
-                                                           smoother_.getFactors());
+                featureManager_.removeKeyframeFromClusters(idxMarginalize, markovBlanket, smoother_.getFactors());
                 // modifies states_: removes keyframe data, optionally archives submap
                 states_.removeKeyframe(idxMarginalize);
             }

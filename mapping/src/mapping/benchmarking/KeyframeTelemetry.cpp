@@ -93,5 +93,23 @@ namespace mapping
 #undef KF_TELEMETRY_VALUE
             out.back() = '\n'; // replace the trailing separator
         }
+
+        void appendClustersCsvHeader(std::string &out) { out += "kf,cluster_id,keyframes,info,weight,touches_marg\n"; }
+
+        void appendClustersCsvRow(std::string &out, const ClusterSpanRow &row)
+        {
+            (((out += std::to_string(row.kf)) += ',') += std::to_string(row.clusterId)) += ',';
+            for (std::size_t i = 0; i < row.keyframes.size(); i++)
+            {
+                if (i > 0)
+                    out += ' ';
+                out += std::to_string(row.keyframes[i]);
+            }
+            out += ',';
+            appendReal(out, row.info);
+            out += ',';
+            appendReal(out, row.weight);
+            out += row.touchesMarg ? ",1\n" : ",0\n";
+        }
     } // namespace benchmarking
 } // namespace mapping

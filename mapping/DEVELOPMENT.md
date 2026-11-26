@@ -323,6 +323,7 @@ ros2 run mapping mapper --bag <bag_dir> --config <config.yaml> --output-dir <rep
 
 - `trajectory.tum`: keyframe poses (IMU frame) with absolute bag timestamps, readable by `evo`
 - `telemetry.csv`: one row per keyframe that `track()` creates, also for keyframes that lose tracking, see below
+- `clusters.csv`: one row per LiDAR cluster factor in the smoother before each update that marginalizes, see `ClusterSpanRow`
 - `config.yaml`: the `MappingConfig` used by the run, serialized after loading. It holds the real values incl. defaults for missing keys, not the user file
 - `run.yaml`: git commit and dirty flag, build type, inputs, timing and result counters, exit code
 
@@ -371,8 +372,10 @@ Run it on a run directory and a ground-truth TUM file:
 mapping/scripts/.venv/bin/python mapping/scripts/evaluate_run.py benchmark_runs/<name> <ground_truth.txt>
 ```
 
+Alignment: the first estimated pose is set to the first ground-truth pose. There is no least-squares fit. A fit on the
+static start cannot fix the rotation.
+
 Options: `--t-max-diff` (default 0.05 s, max. timestamp difference to match a ground-truth pose),
-`--align-seconds` (default 5 s, SE(3) alignment on the start of the run only, no global alignment),
 `--segment` (default 1 s, segment length of the relative error), `--threshold` (default 1 m),
 `--gyro-bias-seconds` (default 2 s), `--static-end` (default: detected from the gyro rate), `--gyro-until` (default 14 s).
 

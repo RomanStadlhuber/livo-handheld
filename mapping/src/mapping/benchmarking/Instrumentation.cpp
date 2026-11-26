@@ -201,6 +201,7 @@ namespace mapping
                     row.w_lidar = makeStats(std::move(wLidar));
                     row.lidar_var = makeStats(std::move(varLidar));
                     row.lidar_fac_after = countLidarFactors(smoother.getFactors());
+                    row.t_update_ms = 1e3 * smoother.getLastUpdateSeconds();
                     std::size_t numFixed = 0, numWindow = 0, numFixedVb = 0;
                     double fixedFirst = std::numeric_limits<double>::quiet_NaN();
                     double fixedLast = fixedFirst;
@@ -234,11 +235,6 @@ namespace mapping
                     row.lidar_fac_new = stats.numFactorsAdded;
                     row.clusters_pruned = stats.numPruned;
                     row.clusters_shifted_idle = stats.numShiftedIdle;
-                    std::vector<double> anchorCounts;
-                    for (const auto &[clusterId, anchors] : featureManager.clusterAnchors_)
-                        if (!anchors.empty())
-                            anchorCounts.push_back(static_cast<double>(anchors.size()));
-                    row.anchor_pts = makeStats(std::move(anchorCounts));
                     if (!row.marg_kf)
                         return; // no marginalization in this update, the marginalization columns stay nan
                     row.marg_n = stats.numMargFactors;
@@ -280,6 +276,8 @@ namespace mapping
             /// 3. the estimate before the update, plus the IMU-propagated pose of the new keyframe
             /// 4. per `PointToPlaneFactor` that touches a marginalized `NavState`: its index and cluster, and its rows
             ///    in the `ClusterRowsMap`, the baseline of the `rebuild_*` columns
+            /// 5. per `PointToPlaneFactor` in the smoother (all of them): a `ClusterSpanRow` for `clusters.csv`,
+            ///    the pose keys and the trace of the whitened `H^T H` on them
             ///
             /// The factor search is more general than needed. A `PointToPlaneFactor` only connects to the poses
             /// `X(k)`, but the search checks `X`, `V` and `B`. It stays general, so it also works for visual factors
@@ -309,13 +307,41 @@ namespace mapping
                 for (gtsam::FactorIndex i = 0; i < smootherFactors.size(); i++)
                 {
                     const gtsam::NonlinearFactor::shared_ptr &factor = smootherFactors[i];
-                    if (!factor || !touchesAny(*factor, margKeys))
+                    if (!factor)
+                        continue;
+                    const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+                    const bool touchesMarg = touchesAny(*factor, margKeys);
+                    std::optional<ClusterRows> rows;
+                    if (ptp)
+                        rows = clusterRows(*ptp, snapshot.values);
+                    // 5. every LiDAR cluster factor: its key set and information, the rows of `clusters.csv`
+                    if (ptp)
+                    {
+                        ClusterSpanRow span;
+                        span.kf = idxKeyframe;
+                        span.clusterId = ptp->clusterId_;
+                        for (const gtsam::Key key : ptp->keys())
+                            if (gtsam::Symbol(key).chr() == 'x')
+                                span.keyframes.push_back(static_cast<uint32_t>(gtsam::Symbol(key).index()));
+                        std::sort(span.keyframes.begin(), span.keyframes.end());
+                        span.touchesMarg = touchesMarg;
+                        if (rows)
+                        {
+                            double jSq = 0.0;
+                            for (const auto &[key, J] : rows->jacobians)
+                                jSq += J.squaredNorm();
+                            span.info = rows->weight / (rows->sigma * rows->sigma) * jSq;
+                            span.weight = rows->weight;
+                        }
+                        row.clusterSpans.push_back(std::move(span));
+                    }
+                    if (!touchesMarg)
                         continue;
                     // a LiDAR cluster: record it and its rows before the rebuild
-                    if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
+                    if (ptp)
                     {
                         snapshot.factors.push_back({i, ptp->clusterId_});
-                        if (std::optional<ClusterRows> rows = clusterRows(*ptp, snapshot.values))
+                        if (rows)
                             snapshot.rebuildBaseline[ptp->clusterId_] = std::move(*rows);
                     }
                 }

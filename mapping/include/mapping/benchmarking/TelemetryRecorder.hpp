@@ -29,6 +29,10 @@ namespace mapping
             /// @return false if the file could not be written.
             bool writeCsv(const std::string &path, double bagStart) const;
 
+            /// @brief Write the detail rows of all keyframes: `clusters.csv`.
+            /// @return false if a file could not be written.
+            bool writeClustersCsv(const std::string &path) const;
+
             /// @brief Number of recorded rows.
             std::size_t size() const { return rows_.size(); }
 

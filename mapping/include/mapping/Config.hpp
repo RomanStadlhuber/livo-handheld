@@ -42,7 +42,6 @@ namespace mapping
     struct ClusteringConfig
     {
         size_t min_points = 5;
-        size_t max_points = 20;
         double max_plane_thickness = 0.1;          // [m]
         double sampling_voxel_size = 2.5;          // [m], voxel size to use when supplementing new clusters
         uint32_t insert_lag = 2;                   // keyframe delay to use when inserting new clusters from keyframes
@@ -54,13 +53,11 @@ namespace mapping
         using namespace config;
         name("ClusteringConfig");
         field(config.min_points, "min_points");
-        field(config.max_points, "max_points");
         field(config.max_plane_thickness, "max_plane_thickness", "m");
         field(config.sampling_voxel_size, "sampling_voxel_size", "m");
         field(config.insert_lag, "insert_lag", "keyframes");
         field(config.normal_consistency_threshold, "normal_consistency_threshold");
         check(config.min_points, GT, 0, "min_points");
-        check(config.max_points, GT, config.min_points, "max_points");
         check(config.max_plane_thickness, GT, 0.0, "max_plane_thickness");
         check(config.sampling_voxel_size, GT, 0.0, "sampling_voxel_size");
         check(config.insert_lag, GE, 0, "insert_lag");
@@ -213,9 +210,6 @@ namespace mapping
         double init_time_window = 2.0;  // [sec.]
         size_t solver_iterations = 2;
         double isam2_relinearize_threshold = 0.01; // frobenius norm for relinearization on state variables
-        /// experimental: keep the point of a marginalized keyframe as a constant "anchor" in its cluster
-        /// instead of a unary marginalization factor
-        bool marginalization_anchor = false;
     };
 
     inline void declare_config(BackendConfig &config)
@@ -227,7 +221,6 @@ namespace mapping
         field(config.init_time_window, "init_time_window", "s");
         field(config.solver_iterations, "solver_iterations");
         field(config.isam2_relinearize_threshold, "isam2_relinearize_threshold");
-        field(config.marginalization_anchor, "marginalization_anchor");
         check(config.sliding_window_size, GT, 0, "sliding_window_size");
         check(config.init_time_window, GT, 0.0, "init_time_window");
         check(config.solver_iterations, GT, 0, "solver_iterations");

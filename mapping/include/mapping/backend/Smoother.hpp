@@ -19,6 +19,7 @@
 #include <tbb/task_arena.h>
 
 #include <iostream>
+#include <limits>
 #include <optional>
 
 namespace mapping
@@ -88,6 +89,9 @@ namespace mapping
         /// @brief The keyframe of the last `updateAndOptimizeGraph` call (benchmark build only).
         /// @details Empty before the first call and after `reset`. Tells if the copies above belong to a keyframe.
         const std::optional<uint32_t> &getLastUpdateKeyframe() const { return lastUpdateKeyframe_; }
+
+        /// @brief Wall time of the last `updateAndOptimizeGraph` call `[s]`: all iSAM2 updates and the estimate.
+        double getLastUpdateSeconds() const { return lastUpdateSeconds_; }
 #endif
 
     private:
@@ -115,6 +119,7 @@ namespace mapping
         gtsam::NonlinearFactorGraph lastNewFactors_;
         gtsam::FactorIndices lastFactorsToRemove_;
         std::optional<uint32_t> lastUpdateKeyframe_;
+        double lastUpdateSeconds_ = std::numeric_limits<double>::quiet_NaN();
 #endif
     };
 } // namespace mapping

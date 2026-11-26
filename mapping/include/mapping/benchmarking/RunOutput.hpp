@@ -48,7 +48,8 @@ namespace mapping
     bool prepareRunDir(const std::string &dir, std::string &error);
 
     /// @ingroup benchmarking
-    /// @brief Write `trajectory.tum`, `telemetry.csv`, `config.yaml` and `run.yaml` into the run directory.
+    /// @brief Write `trajectory.tum`, `telemetry.csv`, `clusters.csv`, `config.yaml` and `run.yaml`
+    /// into the run directory.
     /// @details `config.yaml` is the serialized `config` as used by the system, not a copy of the user file.
     /// It holds the real values, incl. defaults for keys missing in the user file.
     /// `run.yaml` is written even if another file fails. In that case it records exit code 1.

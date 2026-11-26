@@ -66,9 +66,7 @@
 ///   factor after the update (e.g. `ShiftedIdle` overwritten with `Idle` by a failed track).
 /// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
 ///   `ShiftedIdle`
-/// - `anchor_pts` (`Stats`): number of anchors (constant world points of marginalized keyframes,
-///   `backend.marginalization_anchor`) per cluster, over the clusters with at least one anchor, at the end of the
-///   keyframe. Empty (`n` = 0) when the switch is off.
+/// - `t_update_ms` `[ms]`: wall time of `Smoother::updateAndOptimizeGraph` (all iSAM2 updates and the estimate)
 ///
 /// Fixed variables of iSAM2 after the smoother update, recorded at every keyframe:
 /// - `n_fixed_kf`: number of keyframes in the sliding window whose pose key `X(k)` is in
@@ -159,7 +157,7 @@
     X(Real, fixed_kf_first)                                                                                            \
     X(Real, fixed_kf_last)                                                                                             \
     X(Index, n_fixed_vb)                                                                                               \
-    X(Stats, anchor_pts)                                                                                               \
+    X(Real, t_update_ms)                                                                                               \
     X(Index, marg_n)                                                                                                   \
     X(Real, marg_info_rot)                                                                                             \
     X(Real, marg_info_trans)                                                                                           \
@@ -242,10 +240,28 @@ namespace mapping
 #define KF_TELEMETRY_MEMBER(Type, name) field::Type::value_type name = field::Type::init();
 
         /// @ingroup benchmarking
+        /// @brief One row of `clusters.csv`: one `PointToPlaneFactor` in the smoother right before the update of
+        /// keyframe `kf`, only at keyframes that marginalize. For the analysis of cluster spans.
+        struct ClusterSpanRow
+        {
+            uint32_t kf = 0, clusterId = 0;
+            /// @brief Keyframe indices of the pose keys `X(j)` of the factor, ascending.
+            std::vector<uint32_t> keyframes;
+            /// @brief Trace of the whitened `H^T H` on the pose keys, incl. the robust kernel weight.
+            double info = field::NaN;
+            /// @brief Robust kernel weight.
+            double weight = field::NaN;
+            /// @brief The factor touches a keyframe that this update marginalizes.
+            bool touchesMarg = false;
+        };
+
+        /// @ingroup benchmarking
         /// @brief One row of `telemetry.csv`, members generated from `KF_TELEMETRY_FIELDS`.
+        /// @details Also carries the rows of the per-keyframe detail file `clusters.csv`.
         struct KeyframeTelemetry
         {
             KF_TELEMETRY_FIELDS(KF_TELEMETRY_MEMBER)
+            std::vector<ClusterSpanRow> clusterSpans;
         };
 
 #undef KF_TELEMETRY_MEMBER
@@ -262,6 +278,11 @@ namespace mapping
         /// @brief Append one CSV row (incl. newline).
         /// @param bagStart Absolute bag time of the first message, added to `Time` fields.
         void appendCsvRow(std::string &out, const KeyframeTelemetry &row, double bagStart);
+
+        /// @ingroup benchmarking
+        /// @brief Header and rows of `clusters.csv` (incl. newline). `keyframes` is one space-separated column.
+        void appendClustersCsvHeader(std::string &out);
+        void appendClustersCsvRow(std::string &out, const ClusterSpanRow &row);
     } // namespace benchmarking
 } // namespace mapping
 

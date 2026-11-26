@@ -145,6 +145,11 @@ namespace mapping
             appendError(error, "failed to write '" + (root / "telemetry.csv").string() + "'");
             ok = false;
         }
+        if (!telemetry.writeClustersCsv((root / "clusters.csv").string()))
+        {
+            appendError(error, "failed to write '" + (root / "clusters.csv").string() + "'");
+            ok = false;
+        }
         if (!writeConfigYaml(root / "config.yaml", config))
         {
             appendError(error, "failed to write '" + (root / "config.yaml").string() + "'");
