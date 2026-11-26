@@ -127,7 +127,9 @@ namespace mapping
                     std::vector<double> distLive, normalAngle;
                     for (const auto &[clusterId, anchors] : featureManager.clusterAnchors_)
                     {
-                        if (anchors.empty() || !featureManager.clusters_.count(clusterId))
+                        // a cluster without a plane thickness has no noise model (no factor yet), skip it
+                        if (anchors.empty() || !featureManager.clusters_.count(clusterId) ||
+                            !featureManager.clusterPlaneThickness_.count(clusterId))
                             continue;
                         const std::vector<uint32_t> &anchorKfs = featureManager.clusterAnchorKeyframes_.at(clusterId);
                         std::vector<Eigen::Vector3d> live;
@@ -138,10 +140,16 @@ namespace mapping
                         std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> livePlane; // normal, center
                         if (live.size() >= 3)
                         {
-                            const auto [valid, normal, center, mat, thickness] = planeFitCovariance(live);
-                            livePlane = std::make_pair(normal, center);
-                            const double cosAngle = std::min(1.0, std::abs(normal.dot(usedNormal)));
-                            normalAngle.push_back(std::acos(cosAngle) * 180.0 / M_PI);
+                            // degeneracy check only (no planarity test): collinear live points have no plane,
+                            // their columns stay nan
+                            const auto [valid, normal, center, mat, thickness] =
+                                planeFitCovariance(live, /*planarityThreshold=*/1.0, /*linearityThreshold=*/0.05);
+                            if (valid)
+                            {
+                                livePlane = std::make_pair(normal, center);
+                                const double cosAngle = std::min(1.0, std::abs(normal.dot(usedNormal)));
+                                normalAngle.push_back(std::acos(cosAngle) * 180.0 / M_PI);
+                            }
                         }
                         const double sigma = std::pow(featureManager.factorVariance(clusterId), 0.25);
                         for (std::size_t i = 0; i < anchors.size(); i++)

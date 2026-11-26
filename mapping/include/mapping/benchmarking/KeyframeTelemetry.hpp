@@ -262,9 +262,13 @@ namespace mapping
             uint32_t kf = 0, clusterId = 0;
             /// @brief `kf` minus the keyframe that created the anchor.
             uint32_t age = 0;
-            /// @brief Distance to a plane fit from the live points only, `nan` with fewer than 3 live points.
+            /// @brief Distance to a plane fit from the live points only (after the update), `nan` with fewer than 3
+            /// live points or a degenerate fit.
             double distLivePlane = field::NaN;
-            /// @brief Distance to the plane of the factor (live points and anchors).
+            /// @brief Distance to the plane of the factor (live points and anchors) as used in this update.
+            /// @details The factor shares this plane (`clusterCenters_`/`clusterNormals_`) and does not refit it during
+            /// the update. `createAndUpdateFactors` fits it before the update, so it lags the live points by one
+            /// update.
             double distUsedPlane = field::NaN;
             uint32_t nLive = 0, nAnchors = 0;
             double sigma = field::NaN;
