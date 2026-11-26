@@ -73,7 +73,8 @@ namespace mapping
                     return n;
                 }
 
-                /// @brief `X`, `V` and `B` keys of the keyframes.
+                /// @brief For a given set of keyframe indices, returns the keys `X(k)`, `V(k)` and `B(k)` that make up
+                /// the `gtsam::NavState` of keyframes `k`.
                 gtsam::KeySet navStateKeys(const std::vector<uint32_t> &keyframes)
                 {
                     gtsam::KeySet keys;
@@ -82,6 +83,7 @@ namespace mapping
                     return keys;
                 }
 
+                /// @brief Indicates whether a given `gtsam::NonlinearFactor` connects to any parameter key in `keys`.
                 bool touchesAny(const gtsam::NonlinearFactor &factor, const gtsam::KeySet &keys)
                 {
                     for (const gtsam::Key key : factor.keys())
@@ -264,28 +266,46 @@ namespace mapping
                 row.pts_submap = states.getKeyframeSubmaps().at(idxKeyframe)->points_.size();
             }
 
+            /// @details Runs in the `KeyframeProbe` constructor, before the update changes the smoother.
+            /// It finds the `PointToPlaneFactor` LiDAR clusters that connect to the keyframes that the update
+            /// marginalizes, and records what `collectMarginalization` needs after the update:
+            /// 1. the marginalized keyframes: `X(j)` in the estimate and `j + slidingWindowSize < idxKeyframe`
+            /// 2. `marg_kf`: the first (oldest) marginalized keyframe, `front()` of the list
+            /// 3. the estimate before the update, plus the IMU-propagated pose of the new keyframe
+            /// 4. per `PointToPlaneFactor` that touches a marginalized `NavState`: its index and cluster, and its rows
+            ///    in the `ClusterRowsMap`, the baseline of the `rebuild_*` columns
+            ///
+            /// The factor search is more general than needed. A `PointToPlaneFactor` only connects to the poses
+            /// `X(k)`, but the search checks `X`, `V` and `B`. It stays general, so it also works for visual factors
+            /// later. The function does nothing else when no keyframe is marginalized.
             void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,
                                          const States &states, const Smoother &smoother, uint32_t idxKeyframe,
                                          uint32_t slidingWindowSize)
             {
                 snapshot = {};
+                // 1. find the marginalized keyframes, ascending
                 const gtsam::Values &estimate = states.getSmootherEstimate();
                 for (const auto &[k, _] : states.getKeyframeImuPoses())
                     if (k + slidingWindowSize < idxKeyframe && estimate.exists(X(k)))
                         snapshot.keyframes.push_back(k);
                 if (snapshot.keyframes.empty())
                     return;
+                // 2. the first keyframe is the oldest one, normally the only one
                 row.marg_kf = snapshot.keyframes.front();
+                // all keys that a factor can connect to, `X`, `V` and `B` of each marginalized keyframe
                 const gtsam::KeySet margKeys = navStateKeys(snapshot.keyframes);
+                // 3. keep the estimate before the update, the new keyframe is not in it yet
                 snapshot.values = estimate;
                 if (!snapshot.values.exists(X(idxKeyframe)))
                     snapshot.values.insert(X(idxKeyframe), *states.getKeyframeImuPoses().at(idxKeyframe));
+                // 4. go over all smoother factors that connect to a marginalized `NavState`, at least in part
                 const gtsam::NonlinearFactorGraph &smootherFactors = smoother.getFactors();
                 for (gtsam::FactorIndex i = 0; i < smootherFactors.size(); i++)
                 {
                     const gtsam::NonlinearFactor::shared_ptr &factor = smootherFactors[i];
                     if (!factor || !touchesAny(*factor, margKeys))
                         continue;
+                    // a LiDAR cluster: record it and its rows before the rebuild
                     if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
                     {
                         snapshot.factors.push_back({i, ptp->clusterId_});
@@ -295,6 +315,18 @@ namespace mapping
                 }
             }
 
+            /// @brief Computes `lidar_fac_marg_pruned`, `lidar_fac_marg_lost` and the `rebuild_*` columns.
+            /// @details Runs in the `KeyframeProbe` destructor, after the smoother update. It reads the state from
+            /// before the update from `snapshot`, and the factors that the update added and removed from `smoother`.
+            /// 1. factor accounting: a factor on a marginalized keyframe that the update removes marks its cluster as
+            ///    rebuilt. Any other such factor goes into the iSAM2 marginalization, and counts as `pruned` (the
+            ///    cluster is gone or `Pruned`) or `lost` (the cluster is alive, but has no factor afterwards)
+            /// 2. evaluation values: the estimate before the update from `snapshot`, for the old and the rebuilt rows
+            /// 3. rebuild comparison per cluster: the rows of the rebuilt factor against the rows of the removed one,
+            ///    on their common pose keys, sorted into total, `Tracked` and shifted (`Idle`) groups
+            /// 4. reduction: the per-cluster values become the `rebuild_*` columns
+            ///
+            /// Both columns are 0 when no keyframe is marginalized, and the `rebuild_*` columns stay unset.
             void collectMarginalization(KeyframeTelemetry &row, const MarginalizationSnapshot &snapshot,
                                         const FeatureManager &featureManager, const Smoother &smoother)
             {
@@ -307,8 +339,8 @@ namespace mapping
                 const std::set<gtsam::FactorIndex> removed(factorsToRemove.begin(), factorsToRemove.end());
                 const ClusterRowsMap &rebuildBaseline = snapshot.rebuildBaseline;
                 const gtsam::Values &values = snapshot.values;
-                // clusters whose removed factor touched a marginalized key: their rebuilt factor (without the
-                // marginalized keyframes) carries the information of the other points of the cluster
+                // 1. factor accounting, clusters whose removed factor touched a marginalized key: their rebuilt factor
+                // (without the marginalized keyframes) carries the information of the other points of the cluster
                 std::set<uint32_t> rebuiltClusters;
                 for (const MargFactor &factor : snapshot.factors)
                 {
@@ -323,9 +355,9 @@ namespace mapping
                     else
                         (*row.lidar_fac_marg_lost)++;
                 }
-                // rebuild comparison: rows of each rebuilt factor vs. its removed factor, on their common pose keys
-                // total, `Tracked` (plane refit at this keyframe) and shifted (`Idle` after `createAndUpdateFactors`,
-                // shifted without a refit); any other state counts in the total only
+                // 2./3. rebuild comparison, evaluated at `values` (2.): rows of each rebuilt factor vs. its removed
+                // factor, on their common pose keys total, `Tracked` (plane refit at this keyframe) and shifted (`Idle`
+                // after `createAndUpdateFactors`, shifted without a refit); any other state counts in the total only
                 struct Group
                 {
                     double massBefore = 0.0, massAfter = 0.0;
@@ -391,6 +423,7 @@ namespace mapping
                     sigmaRatio.push_back(before.sigma / after->sigma);
                     weightRatio.push_back(std::sqrt(after->weight / before.weight));
                 }
+                // 4. reduction into the columns
                 const auto infoRatio = [](const Group &group)
                 { return group.massBefore > 0.0 ? group.massAfter / group.massBefore : field::NaN; };
                 row.rebuild_n = total.jacRatio.size();

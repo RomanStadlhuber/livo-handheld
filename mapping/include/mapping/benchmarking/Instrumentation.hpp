@@ -73,14 +73,14 @@ namespace mapping
             };
 
             /// @brief Record the marginalization of the update of `idxKeyframe`. Sets `marg_kf`.
-            /// @details Call it before the update. A keyframe `j` is marginalized when `X(j)` is in the smoother
-            /// estimate and `j + slidingWindowSize < idxKeyframe`. Does nothing else when there is none.
+            /// @details Call it before the update. Fills `snapshot` with the keyframes that the update marginalizes,
+            /// the LiDAR factors on them and the estimate. Steps are in the definition.
             void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,
                                          const States &states, const Smoother &smoother, uint32_t idxKeyframe,
                                          uint32_t slidingWindowSize);
 
             /// @brief Call after the smoother update. Sets `lidar_fac_marg_*`, `rebuild_*`.
-            /// @details Reads the factors that the update added and removed from the `Smoother`.
+            /// @details Needs the `snapshot` of `snapshotMarginalization`. Phases are in the definition.
             /// Do not call it for a `row.lost_tracking` keyframe, it has no update.
             void collectMarginalization(KeyframeTelemetry &row, const MarginalizationSnapshot &snapshot,
                                         const FeatureManager &featureManager, const Smoother &smoother);
