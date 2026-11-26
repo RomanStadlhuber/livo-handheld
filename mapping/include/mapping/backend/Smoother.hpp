@@ -19,6 +19,7 @@
 #include <tbb/task_arena.h>
 
 #include <iostream>
+#include <limits>
 #include <optional>
 
 namespace mapping
@@ -71,6 +72,25 @@ namespace mapping
         /// @brief Insert initial calibration values, timestamps, and priors into the smoother buffers.
         void setCalibrationPriors(const MappingConfig &config, const gtsam::Pose3 &initialExtrinsic);
 
+        /// @brief Smoother timestamp of the keys of keyframe `kf` after the update of keyframe `idxNewest`.
+        /// @details Keyframe indices are the timestamps. With block release (`blockSize > 1`), the keys of a completed
+        /// block `[b * blockSize, b * blockSize + blockSize - 1]` carry the index of the newest keyframe of the block,
+        /// so the smoother marginalizes the block in one update. Never newer than `idxNewest`.
+        static uint32_t keyframeStamp(uint32_t kf, uint32_t idxNewest, uint32_t blockSize)
+        {
+            if (blockSize <= 1)
+                return kf;
+            const uint32_t blockEnd = (kf / blockSize) * blockSize + blockSize - 1;
+            return blockEnd <= idxNewest ? blockEnd : kf;
+        }
+
+        /// @brief Whether the update of keyframe `idxKeyframe` marginalizes the keys of keyframe `kf`.
+        /// @details Same rule as `IncrementalFixedLagSmoother`: stamp older than the newest stamp minus the lag.
+        static bool isMarginalized(uint32_t kf, uint32_t idxKeyframe, uint32_t slidingWindowSize, uint32_t blockSize)
+        {
+            return keyframeStamp(kf, idxKeyframe, blockSize) + slidingWindowSize < idxKeyframe;
+        }
+
 #ifdef MAPPING_BENCHMARKING
         /// @brief Marginal covariance of a variable in the current graph (benchmark build only, for telemetry).
         gtsam::Matrix marginalCovariance(const gtsam::Key key) const { return smoother_.marginalCovariance(key); }
@@ -88,6 +108,9 @@ namespace mapping
         /// @brief The keyframe of the last `updateAndOptimizeGraph` call (benchmark build only).
         /// @details Empty before the first call and after `reset`. Tells if the copies above belong to a keyframe.
         const std::optional<uint32_t> &getLastUpdateKeyframe() const { return lastUpdateKeyframe_; }
+
+        /// @brief Wall time of the last `updateAndOptimizeGraph` call `[s]`: all iSAM2 updates and the estimate.
+        double getLastUpdateSeconds() const { return lastUpdateSeconds_; }
 #endif
 
     private:
@@ -97,6 +120,8 @@ namespace mapping
     private:
         bool temporalCalibrationEnabled_{false};
         bool extrinsicCalibrationEnabled_{false};
+        /// @brief Block release size (`backend.block_release_size`, benchmark build only), 0 elsewhere.
+        uint32_t blockReleaseSize_{0};
 
         /// @brief The GTSAM fixed lag smoother instance (based on iSAM2).
         gtsam::IncrementalFixedLagSmoother smoother_;
@@ -115,6 +140,7 @@ namespace mapping
         gtsam::NonlinearFactorGraph lastNewFactors_;
         gtsam::FactorIndices lastFactorsToRemove_;
         std::optional<uint32_t> lastUpdateKeyframe_;
+        double lastUpdateSeconds_ = std::numeric_limits<double>::quiet_NaN();
 #endif
     };
 } // namespace mapping

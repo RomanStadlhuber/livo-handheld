@@ -44,14 +44,14 @@ namespace mapping
                 "snapshot", idxKeyframe, [&]
                 { instrumentation::snapshot(row_, imuPropagated_, system_.states_, system_.smoother_, idxKeyframe); });
             // nothing between the keyframe creation and the marginalization changes the smoother or the keyframes
-            const bool snapshotOk =
-                runStep("marginalization snapshot", idxKeyframe,
-                        [&]
-                        {
-                            instrumentation::snapshotMarginalization(
-                                row_, marginalization_, system_.states_, system_.smoother_, idxKeyframe,
-                                static_cast<uint32_t>(system_.config_.backend.sliding_window_size));
-                        });
+            const bool snapshotOk = runStep(
+                "marginalization snapshot", idxKeyframe,
+                [&]
+                {
+                    instrumentation::snapshotMarginalization(
+                        row_, marginalization_, system_.states_, system_.smoother_, idxKeyframe,
+                        static_cast<uint32_t>(system_.config_.backend.sliding_window_size), system_.blockReleaseSize_);
+                });
             if (!snapshotOk)
             {
                 // a half-filled snapshot must not reach the collect step: all marginalization columns stay nan

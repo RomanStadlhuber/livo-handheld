@@ -2,6 +2,7 @@
 /// @ingroup benchmarking
 #include <mapping/benchmarking/Instrumentation.hpp>
 #include <mapping/factors/PointToPlaneFactor.hpp>
+#include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
 
 #include <gtsam/inference/Symbol.h>
@@ -118,6 +119,53 @@ namespace mapping
                     return rows;
                 }
 
+                /// @brief Anchor columns and the rows of `anchors.csv`, see `collect`.
+                void collectAnchors(KeyframeTelemetry &row, const States &states, const FeatureManager &featureManager)
+                {
+                    const uint32_t kf = static_cast<uint32_t>(*row.kf);
+                    const auto &submaps = states.getKeyframeSubmaps();
+                    std::vector<double> distLive, normalAngle;
+                    for (const auto &[clusterId, anchors] : featureManager.clusterAnchors_)
+                    {
+                        if (anchors.empty() || !featureManager.clusters_.count(clusterId))
+                            continue;
+                        const std::vector<uint32_t> &anchorKfs = featureManager.clusterAnchorKeyframes_.at(clusterId);
+                        std::vector<Eigen::Vector3d> live;
+                        for (const auto &[idxSubmap, idxPoint] : featureManager.clusters_.at(clusterId))
+                            live.push_back(submaps.at(idxSubmap)->points_.at(idxPoint));
+                        const Eigen::Vector3d &usedNormal = *featureManager.clusterNormals_.at(clusterId);
+                        const Eigen::Vector3d &usedCenter = *featureManager.clusterCenters_.at(clusterId);
+                        std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> livePlane; // normal, center
+                        if (live.size() >= 3)
+                        {
+                            const auto [valid, normal, center, mat, thickness] = planeFitCovariance(live);
+                            livePlane = std::make_pair(normal, center);
+                            const double cosAngle = std::min(1.0, std::abs(normal.dot(usedNormal)));
+                            normalAngle.push_back(std::acos(cosAngle) * 180.0 / M_PI);
+                        }
+                        const double sigma = std::pow(featureManager.factorVariance(clusterId), 0.25);
+                        for (std::size_t i = 0; i < anchors.size(); i++)
+                        {
+                            AnchorRow anchor;
+                            anchor.kf = kf;
+                            anchor.clusterId = clusterId;
+                            anchor.age = kf - anchorKfs.at(i);
+                            anchor.distUsedPlane = std::abs(usedNormal.dot(anchors[i] - usedCenter));
+                            if (livePlane)
+                            {
+                                anchor.distLivePlane = std::abs(livePlane->first.dot(anchors[i] - livePlane->second));
+                                distLive.push_back(anchor.distLivePlane / sigma);
+                            }
+                            anchor.nLive = static_cast<uint32_t>(live.size());
+                            anchor.nAnchors = static_cast<uint32_t>(anchors.size());
+                            anchor.sigma = sigma;
+                            row.anchors.push_back(anchor);
+                        }
+                    }
+                    row.anchor_dist_live = makeStats(std::move(distLive));
+                    row.anchor_normal_angle = makeStats(std::move(normalAngle));
+                }
+
                 void collectImu(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states)
                 {
                     const gtsam::Values &estimate = states.getSmootherEstimate();
@@ -201,6 +249,7 @@ namespace mapping
                     row.w_lidar = makeStats(std::move(wLidar));
                     row.lidar_var = makeStats(std::move(varLidar));
                     row.lidar_fac_after = countLidarFactors(smoother.getFactors());
+                    row.t_update_ms = 1e3 * smoother.getLastUpdateSeconds();
                     std::size_t numFixed = 0, numWindow = 0, numFixedVb = 0;
                     double fixedFirst = std::numeric_limits<double>::quiet_NaN();
                     double fixedLast = fixedFirst;
@@ -280,19 +329,21 @@ namespace mapping
             /// 3. the estimate before the update, plus the IMU-propagated pose of the new keyframe
             /// 4. per `PointToPlaneFactor` that touches a marginalized `NavState`: its index and cluster, and its rows
             ///    in the `ClusterRowsMap`, the baseline of the `rebuild_*` columns
+            /// 5. per `PointToPlaneFactor` in the smoother (all of them): a `ClusterSpanRow` for `clusters.csv`,
+            ///    the pose keys and the trace of the whitened `H^T H` on them
             ///
             /// The factor search is more general than needed. A `PointToPlaneFactor` only connects to the poses
             /// `X(k)`, but the search checks `X`, `V` and `B`. It stays general, so it also works for visual factors
             /// later. The function does nothing else when no keyframe is marginalized.
             void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,
                                          const States &states, const Smoother &smoother, uint32_t idxKeyframe,
-                                         uint32_t slidingWindowSize)
+                                         uint32_t slidingWindowSize, uint32_t blockSize)
             {
                 snapshot = {};
                 // 1. find the marginalized keyframes, ascending
                 const gtsam::Values &estimate = states.getSmootherEstimate();
                 for (const auto &[k, _] : states.getKeyframeImuPoses())
-                    if (k + slidingWindowSize < idxKeyframe && estimate.exists(X(k)))
+                    if (Smoother::isMarginalized(k, idxKeyframe, slidingWindowSize, blockSize) && estimate.exists(X(k)))
                         snapshot.keyframes.push_back(k);
                 if (snapshot.keyframes.empty())
                     return;
@@ -309,13 +360,41 @@ namespace mapping
                 for (gtsam::FactorIndex i = 0; i < smootherFactors.size(); i++)
                 {
                     const gtsam::NonlinearFactor::shared_ptr &factor = smootherFactors[i];
-                    if (!factor || !touchesAny(*factor, margKeys))
+                    if (!factor)
+                        continue;
+                    const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+                    const bool touchesMarg = touchesAny(*factor, margKeys);
+                    std::optional<ClusterRows> rows;
+                    if (ptp)
+                        rows = clusterRows(*ptp, snapshot.values);
+                    // 5. every LiDAR cluster factor: its key set and information, the rows of `clusters.csv`
+                    if (ptp)
+                    {
+                        ClusterSpanRow span;
+                        span.kf = idxKeyframe;
+                        span.clusterId = ptp->clusterId_;
+                        for (const gtsam::Key key : ptp->keys())
+                            if (gtsam::Symbol(key).chr() == 'x')
+                                span.keyframes.push_back(static_cast<uint32_t>(gtsam::Symbol(key).index()));
+                        std::sort(span.keyframes.begin(), span.keyframes.end());
+                        span.touchesMarg = touchesMarg;
+                        if (rows)
+                        {
+                            double jSq = 0.0;
+                            for (const auto &[key, J] : rows->jacobians)
+                                jSq += J.squaredNorm();
+                            span.info = rows->weight / (rows->sigma * rows->sigma) * jSq;
+                            span.weight = rows->weight;
+                        }
+                        row.clusterSpans.push_back(std::move(span));
+                    }
+                    if (!touchesMarg)
                         continue;
                     // a LiDAR cluster: record it and its rows before the rebuild
-                    if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
+                    if (ptp)
                     {
                         snapshot.factors.push_back({i, ptp->clusterId_});
-                        if (std::optional<ClusterRows> rows = clusterRows(*ptp, snapshot.values))
+                        if (rows)
                             snapshot.rebuildBaseline[ptp->clusterId_] = std::move(*rows);
                     }
                 }
@@ -338,6 +417,7 @@ namespace mapping
             {
                 row.lidar_fac_marg_pruned = 0;
                 row.lidar_fac_marg_lost = 0;
+                row.lidar_fac_marg_whole = 0;
                 if (snapshot.keyframes.empty())
                     return;
                 const gtsam::KeySet margKeys = navStateKeys(snapshot.keyframes);
@@ -354,6 +434,11 @@ namespace mapping
                     if (removed.count(factor.index))
                     {
                         rebuiltClusters.insert(factor.clusterId);
+                        continue;
+                    }
+                    if (featureManager.lastKeyframeFactorStats().wholeReleased.count(factor.clusterId))
+                    {
+                        (*row.lidar_fac_marg_whole)++;
                         continue;
                     }
                     const auto itState = featureManager.clusterStates_.find(factor.clusterId);
@@ -456,6 +541,7 @@ namespace mapping
                     return;
                 collectGroup("frontend/geometry", *row.kf,
                              [&] { collectFrontendAndGeometry(row, states, featureManager); });
+                collectGroup("anchors", *row.kf, [&] { collectAnchors(row, states, featureManager); });
                 if (row.lost_tracking)
                     return; // no smoother update for this keyframe, IMU and backend columns stay nan
                 collectGroup("IMU", *row.kf, [&] { collectImu(row, imuPropagated, states); });

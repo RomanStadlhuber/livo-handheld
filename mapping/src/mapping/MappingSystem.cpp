@@ -51,6 +51,9 @@ namespace mapping
         featureManager_.setLidarKernel(config_.backend.lidar_kernel);
         featureManager_.anchorMarginalization_ = config_.backend.marginalization_anchor;
         featureManager_.maxAnchors_ = config_.lidar_frontend.clustering.max_points;
+#ifdef MAPPING_BENCHMARKING
+        blockReleaseSize_ = static_cast<uint32_t>(config_.backend.block_release_size);
+#endif
         featureManager_.setCalibrationKeys(
             config_.extrinsics.temporal_calibration_enabled ? boost::optional<gtsam::Key>(T(0)) : boost::none,
             config_.extrinsics.extrinsic_calibration_enabled ? boost::optional<gtsam::Key>(E(0)) : boost::none);
@@ -450,26 +453,30 @@ namespace mapping
 
     void MappingSystem::marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe)
     {
-        if (idxKeyframe <= static_cast<uint32_t>(config_.backend.sliding_window_size))
+        // the keyframes that the smoother marginalizes in this update, ascending
+        std::vector<uint32_t> keyframesToMarginalize;
+        for (const auto &[idxKf, _] : states_.getKeyframeSubmaps())
+            if (Smoother::isMarginalized(idxKf, idxKeyframe, static_cast<uint32_t>(config_.backend.sliding_window_size),
+                                         blockReleaseSize_))
+                keyframesToMarginalize.push_back(idxKf);
+        if (keyframesToMarginalize.empty())
             return;
-
-        const uint32_t idxUpperbound = idxKeyframe - static_cast<uint32_t>(config_.backend.sliding_window_size);
-        uint32_t idxMarginalize = states_.getKeyframeSubmaps().begin()->first;
-        while (idxMarginalize < idxUpperbound)
+#ifdef MAPPING_BENCHMARKING
+        // block release: clusters inside the block (plus the next keyframe) go whole into the iSAM2 marginalization
+        if (blockReleaseSize_ > 1)
+            featureManager_.releaseClustersInsideBlock(keyframesToMarginalize, keyframesToMarginalize.back() + 1,
+                                                       smoother_.getFactors());
+#endif
+        for (const uint32_t idxMarginalize : keyframesToMarginalize)
         {
-            if (states_.getKeyframeSubmaps().find(idxMarginalize) != states_.getKeyframeSubmaps().end())
-            {
-                gtsam::Values markovBlanket = states_.getMarkovBlanketForKeyframe(idxMarginalize, idxKeyframe);
-                LOG_STAMPED(INFO, states_.tLastScan_,
-                            "marginalizing keyframe " << idxMarginalize << ", outside of sliding window");
-                // modifies featureManager_: creates marginalization factors, removes point associations, updates
-                // cluster states
-                featureManager_.removeKeyframeFromClusters(states_, idxMarginalize, markovBlanket,
-                                                           smoother_.getFactors());
-                // modifies states_: removes keyframe data, optionally archives submap
-                states_.removeKeyframe(idxMarginalize);
-            }
-            idxMarginalize++;
+            gtsam::Values markovBlanket = states_.getMarkovBlanketForKeyframe(idxMarginalize, idxKeyframe);
+            LOG_STAMPED(INFO, states_.tLastScan_,
+                        "marginalizing keyframe " << idxMarginalize << ", outside of sliding window");
+            // modifies featureManager_: creates marginalization factors, removes point associations, updates
+            // cluster states
+            featureManager_.removeKeyframeFromClusters(states_, idxMarginalize, markovBlanket, smoother_.getFactors());
+            // modifies states_: removes keyframe data, optionally archives submap
+            states_.removeKeyframe(idxMarginalize);
         }
     }
 

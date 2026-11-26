@@ -46,6 +46,7 @@ namespace mapping
     {
         clusters_.clear();
         clusterAnchors_.clear();
+        clusterAnchorKeyframes_.clear();
         clusterPlaneThicknessHistory_.clear();
         clusterPlaneThickness_.clear();
         clusterSigmas_.clear();
@@ -125,19 +126,68 @@ namespace mapping
                 clustersToErase.insert(clusterId);
 
         for (const auto &clusterId : clustersToErase)
-        {
-            clusters_.erase(clusterId);
-            clusterAnchors_.erase(clusterId);
-            clusterStates_.erase(clusterId);
-            clusterCenters_.erase(clusterId);
-            clusterNormals_.erase(clusterId);
-            clusterPlaneThickness_.erase(clusterId);
-            clusterSigmas_.erase(clusterId);
-            clusterPlaneThicknessHistory_.erase(clusterId);
-            clusterFactorIdxMap_.erase(clusterId);
-        }
+            eraseCluster(clusterId);
         LOG(INFO, "Pruned " << clustersToErase.size() << " clusters, " << clusters_.size() << " clusters remain");
     }
+
+    void FeatureManager::eraseCluster(const ClusterId &clusterId)
+    {
+        clusters_.erase(clusterId);
+        clusterAnchors_.erase(clusterId);
+        clusterAnchorKeyframes_.erase(clusterId);
+        clusterStates_.erase(clusterId);
+        clusterCenters_.erase(clusterId);
+        clusterNormals_.erase(clusterId);
+        clusterPlaneThickness_.erase(clusterId);
+        clusterSigmas_.erase(clusterId);
+        clusterPlaneThicknessHistory_.erase(clusterId);
+        clusterFactorIdxMap_.erase(clusterId);
+    }
+
+#ifdef MAPPING_BENCHMARKING
+    std::size_t FeatureManager::releaseClustersInsideBlock(const std::vector<uint32_t> &block, uint32_t idxNext,
+                                                           const gtsam::NonlinearFactorGraph &currentSmootherFactors)
+    {
+        std::set<uint32_t> allowed(block.begin(), block.end());
+        allowed.insert(idxNext);
+        const std::set<uint32_t> released(block.begin(), block.end());
+        gtsam::KeySet allowedKeys;
+        for (const uint32_t k : allowed)
+            allowedKeys.insert(X(k));
+        std::vector<ClusterId> whole;
+        for (const auto &[clusterId, clusterPoints] : clusters_)
+        {
+            // only clusters with a point in the released block
+            bool inBlock = false, inside = true;
+            for (const auto &[kf, _] : clusterPoints)
+            {
+                inBlock |= released.count(kf) > 0;
+                inside &= allowed.count(kf) > 0;
+            }
+            if (!inBlock || !inside || !hasClusterFactorIdx(clusterId))
+                continue;
+            const auto &ptr = currentSmootherFactors[clusterFactorIdxMap_.at(clusterId)];
+            const auto factor = boost::dynamic_pointer_cast<PointToPlaneFactor>(ptr);
+            if (!factor || factor->clusterId_ != clusterId)
+                continue;
+            // any other key (e.g. a calibration key) would be fixed by the marginalization, so it disqualifies
+            bool keysInside = true;
+            for (const gtsam::Key key : factor->keys())
+                if (!allowedKeys.count(key))
+                    keysInside = false;
+            if (keysInside)
+                whole.push_back(clusterId);
+        }
+        for (const ClusterId clusterId : whole)
+        {
+            eraseCluster(clusterId); // the factor stays in the smoother, iSAM2 marginalizes it with the block
+            pendingKeyframeFactorStats_.wholeReleased.insert(clusterId);
+        }
+        LOG(INFO, "block release: " << whole.size() << " clusters go whole into the marginal of keyframes "
+                                    << block.front() << ".." << block.back());
+        return whole.size();
+    }
+#endif
 
     void FeatureManager::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx,
                                            const double &planeThickness)
@@ -172,9 +222,14 @@ namespace mapping
                 if (anchorMarginalization_)
                 {
                     std::vector<Eigen::Vector3d> &anchors = clusterAnchors_[clusterId];
+                    std::vector<uint32_t> &anchorKeyframes = clusterAnchorKeyframes_[clusterId];
                     anchors.push_back(states.getKeyframeSubmaps().at(idxKeyframe)->points_[itPoint->second]);
+                    anchorKeyframes.push_back(idxKeyframe);
                     if (maxAnchors_ > 0 && anchors.size() > maxAnchors_) // drop the oldest anchor
+                    {
                         anchors.erase(anchors.begin());
+                        anchorKeyframes.erase(anchorKeyframes.begin());
+                    }
                 }
                 // --- marginalization ---
                 if (!anchorMarginalization_ && hasClusterFactorIdx(clusterId))

@@ -123,6 +123,8 @@ namespace mapping
         /// `anchorMarginalization_` is set. They enter the plane fit and the factor, but not the KNN query,
         /// the gating test or the thickness history.
         std::map<ClusterId, std::vector<Eigen::Vector3d>> clusterAnchors_;
+        /// @brief Keyframe that created each anchor, same order and size as `clusterAnchors_`.
+        std::map<ClusterId, std::vector<uint32_t>> clusterAnchorKeyframes_;
         /// @brief Experimental: keep marginalized points as anchors instead of a unary factor
         /// (`backend.marginalization_anchor`).
         bool anchorMarginalization_{false};
@@ -201,10 +203,26 @@ namespace mapping
             /// @brief `createAndUpdateFactors`: fresh factors, re-added factors (old factor removed and rebuilt),
             /// and factor indices passed to the smoother for removal.
             std::size_t numFactorsAdded = 0, numFactorsUpdated = 0, numFactorsRemoved = 0;
+            /// @brief `releaseClustersInsideBlock`: clusters whose factor stays in the smoother and goes whole into
+            /// the iSAM2 marginalization (block release).
+            std::set<ClusterId> wholeReleased;
         };
         /// @brief Benchmark build only: stats of the last `createAndUpdateFactors` call, together with the stats of all
         /// `removeKeyframeFromClusters` calls before it.
         const KeyframeFactorStats &lastKeyframeFactorStats() const { return lastKeyframeFactorStats_; }
+
+        /// @brief Benchmark build only (block release): hand the clusters that lie inside a released block whole to
+        /// the iSAM2 marginalization.
+        /// @details A cluster goes whole when it has a live factor, and all pose keys of the factor and all points of
+        /// the cluster are in `block` or in `idxNext` (the IMU neighbor `X(j+1)`, fixed anyway). Its factor stays in
+        /// the smoother and the cluster is erased here, so `createAndUpdateFactors` does not touch the factor and no
+        /// unary factor is created. Call it before `removeKeyframeFromClusters` for the keyframes of the block, which
+        /// then sheds the crossing clusters as before.
+        /// @param block The released keyframes, contiguous.
+        /// @param idxNext The keyframe after the newest released keyframe.
+        /// @return Number of clusters released whole.
+        std::size_t releaseClustersInsideBlock(const std::vector<uint32_t> &block, uint32_t idxNext,
+                                               const gtsam::NonlinearFactorGraph &currentSmootherFactors);
 
     private:
         KeyframeFactorStats lastKeyframeFactorStats_;
@@ -214,6 +232,9 @@ namespace mapping
 #endif
 
     private:
+        /// @brief Erase a cluster and all its bookkeeping (not its factor in the smoother).
+        void eraseCluster(const ClusterId &clusterId);
+
         boost::optional<gtsam::Key> dtKey_;
         boost::optional<gtsam::Key> extrinsicKey_;
         /// @brief Mapping from Cluster ID to associated factor in the graph

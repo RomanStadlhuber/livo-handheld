@@ -323,6 +323,8 @@ ros2 run mapping mapper --bag <bag_dir> --config <config.yaml> --output-dir <rep
 
 - `trajectory.tum`: keyframe poses (IMU frame) with absolute bag timestamps, readable by `evo`
 - `telemetry.csv`: one row per keyframe that `track()` creates, also for keyframes that lose tracking, see below
+- `anchors.csv`: one row per anchor per keyframe (only with `backend.marginalization_anchor`), see `AnchorRow`
+- `clusters.csv`: one row per LiDAR cluster factor in the smoother before each update that marginalizes, see `ClusterSpanRow`
 - `config.yaml`: the `MappingConfig` used by the run, serialized after loading. It holds the real values incl. defaults for missing keys, not the user file
 - `run.yaml`: git commit and dirty flag, build type, inputs, timing and result counters, exit code
 
@@ -392,6 +394,26 @@ On stdout it prints the gyro gap means, the first time the absolute error passes
 Plot title and summary show the commit, dirty flag and config name from `run.yaml`.
 A run directory written from the container belongs to `root`. Give it to your user first
 (`sudo chown -R $USER benchmark_runs/<name>`) so the script can create `eval/`.
+
+### Marginalization Analysis Script
+
+`scripts/block_release_analysis.py` reads the detail files of runs (same venv):
+
+```bash
+# span distribution and block-release simulation (shed / end at boundary) from clusters.csv
+mapping/scripts/.venv/bin/python mapping/scripts/block_release_analysis.py spans benchmark_runs/<name> --out <dir>
+# anchor distance to the live-point plane and to the factor plane, vs. anchor age and vs. keyframe
+mapping/scripts/.venv/bin/python mapping/scripts/block_release_analysis.py anchors benchmark_runs/<a> [<b> ...] --out anchors.png
+# smoother update time per keyframe (t_update_ms): median, p95, max
+mapping/scripts/.venv/bin/python mapping/scripts/block_release_analysis.py timing benchmark_runs/<a> [<b> ...]
+```
+
+The definitions of the views and of the simulation are in the docstring of the script.
+
+`backend.block_release_size` (benchmark build only, default 0 = off) marginalizes the keyframes in contiguous blocks:
+the smoother re-stamps the `X`/`V`/`B` keys of each completed block to its newest keyframe, so one update marginalizes
+the whole block. Clusters that lie inside the block (plus the next keyframe) keep their factor and go whole into the
+marginal (`lidar_fac_marg_whole`), crossing clusters are rebuilt with a unary factor as before.
 
 The initialization keyframe `0` is not created by `track()`, so it has a pose in `trajectory.tum`
 but no telemetry row. This is a known exception to "every `t` in `trajectory.tum` has a telemetry row".

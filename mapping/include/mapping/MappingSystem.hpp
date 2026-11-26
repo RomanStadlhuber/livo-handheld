@@ -137,6 +137,8 @@ namespace mapping
         /// @brief Remove old keyframes and their cluster associations outside the sliding window.
         /// @details Must be called BEFORE tracking so that marginalization factors
         /// are created before the smoother update.
+        /// With block release (benchmark build only), the keyframes of a block leave together, see
+        /// `Smoother::isMarginalized`.
         /// @param idxKeyframe Index of the current (newly created) keyframe.
         void marginalizeKeyframesOutsideSlidingWindow(const uint32_t &idxKeyframe);
 
@@ -175,6 +177,8 @@ namespace mapping
         // configuration and cached extrinsic
         MappingConfig config_;
         gtsam::Pose3 imu_T_lidar_;
+        /// @brief Block release size (`backend.block_release_size`), only set in a benchmark build, 0 elsewhere.
+        uint32_t blockReleaseSize_{0};
 
 #ifdef MAPPING_BENCHMARKING
         /// @brief Finished keyframe telemetry rows, filled by `KeyframeProbe`, drained by `takeTelemetry()`.

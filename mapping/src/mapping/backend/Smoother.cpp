@@ -3,6 +3,8 @@
 #include <mapping/backend/Smoother.hpp>
 #include <mapping/logging.hpp>
 
+#include <chrono>
+
 SETUP_LOGS(INFO, "Smoother")
 
 namespace mapping
@@ -29,6 +31,15 @@ namespace mapping
         lastNewFactors_ = {};
         lastFactorsToRemove_.clear();
         lastUpdateKeyframe_.reset();
+#endif
+#ifdef MAPPING_BENCHMARKING
+        lastUpdateSeconds_ = std::numeric_limits<double>::quiet_NaN();
+        blockReleaseSize_ = static_cast<uint32_t>(config.backend.block_release_size);
+        if (blockReleaseSize_ > 1)
+            LOG(INFO, "block release: marginalizing blocks of " << blockReleaseSize_ << " keyframes");
+#else
+        if (config.backend.block_release_size > 1)
+            LOG(WARN, "backend.block_release_size needs a benchmark build, ignored");
 #endif
         temporalCalibrationEnabled_ = config.extrinsics.temporal_calibration_enabled;
         extrinsicCalibrationEnabled_ = config.extrinsics.extrinsic_calibration_enabled;
@@ -107,6 +118,16 @@ namespace mapping
         newSmootherIndices[X(idxKeyframe)] = tSmootherCurr;
         newSmootherIndices[V(idxKeyframe)] = tSmootherCurr;
         newSmootherIndices[B(idxKeyframe)] = tSmootherCurr;
+        // block release: when this keyframe completes a block, re-stamp the older keys of the block to this keyframe,
+        // so the smoother marginalizes the whole block in one update (FixedLagSmoother moves an existing key)
+        if (blockReleaseSize_ > 1 && (idxKeyframe + 1) % blockReleaseSize_ == 0)
+        {
+            const gtsam::FixedLagSmootherKeyTimestampMap &stamps = smoother_.timestamps();
+            for (uint32_t k = idxKeyframe + 1 - blockReleaseSize_; k < idxKeyframe; k++)
+                for (const gtsam::Key key : {X(k), V(k), B(k)})
+                    if (stamps.count(key))
+                        newSmootherIndices[key] = tSmootherCurr;
+        }
         // bump calibration timestamps to keep them alive in the sliding window
         if (temporalCalibrationEnabled_)
             newSmootherIndices[T(0)] = tSmootherCurr;
@@ -130,6 +151,9 @@ namespace mapping
         // capture calibration values before update for delta logging
         const double dt_before = temporalCalibrationEnabled_ ? states.getTemporalOffset() : 0.0;
         const gtsam::Pose3 E_before = extrinsicCalibrationEnabled_ ? states.getImuToLidarExtrinsic() : gtsam::Pose3();
+#ifdef MAPPING_BENCHMARKING
+        const auto tUpdateStart = std::chrono::steady_clock::now();
+#endif
         // update estimator
         frontendArena_->execute(
             [&] { smoother_.update(newAndUpdatedFactors, newValues, newSmootherIndices, factorsToRemove); });
@@ -163,6 +187,9 @@ namespace mapping
         // calculate the estimate and update the shared state container
         // currently this is just matching legacy behavior
         frontendArena_->execute([&] { states.setSmootherEstimate(smoother_.calculateEstimate()); });
+#ifdef MAPPING_BENCHMARKING
+        lastUpdateSeconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - tUpdateStart).count();
+#endif
         states.setCurrentState(gtsam::NavState(states.getSmootherEstimate().at(X(idxKeyframe)).cast<gtsam::Pose3>(),
                                                states.getSmootherEstimate().at(V(idxKeyframe)).cast<gtsam::Vector3>()));
         states.setCurrentBias(states.getSmootherEstimate().at(B(idxKeyframe)).cast<gtsam::imuBias::ConstantBias>());
