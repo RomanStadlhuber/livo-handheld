@@ -110,6 +110,9 @@ namespace mapping
         /// The robust-weighted error that `linearize()` solves for is `weight * error`.
         ErrorDiagnostic evaluateErrorDiagnostic(const gtsam::Values &values) const;
 
+        /// @brief Scan points per pose key, in the LiDAR frame of that keyframe.
+        const std::map<gtsam::Key, Eigen::Vector3d> &lidarPoints() const { return lidar_points_; }
+
         void print(const std::string &s = "",
                    const gtsam::KeyFormatter &keyFormatter = gtsam::DefaultKeyFormatter) const override;
 

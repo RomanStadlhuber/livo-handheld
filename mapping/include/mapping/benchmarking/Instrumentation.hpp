@@ -8,6 +8,7 @@
 #include <mapping/States.hpp>
 #include <mapping/backend/FeatureManager.hpp>
 #include <mapping/backend/Smoother.hpp>
+#include <mapping/benchmarking/GroundTruth.hpp>
 #include <mapping/benchmarking/KeyframeTelemetry.hpp>
 
 #include <Eigen/Core>
@@ -102,6 +103,13 @@ namespace mapping
             /// `s = FeatureManager::factorVariance`. Rotation block first, as in `gtsam::Pose3`.
             void collect(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states,
                          const FeatureManager &featureManager, const Smoother &smoother) noexcept;
+
+            /// @brief Ground-truth probe of the LiDAR factors, after the smoother update. Sets `lidar_cost_*`,
+            /// `lidar_rcost_*` and `gt_win_*`, see `KeyframeTelemetry.hpp`. Clones only, the live factors stay
+            /// unchanged. Leaves the columns `nan` when the ground truth does not cover the window.
+            void collectGroundTruth(KeyframeTelemetry &row, const States &states, const Smoother &smoother,
+                                    const FeatureManager &featureManager, const GroundTruth &groundTruth,
+                                    double planarityThreshold, double linearityThreshold);
         } // namespace instrumentation
     } // namespace benchmarking
 } // namespace mapping

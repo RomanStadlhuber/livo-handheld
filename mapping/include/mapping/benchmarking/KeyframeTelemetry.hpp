@@ -120,6 +120,27 @@
 ///   - `rebuild_sigma_ratio`: per cluster `sigma / sigma'` (noise model, plane thickness history)
 ///   - `rebuild_w_ratio`: per cluster `sqrt(w' / w)` (robust kernel)
 ///   The product of the three per-cluster factors is the per-cluster row ratio `||A'|| / ||A||`.
+///
+/// Ground-truth probe, only with `--ground-truth` (else `nan`), after the smoother update.
+/// The window keyframes are moved to `X~(k) = X(o) * GT(o)^-1 * GT(k)`, `o` the oldest window keyframe, so only the
+/// relative motion in the window differs from the estimate. Every `PointToPlaneFactor` of the smoother is cloned
+/// twice with frozen associations: one plane refit at the estimate `X(k)` and one at `X~(k)` (`planeFitCovariance`
+/// on the points of the window keys), each evaluated at its own poses. Noise model and kernel stay as in the factor.
+/// - `lidar_cost_est`, `lidar_cost_gt`: per factor the unweighted error `0.5 * r^2 / sigma^2`
+/// - `lidar_rcost_est`, `lidar_rcost_gt`: per factor the robust loss `rho(r / sigma)` that the optimizer minimizes
+/// - `lidar_cost_est_sum`, `lidar_cost_gt_sum`, `lidar_rcost_est_sum`, `lidar_rcost_gt_sum`: sums of the above
+/// - `lidar_cost_gt_lower`: share of the factors with `cost_gt < cost_est`
+/// - `gt_win_dpos` `[m]`, `gt_win_drot` `[rad]`: offset of `X~(newest)` from `X(newest)`
+/// - `gt_win_span` `[s]`: time from the oldest to the newest window keyframe
+/// - `lidar_rcost_aNN_sum`: line search, sum of `rho` with refit planes at `X_a(k) = X(k) Exp(a Log(X(k)^-1 X~(k)))`,
+///   `a = NN / 100`
+/// - `gt_verr` `[m/s]`: `|V(newest) - R_a v_gt|`, `R_a` the rotation of the anchor, `v_gt` by finite difference
+/// - `gt_verr_info`: `d^T I_t d` with `d` the unit velocity error and `I_t` the translation block (world frame) of
+///   the `eig_*` information matrix of the newest keyframe
+/// - `gt_verr_cos_min`: `|cos|` between `d` and the eigenvector of the smallest eigenvalue of `I_t`
+/// - `gt_eig_trans_max`: largest eigenvalue of `I_t`
+/// - `lidar_rcost_live_aNN_sum`: the same without the refit, with the live plane of each factor (what the solver
+///   sees in its iterations)
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
     X(Index, kf)                                                                                                       \
     X(Time, t)                                                                                                         \
@@ -176,7 +197,31 @@
     X(Stats, rebuild_w_ratio)                                                                                          \
     X(Index, rebuild_n_collapsed)                                                                                      \
     X(Stats, rebuild_collapsed_pts)                                                                                    \
-    X(Real, rebuild_marg_share)
+    X(Real, rebuild_marg_share)                                                                                        \
+    X(Stats, lidar_cost_est)                                                                                           \
+    X(Stats, lidar_cost_gt)                                                                                            \
+    X(Stats, lidar_rcost_est)                                                                                          \
+    X(Stats, lidar_rcost_gt)                                                                                           \
+    X(Real, lidar_cost_est_sum)                                                                                        \
+    X(Real, lidar_cost_gt_sum)                                                                                         \
+    X(Real, lidar_rcost_est_sum)                                                                                       \
+    X(Real, lidar_rcost_gt_sum)                                                                                        \
+    X(Real, lidar_cost_gt_lower)                                                                                       \
+    X(Real, gt_win_dpos)                                                                                               \
+    X(Real, gt_win_drot)                                                                                               \
+    X(Real, gt_win_span)                                                                                               \
+    X(Real, lidar_rcost_a05_sum)                                                                                       \
+    X(Real, lidar_rcost_a25_sum)                                                                                       \
+    X(Real, lidar_rcost_a50_sum)                                                                                       \
+    X(Real, lidar_rcost_a75_sum)                                                                                       \
+    X(Real, lidar_rcost_live_a00_sum)                                                                                  \
+    X(Real, lidar_rcost_live_a05_sum)                                                                                  \
+    X(Real, lidar_rcost_live_a25_sum)                                                                                  \
+    X(Real, lidar_rcost_live_a100_sum)                                                                                 \
+    X(Real, gt_verr)                                                                                                   \
+    X(Real, gt_verr_info)                                                                                              \
+    X(Real, gt_verr_cos_min)                                                                                           \
+    X(Real, gt_eig_trans_max)
 
 namespace mapping
 {
