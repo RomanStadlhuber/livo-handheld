@@ -19,6 +19,7 @@
 
 #include <memory>
 #ifdef MAPPING_BENCHMARKING
+#include <mapping/benchmarking/GroundTruth.hpp>
 #include <mapping/benchmarking/KeyframeTelemetry.hpp>
 #include <vector>
 #endif
@@ -111,6 +112,12 @@ namespace mapping
 #ifdef MAPPING_BENCHMARKING
         /// @brief Drain the keyframe telemetry rows recorded since the last call (benchmark build only).
         std::vector<benchmarking::KeyframeTelemetry> takeTelemetry();
+        /// @brief Set the ground truth for the `lidar_cost_*` probe (benchmark build only).
+        /// @details The stamps must be in the time base of the system (relative to the first bag message).
+        void setGroundTruth(std::shared_ptr<const benchmarking::GroundTruth> groundTruth)
+        {
+            groundTruth_ = std::move(groundTruth);
+        }
 #endif
 
     private:
@@ -179,6 +186,8 @@ namespace mapping
 #ifdef MAPPING_BENCHMARKING
         /// @brief Finished keyframe telemetry rows, filled by `KeyframeProbe`, drained by `takeTelemetry()`.
         std::vector<benchmarking::KeyframeTelemetry> telemetryQueue_;
+        /// @brief Ground truth for the `lidar_cost_*` probe, empty without `--ground-truth`.
+        std::shared_ptr<const benchmarking::GroundTruth> groundTruth_;
 #endif
     };
 

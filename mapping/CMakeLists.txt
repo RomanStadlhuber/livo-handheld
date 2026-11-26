@@ -89,6 +89,7 @@ if(MAPPING_BENCHMARKING)
     src/mapping/benchmarking/TelemetryRecorder.cpp
     src/mapping/benchmarking/Instrumentation.cpp
     src/mapping/benchmarking/KeyframeProbe.cpp
+    src/mapping/benchmarking/GroundTruth.cpp
   )
   target_compile_definitions(mapping PUBLIC MAPPING_BENCHMARKING)
 

@@ -2,6 +2,7 @@
 /// @ingroup benchmarking
 #include <mapping/benchmarking/Instrumentation.hpp>
 #include <mapping/factors/PointToPlaneFactor.hpp>
+#include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
 
 #include <gtsam/inference/Symbol.h>
@@ -16,6 +17,8 @@
 #include <exception>
 #include <iterator>
 #include <limits>
+#include <memory>
+#include <numeric>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -243,6 +246,95 @@ namespace mapping
                         setMinEigenvalues(stats.margInformation, row.marg_info_rot, row.marg_info_trans);
                 }
             } // namespace
+
+            void collectGroundTruth(KeyframeTelemetry &row, const States &states, const Smoother &smoother,
+                                    const GroundTruth &groundTruth, double planarityThreshold,
+                                    double linearityThreshold)
+            {
+                const gtsam::Values &estimate = states.getSmootherEstimate();
+                const std::map<uint32_t, double> &stamps = states.getKeyframeTimestamps();
+                // 1: window keyframes and their ground-truth poses
+                std::vector<uint32_t> window;
+                for (const auto &[k, t] : stamps)
+                    if (estimate.exists(X(k)))
+                        window.push_back(k);
+                if (window.size() < 2)
+                    return;
+                const uint32_t oldest = window.front(), newest = window.back();
+                const std::optional<gtsam::Pose3> gtOldest = groundTruth.poseAt(stamps.at(oldest));
+                if (!gtOldest)
+                    return;
+                // 2: anchor at the oldest window keyframe, only the relative motion in the window changes
+                const gtsam::Pose3 anchor = estimate.at<gtsam::Pose3>(X(oldest)) * gtOldest->inverse();
+                gtsam::Values estValues, gtValues;
+                for (const uint32_t k : window)
+                {
+                    const std::optional<gtsam::Pose3> gtPose = groundTruth.poseAt(stamps.at(k));
+                    if (!gtPose)
+                        return;
+                    estValues.insert(X(k), estimate.at<gtsam::Pose3>(X(k)));
+                    gtValues.insert(X(k), anchor * *gtPose);
+                }
+                const gtsam::Pose3 &estNewest = estValues.at<gtsam::Pose3>(X(newest)),
+                                   &gtNewest = gtValues.at<gtsam::Pose3>(X(newest));
+                row.gt_win_dpos = (gtNewest.translation() - estNewest.translation()).norm();
+                row.gt_win_drot = gtsam::Rot3::Logmap(estNewest.rotation().between(gtNewest.rotation())).norm();
+                row.gt_win_span = stamps.at(newest) - stamps.at(oldest);
+
+                // 3: per factor, refit the plane at the given poses (frozen associations) and evaluate
+                const gtsam::Pose3 imu_T_lidar = states.getImuToLidarExtrinsic();
+                struct Cost
+                {
+                    double plain, robust;
+                };
+                auto costAt = [&](const PointToPlaneFactor &factor, const gtsam::Values &values) -> std::optional<Cost>
+                {
+                    std::vector<Eigen::Vector3d> points;
+                    for (const auto &[key, l_p] : factor.lidarPoints())
+                        if (values.exists(key))
+                            points.push_back((values.at<gtsam::Pose3>(key) * imu_T_lidar).transformFrom(l_p));
+                    if (points.size() < 3)
+                        return std::nullopt;
+                    const auto [valid, normal, center, centered, thickness] =
+                        planeFitCovariance(points, planarityThreshold, linearityThreshold);
+                    const auto clone = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor.clone());
+                    clone->updatePlaneParameters(std::make_shared<Eigen::Vector3d>(normal),
+                                                 std::make_shared<Eigen::Vector3d>(center), factor.noiseModel());
+                    const double error = clone->evaluateErrorDiagnostic(values).error;
+                    double robust = error;
+                    if (const auto noise = boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(factor.noiseModel()))
+                        robust = noise->robust()->loss(std::sqrt(2.0 * error));
+                    return Cost{error, robust};
+                };
+                std::vector<double> costEst, costGt, rcostEst, rcostGt;
+                std::size_t numGtLower = 0;
+                for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
+                {
+                    const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+                    if (!ptp)
+                        continue;
+                    const std::optional<Cost> est = costAt(*ptp, estValues), gt = costAt(*ptp, gtValues);
+                    if (!est || !gt)
+                        continue;
+                    costEst.push_back(est->plain);
+                    costGt.push_back(gt->plain);
+                    rcostEst.push_back(est->robust);
+                    rcostGt.push_back(gt->robust);
+                    if (gt->plain < est->plain)
+                        numGtLower++;
+                }
+                const auto sum = [](const std::vector<double> &v) { return std::accumulate(v.begin(), v.end(), 0.0); };
+                row.lidar_cost_est_sum = sum(costEst);
+                row.lidar_cost_gt_sum = sum(costGt);
+                row.lidar_rcost_est_sum = sum(rcostEst);
+                row.lidar_rcost_gt_sum = sum(rcostGt);
+                if (!costEst.empty())
+                    row.lidar_cost_gt_lower = static_cast<double>(numGtLower) / static_cast<double>(costEst.size());
+                row.lidar_cost_est = makeStats(std::move(costEst));
+                row.lidar_cost_gt = makeStats(std::move(costGt));
+                row.lidar_rcost_est = makeStats(std::move(rcostEst));
+                row.lidar_rcost_gt = makeStats(std::move(rcostGt));
+            }
 
             void snapshot(KeyframeTelemetry &row, gtsam::Pose3 &imuPropagated, const States &states,
                           const Smoother &smoother, uint32_t idxKeyframe)

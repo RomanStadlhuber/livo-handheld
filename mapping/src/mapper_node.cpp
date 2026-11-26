@@ -16,6 +16,7 @@
 // Mapping
 #include <mapping/MappingSystem.hpp>
 #ifdef MAPPING_BENCHMARKING
+#include <mapping/benchmarking/GroundTruth.hpp>
 #include <mapping/benchmarking/RunOutput.hpp>
 #include <mapping/benchmarking/TelemetryRecorder.hpp>
 #include <mapping/benchmarking/TrajectoryRecorder.hpp>
@@ -545,6 +546,8 @@ struct BagOptions
     std::string outputDir;
     /// @brief Config path as given on the command line, recorded in the run metadata.
     std::string configPath;
+    /// @brief TUM ground truth for the `lidar_cost_*` telemetry probe (benchmarking builds only).
+    std::string groundTruthPath;
 };
 
 /// @brief Strip a leading slash, so that e.g. `livox/lidar` and `/livox/lidar` match the same bag topic.
@@ -655,6 +658,24 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
     std::cout << "LiDAR topic: " << metaLidar->name << " (" << metaLidar->type << ")" << std::endl;
 
     mapping::MappingSystem slam(config);
+#ifdef MAPPING_BENCHMARKING
+    // the stamps are shifted to the system time base at the first message, see below
+    std::shared_ptr<mapping::benchmarking::GroundTruth> groundTruth;
+    if (!options.groundTruthPath.empty())
+    {
+        try
+        {
+            groundTruth = std::make_shared<mapping::benchmarking::GroundTruth>(
+                mapping::benchmarking::GroundTruth::loadTum(options.groundTruthPath));
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return 1;
+        }
+        std::cout << "ground truth: " << groundTruth->size() << " poses from " << options.groundTruthPath << std::endl;
+    }
+#endif
     std::cout << "bundle adjustment: " << (config.bundle_adjustment.enabled ? "enabled" : "disabled") << std::endl;
 
     rclcpp::Serialization<sensor_msgs::msg::Imu> serializationImu;
@@ -675,6 +696,18 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
             has_start_time = true;
         }
         return (rclcpp::Time(stamp) - start_time).seconds();
+    };
+    // hand the ground truth to the system once the time base is known, track() only runs after static init
+    auto setGroundTruthOnce = [&]()
+    {
+#ifdef MAPPING_BENCHMARKING
+        if (groundTruth && has_start_time)
+        {
+            groundTruth->shiftTime(start_time.seconds());
+            slam.setGroundTruth(std::move(groundTruth));
+            groundTruth.reset();
+        }
+#endif
     };
 
     // the smoother only optimizes at keyframes, so the trajectory is recorded once per new keyframe
@@ -711,6 +744,7 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
             {
                 serializationImu.deserialize_message(&serialized_msg, &msgImu);
                 tLastMsg = toRelativeTime(msgImu.header.stamp);
+                setGroundTruthOnce();
                 slam.feedImu(imuMsgToImuData(msgImu, options.scalingImu), tLastMsg);
                 ++numImuMsgs;
             }
@@ -729,6 +763,7 @@ int processBag(const BagOptions &options, const mapping::MappingConfig &config, 
                     tLastMsg = toRelativeTime(msgLivox.header.stamp);
                     lidarData = livoxMsgToLidarData(msgLivox);
                 }
+                setGroundTruthOnce();
                 if (!lidarData)
                 {
                     ++numSkippedLidarMsgs;
@@ -842,6 +877,8 @@ void printUsage(const char *argv0)
               << "                          (loaded config) and run.yaml into <dir>.\n"
               << "                          Fails if <dir> is not empty.\n"
               << "                          Needs a build with -DMAPPING_BENCHMARKING=ON (default: off)\n"
+              << "  --ground-truth <file>   TUM ground truth (IMU frame, absolute stamps) for the lidar_cost_*\n"
+              << "                          telemetry columns. Needs -DMAPPING_BENCHMARKING=ON\n"
               << "  -h, --help              show this message" << std::endl;
 }
 
@@ -864,7 +901,7 @@ int main(int argc, char **argv)
             return 0;
         }
         const bool takesValue = arg == "--config" || arg == "--bag" || arg == "--topic-imu" || arg == "--topic-lidar" ||
-                                arg == "--scaling-imu" || arg == "--output-dir";
+                                arg == "--scaling-imu" || arg == "--output-dir" || arg == "--ground-truth";
         if (!takesValue)
             continue; // e.g. ROS arguments
         if (i + 1 >= argc)
@@ -882,7 +919,8 @@ int main(int argc, char **argv)
             rclcpp::shutdown();
             return 1;
         }
-        if (arg == "--topic-imu" || arg == "--topic-lidar" || arg == "--scaling-imu" || arg == "--output-dir")
+        if (arg == "--topic-imu" || arg == "--topic-lidar" || arg == "--scaling-imu" || arg == "--output-dir" ||
+            arg == "--ground-truth")
             bagOnlyOptionGiven = true;
         if (arg == "--config")
             config_path = bagOptions.configPath = value;
@@ -897,6 +935,8 @@ int main(int argc, char **argv)
             bagOptions.topicLidar = value;
         else if (arg == "--output-dir")
             bagOptions.outputDir = value;
+        else if (arg == "--ground-truth")
+            bagOptions.groundTruthPath = value;
         else if (arg == "--scaling-imu")
         {
             try
@@ -949,9 +989,10 @@ int main(int argc, char **argv)
             }
         }
 #else
-        if (!bagOptions.outputDir.empty())
+        if (!bagOptions.outputDir.empty() || !bagOptions.groundTruthPath.empty())
         {
-            std::cerr << "Error: --output-dir requires a build with -DMAPPING_BENCHMARKING=ON" << std::endl;
+            std::cerr << "Error: --output-dir and --ground-truth require a build with -DMAPPING_BENCHMARKING=ON"
+                      << std::endl;
             rclcpp::shutdown();
             return 1;
         }

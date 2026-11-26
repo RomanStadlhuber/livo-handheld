@@ -80,6 +80,14 @@ namespace mapping
                                                                     system_.smoother_);
                         });
             instrumentation::collect(row_, imuPropagated_, states, system_.featureManager_, system_.smoother_);
+            if (system_.groundTruth_ && !row_.lost_tracking)
+                runStep("ground truth", *row_.kf,
+                        [&]
+                        {
+                            const auto &planarity = system_.config_.lidar_frontend.planarity_check;
+                            instrumentation::collectGroundTruth(row_, states, system_.smoother_, *system_.groundTruth_,
+                                                                planarity.planarity, planarity.linearity);
+                        });
             try
             {
                 system_.telemetryQueue_.push_back(std::move(row_));
