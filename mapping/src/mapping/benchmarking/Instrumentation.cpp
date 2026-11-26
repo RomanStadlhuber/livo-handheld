@@ -287,6 +287,12 @@ namespace mapping
                 {
                     double plain, robust;
                 };
+                const auto robustLoss = [](const PointToPlaneFactor &factor, double error)
+                {
+                    if (const auto noise = boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(factor.noiseModel()))
+                        return noise->robust()->loss(std::sqrt(2.0 * error));
+                    return error;
+                };
                 auto costAt = [&](const PointToPlaneFactor &factor, const gtsam::Values &values) -> std::optional<Cost>
                 {
                     std::vector<Eigen::Vector3d> points;
@@ -301,11 +307,27 @@ namespace mapping
                     clone->updatePlaneParameters(std::make_shared<Eigen::Vector3d>(normal),
                                                  std::make_shared<Eigen::Vector3d>(center), factor.noiseModel());
                     const double error = clone->evaluateErrorDiagnostic(values).error;
-                    double robust = error;
-                    if (const auto noise = boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(factor.noiseModel()))
-                        robust = noise->robust()->loss(std::sqrt(2.0 * error));
-                    return Cost{error, robust};
+                    return Cost{error, robustLoss(factor, error)};
                 };
+                // line search from the estimate (a = 0) to the ground truth (a = 1)
+                const auto interpolate = [&](double a)
+                {
+                    gtsam::Values values;
+                    for (const uint32_t k : window)
+                    {
+                        const gtsam::Pose3 &est = estValues.at<gtsam::Pose3>(X(k)),
+                                           &gt = gtValues.at<gtsam::Pose3>(X(k));
+                        values.insert(X(k), est * gtsam::Pose3::Expmap(a * gtsam::Pose3::Logmap(est.between(gt))));
+                    }
+                    return values;
+                };
+                const std::vector<double> alphasRefit{0.05, 0.25, 0.5, 0.75}, alphasLive{0.0, 0.05, 0.25, 1.0};
+                std::vector<gtsam::Values> valuesRefit, valuesLive;
+                for (const double a : alphasRefit)
+                    valuesRefit.push_back(interpolate(a));
+                for (const double a : alphasLive)
+                    valuesLive.push_back(interpolate(a));
+                std::vector<double> sumRefit(alphasRefit.size(), 0.0), sumLive(alphasLive.size(), 0.0);
                 std::vector<double> costEst, costGt, rcostEst, rcostGt;
                 std::size_t numGtLower = 0;
                 for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
@@ -322,7 +344,20 @@ namespace mapping
                     rcostGt.push_back(gt->robust);
                     if (gt->plain < est->plain)
                         numGtLower++;
+                    for (std::size_t i = 0; i < valuesRefit.size(); ++i)
+                        if (const std::optional<Cost> c = costAt(*ptp, valuesRefit[i]))
+                            sumRefit[i] += c->robust;
+                    for (std::size_t i = 0; i < valuesLive.size(); ++i)
+                        sumLive[i] += robustLoss(*ptp, ptp->evaluateErrorDiagnostic(valuesLive[i]).error);
                 }
+                row.lidar_rcost_a05_sum = sumRefit[0];
+                row.lidar_rcost_a25_sum = sumRefit[1];
+                row.lidar_rcost_a50_sum = sumRefit[2];
+                row.lidar_rcost_a75_sum = sumRefit[3];
+                row.lidar_rcost_live_a00_sum = sumLive[0];
+                row.lidar_rcost_live_a05_sum = sumLive[1];
+                row.lidar_rcost_live_a25_sum = sumLive[2];
+                row.lidar_rcost_live_a100_sum = sumLive[3];
                 const auto sum = [](const std::vector<double> &v) { return std::accumulate(v.begin(), v.end(), 0.0); };
                 row.lidar_cost_est_sum = sum(costEst);
                 row.lidar_cost_gt_sum = sum(costGt);

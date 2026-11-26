@@ -132,6 +132,10 @@
 /// - `lidar_cost_gt_lower`: share of the factors with `cost_gt < cost_est`
 /// - `gt_win_dpos` `[m]`, `gt_win_drot` `[rad]`: offset of `X~(newest)` from `X(newest)`
 /// - `gt_win_span` `[s]`: time from the oldest to the newest window keyframe
+/// - `lidar_rcost_aNN_sum`: line search, sum of `rho` with refit planes at `X_a(k) = X(k) Exp(a Log(X(k)^-1 X~(k)))`,
+///   `a = NN / 100`
+/// - `lidar_rcost_live_aNN_sum`: the same without the refit, with the live plane of each factor (what the solver
+///   sees in its iterations)
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
     X(Index, kf)                                                                                                       \
     X(Time, t)                                                                                                         \
@@ -200,7 +204,15 @@
     X(Real, lidar_cost_gt_lower)                                                                                       \
     X(Real, gt_win_dpos)                                                                                               \
     X(Real, gt_win_drot)                                                                                               \
-    X(Real, gt_win_span)
+    X(Real, gt_win_span)                                                                                               \
+    X(Real, lidar_rcost_a05_sum)                                                                                       \
+    X(Real, lidar_rcost_a25_sum)                                                                                       \
+    X(Real, lidar_rcost_a50_sum)                                                                                       \
+    X(Real, lidar_rcost_a75_sum)                                                                                       \
+    X(Real, lidar_rcost_live_a00_sum)                                                                                  \
+    X(Real, lidar_rcost_live_a05_sum)                                                                                  \
+    X(Real, lidar_rcost_live_a25_sum)                                                                                  \
+    X(Real, lidar_rcost_live_a100_sum)
 
 namespace mapping
 {
