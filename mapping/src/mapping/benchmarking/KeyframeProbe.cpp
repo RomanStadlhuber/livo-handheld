@@ -39,30 +39,13 @@ namespace mapping
             runStep(
                 "snapshot", idxKeyframe, [&]
                 { instrumentation::snapshot(row_, imuPropagated_, system_.states_, system_.smoother_, idxKeyframe); });
-        }
-
-        void KeyframeProbe::beforeMarginalization() noexcept
-        {
-            runStep("marginalization snapshot", *row_.kf,
+            // nothing between the keyframe creation and the marginalization changes the smoother or the keyframes
+            runStep("marginalization snapshot", idxKeyframe,
                     [&]
                     {
-                        marginalizedKeyframes_ = instrumentation::marginalizedKeyframes(
-                            system_.states_, static_cast<uint32_t>(*row_.kf),
+                        instrumentation::snapshotMarginalization(
+                            row_, marginalization_, system_.states_, system_.smoother_, idxKeyframe,
                             static_cast<uint32_t>(system_.config_.backend.sliding_window_size));
-                        instrumentation::snapshotMarginalization(row_, rebuildBaseline_, marginalizedKeyframes_,
-                                                                 system_.states_, system_.smoother_);
-                    });
-        }
-
-        void KeyframeProbe::beforeSmootherUpdate(const gtsam::NonlinearFactorGraph &newFactors,
-                                                 const gtsam::FactorIndices &factorsToRemove) noexcept
-        {
-            runStep("marginalization", *row_.kf,
-                    [&]
-                    {
-                        instrumentation::collectMarginalization(row_, marginalizedKeyframes_, rebuildBaseline_,
-                                                                system_.states_, system_.featureManager_,
-                                                                system_.smoother_, newFactors, factorsToRemove);
                     });
         }
 
@@ -73,6 +56,12 @@ namespace mapping
             const auto &numValidClusters = system_.lidarFrontend_.keyframeNumValidClusters;
             if (const auto it = numValidClusters.find(*row_.kf); it != numValidClusters.end())
                 row_.clusters_valid = it->second;
+            if (!row_.lost_tracking) // no smoother update at lost tracking, the smoother holds the last keyframe
+                runStep("marginalization", *row_.kf,
+                        [&] {
+                            instrumentation::collectMarginalization(row_, marginalization_, system_.featureManager_,
+                                                                    system_.smoother_);
+                        });
             instrumentation::collect(row_, imuPropagated_, states, system_.featureManager_, system_.smoother_);
             try
             {

@@ -88,8 +88,8 @@
 /// - `marg_kf`: the oldest keyframe that the smoother marginalizes in this update
 /// - Rebuild comparison: does the rebuild of a cluster factor without the marginalized keyframe weaken the rows that
 ///   stay on the other poses? For each cluster whose factor on a marginalized keyframe is removed and rebuilt in this
-///   update: the old factor is linearized before `removeKeyframeFromClusters`, the rebuilt factor right before the
-///   smoother update, both at the smoother estimate. The whitened row block of pose `X(j)` is
+///   update: the old factor is linearized before `removeKeyframeFromClusters`, the rebuilt factor after the
+///   smoother update, both at the smoother estimate before the update. The whitened row block of pose `X(j)` is
 ///   `A_j = sqrt(w) / sigma * J_j` (`w` robust kernel weight, `sigma` noise sigma, `J_j` unwhitened Jacobian).
 ///   Only the pose keys in both factors count (not the marginalized keyframes, not the new keyframe).
 ///   Clusters with a kernel weight of 0 are skipped.

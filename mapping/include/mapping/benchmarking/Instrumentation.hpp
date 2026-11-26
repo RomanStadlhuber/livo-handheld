@@ -46,26 +46,44 @@ namespace mapping
             void snapshot(KeyframeTelemetry &row, gtsam::Pose3 &imuPropagated, const States &states,
                           const Smoother &smoother, uint32_t idxKeyframe);
 
-            /// @brief Keyframes that the smoother marginalizes in the update of `idxKeyframe`:
-            /// `X(j)` in the smoother estimate with `j + slidingWindowSize < idxKeyframe`, ascending.
-            std::vector<uint32_t> marginalizedKeyframes(const States &states, uint32_t idxKeyframe,
-                                                        uint32_t slidingWindowSize);
+            /// @brief A `PointToPlaneFactor` in the smoother that touches a marginalized keyframe.
+            struct MargFactor
+            {
+                /// @brief Index of the factor in the smoother graph before the update.
+                gtsam::FactorIndex index;
+                /// @brief Cluster of the factor.
+                uint32_t clusterId;
+            };
 
-            /// @brief Call before `removeKeyframeFromClusters`. Sets `marg_kf`.
-            /// @param rebuildBaseline Set to the rows of every `PointToPlaneFactor` on a marginalized keyframe, before
-            /// the rebuild. `collectMarginalization` compares the rebuilt factors with them (`rebuild_*`).
-            void snapshotMarginalization(KeyframeTelemetry &row, ClusterRowsMap &rebuildBaseline,
-                                         const std::vector<uint32_t> &keyframes, const States &states,
-                                         const Smoother &smoother);
+            /// @brief What `collectMarginalization` needs from the state before the smoother update.
+            /// @details Filled by `snapshotMarginalization` in the `KeyframeProbe` constructor, because the update
+            /// removes the factors and overwrites the estimate.
+            struct MarginalizationSnapshot
+            {
+                /// @brief Keyframes that the smoother marginalizes in this update, ascending.
+                std::vector<uint32_t> keyframes;
+                /// @brief Rows of every `PointToPlaneFactor` on a marginalized keyframe, before the rebuild.
+                ClusterRowsMap rebuildBaseline;
+                /// @brief Every `PointToPlaneFactor` on a marginalized keyframe.
+                std::vector<MargFactor> factors;
+                /// @brief Smoother estimate before the update, plus the IMU-propagated pose of the new keyframe.
+                /// @details The rebuilt factors can hold the point of the new keyframe, which is not in the estimate
+                /// yet. All rows of the comparison use these values.
+                gtsam::Values values;
+            };
 
-            /// @brief Call right before the smoother update. Sets `lidar_fac_marg_*`, `rebuild_*`.
-            /// @param newFactors, factorsToRemove The factors that the update adds and removes (without the IMU
-            /// factor of the new keyframe, which does not touch the marginalized keyframes).
-            void collectMarginalization(KeyframeTelemetry &row, const std::vector<uint32_t> &keyframes,
-                                        const ClusterRowsMap &rebuildBaseline, const States &states,
-                                        const FeatureManager &featureManager, const Smoother &smoother,
-                                        const gtsam::NonlinearFactorGraph &newFactors,
-                                        const gtsam::FactorIndices &factorsToRemove);
+            /// @brief Record the marginalization of the update of `idxKeyframe`. Sets `marg_kf`.
+            /// @details Call it before the update. A keyframe `j` is marginalized when `X(j)` is in the smoother
+            /// estimate and `j + slidingWindowSize < idxKeyframe`. Does nothing else when there is none.
+            void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,
+                                         const States &states, const Smoother &smoother, uint32_t idxKeyframe,
+                                         uint32_t slidingWindowSize);
+
+            /// @brief Call after the smoother update. Sets `lidar_fac_marg_*`, `rebuild_*`.
+            /// @details Reads the factors that the update added and removed from the `Smoother`.
+            /// Do not call it for a `row.lost_tracking` keyframe, it has no update.
+            void collectMarginalization(KeyframeTelemetry &row, const MarginalizationSnapshot &snapshot,
+                                        const FeatureManager &featureManager, const Smoother &smoother);
 
             /// @brief Fill the post-update columns of `row` (`row.kf` must be set).
             /// @details Each column group (IMU, frontend, geometry, backend) is collected on its own.

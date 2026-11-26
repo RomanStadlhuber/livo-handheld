@@ -79,6 +79,10 @@ namespace mapping
                                           gtsam::NonlinearFactorGraph newAndUpdatedFactors,
                                           const gtsam::FactorIndices &factorsToRemove)
     {
+#ifdef MAPPING_BENCHMARKING
+        lastNewFactors_ = newAndUpdatedFactors;
+        lastFactorsToRemove_ = factorsToRemove;
+#endif
         // need to manually add preintegraion factor
         newAndUpdatedFactors.add(preintegrationFactor);
         // variables that join the graph with the new keyframe
