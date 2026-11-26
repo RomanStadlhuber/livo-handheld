@@ -49,9 +49,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("run_dir", type=Path, help="run directory with trajectory.tum, telemetry.csv, run.yaml")
     parser.add_argument("ground_truth", type=Path, help="ground-truth trajectory in TUM format")
     parser.add_argument("--t-max-diff", type=float, default=0.05, help="max. timestamp difference [s] for matching")
-    parser.add_argument(
-        "--align-seconds", type=float, default=5.0, help="SE(3)-align on the first N seconds of the estimate only"
-    )
     parser.add_argument("--segment", type=float, default=1.0, help="segment length [s] for the relative error")
     parser.add_argument("--threshold", type=float, default=1.0, help="absolute translation error threshold [m]")
     parser.add_argument(
@@ -91,13 +88,13 @@ def run_label(info: dict) -> str:
     return f"commit {commit}{dirty_str}, config {config}"
 
 
-def align_on_start(est: PoseTrajectory3D, ref: PoseTrajectory3D, seconds: float) -> None:
-    """SE(3)-align `est` to `ref` (in place) using only the poses of the first `seconds`."""
-    t0 = est.timestamps[0]
-    n = int(np.searchsorted(est.timestamps, t0 + seconds, side="right"))
-    if n < 3:
-        raise SystemExit(f"error: only {n} matched poses in the first {seconds} s, cannot align (need >= 3)")
-    est.align(ref, correct_scale=False, n=n)
+def align_on_first_pose(est: PoseTrajectory3D, ref: PoseTrajectory3D) -> None:
+    """Move `est` (in place) so that its first pose equals the first ground-truth pose.
+
+    No least-squares fit: the start of a run is static or slow, and a fit on it cannot fix the rotation
+    (exp14, first 5 s: 8.5 deg false rotation error).
+    """
+    est.align_origin(ref)
 
 
 def rotation_angle_deg(rotations: np.ndarray) -> np.ndarray:
@@ -231,7 +228,7 @@ def compute_errors(run_dir: Path, gt_path: Path, args: argparse.Namespace) -> pd
     ref = file_interface.read_tum_trajectory_file(str(gt_path))
     ref, est = sync.associate_trajectories(ref, est, max_diff=args.t_max_diff)
     print(f"matched {est.num_poses} estimate poses to ground truth (max diff {args.t_max_diff} s)")
-    align_on_start(est, ref, args.align_seconds)
+    align_on_first_pose(est, ref)
     ape_trans, ape_rot = absolute_errors(est, ref)
     rpe_trans, rpe_rot = relative_errors(est, ref, args.segment)
     # timestamps are those of the estimate, i.e. the values written to trajectory.tum
