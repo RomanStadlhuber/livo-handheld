@@ -53,7 +53,7 @@
 ///
 /// LiDAR factor accounting of the smoother update at this keyframe. The counts satisfy
 /// `lidar_fac_after = lidar_fac_before - lidar_fac_removed + lidar_fac_readded + lidar_fac_new
-///  - lidar_fac_marg_pruned - lidar_fac_marg_lost - lidar_fac_marg_whole`.
+///  - lidar_fac_marg_pruned - lidar_fac_marg_lost`.
 /// - `lidar_fac_before`, `lidar_fac_after`: `PointToPlaneFactor` in the smoother before the marginalization of this
 ///   keyframe and after the smoother update
 /// - `lidar_fac_removed`: factors that `createAndUpdateFactors` passes to the smoother for removal
@@ -66,8 +66,6 @@
 ///   factor after the update (e.g. `ShiftedIdle` overwritten with `Idle` by a failed track).
 /// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
 ///   `ShiftedIdle`
-/// - `lidar_fac_marg_whole`: factors on a marginalized keyframe that go whole into the iSAM2 marginalization by design
-///   (block release, `backend.block_release_size`). They do not count in `_pruned` / `_lost`.
 /// - `t_update_ms` `[ms]`: wall time of `Smoother::updateAndOptimizeGraph` (all iSAM2 updates and the estimate)
 ///
 /// Fixed variables of iSAM2 after the smoother update, recorded at every keyframe:
@@ -152,7 +150,6 @@
     X(Index, lidar_fac_new)                                                                                            \
     X(Index, lidar_fac_marg_pruned)                                                                                    \
     X(Index, lidar_fac_marg_lost)                                                                                      \
-    X(Index, lidar_fac_marg_whole)                                                                                     \
     X(Index, clusters_pruned)                                                                                          \
     X(Index, clusters_shifted_idle)                                                                                    \
     X(Index, n_fixed_kf)                                                                                               \
@@ -244,7 +241,7 @@ namespace mapping
 
         /// @ingroup benchmarking
         /// @brief One row of `clusters.csv`: one `PointToPlaneFactor` in the smoother right before the update of
-        /// keyframe `kf`, only at keyframes that marginalize. For the span analysis of block release.
+        /// keyframe `kf`, only at keyframes that marginalize. For the analysis of cluster spans.
         struct ClusterSpanRow
         {
             uint32_t kf = 0, clusterId = 0;

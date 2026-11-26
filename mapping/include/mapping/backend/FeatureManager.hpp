@@ -180,26 +180,10 @@ namespace mapping
             /// @brief `createAndUpdateFactors`: fresh factors, re-added factors (old factor removed and rebuilt),
             /// and factor indices passed to the smoother for removal.
             std::size_t numFactorsAdded = 0, numFactorsUpdated = 0, numFactorsRemoved = 0;
-            /// @brief `releaseClustersInsideBlock`: clusters whose factor stays in the smoother and goes whole into
-            /// the iSAM2 marginalization (block release).
-            std::set<ClusterId> wholeReleased;
         };
         /// @brief Benchmark build only: stats of the last `createAndUpdateFactors` call, together with the stats of all
         /// `removeKeyframeFromClusters` calls before it.
         const KeyframeFactorStats &lastKeyframeFactorStats() const { return lastKeyframeFactorStats_; }
-
-        /// @brief Benchmark build only (block release): hand the clusters that lie inside a released block whole to
-        /// the iSAM2 marginalization.
-        /// @details A cluster goes whole when it has a live factor, and all pose keys of the factor and all points of
-        /// the cluster are in `block` or in `idxNext` (the IMU neighbor `X(j+1)`, fixed anyway). Its factor stays in
-        /// the smoother and the cluster is erased here, so `createAndUpdateFactors` does not touch the factor and no
-        /// unary factor is created. Call it before `removeKeyframeFromClusters` for the keyframes of the block, which
-        /// then sheds the crossing clusters as before.
-        /// @param block The released keyframes, contiguous.
-        /// @param idxNext The keyframe after the newest released keyframe.
-        /// @return Number of clusters released whole.
-        std::size_t releaseClustersInsideBlock(const std::vector<uint32_t> &block, uint32_t idxNext,
-                                               const gtsam::NonlinearFactorGraph &currentSmootherFactors);
 
     private:
         KeyframeFactorStats lastKeyframeFactorStats_;

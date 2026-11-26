@@ -140,51 +140,6 @@ namespace mapping
         clusterFactorIdxMap_.erase(clusterId);
     }
 
-#ifdef MAPPING_BENCHMARKING
-    std::size_t FeatureManager::releaseClustersInsideBlock(const std::vector<uint32_t> &block, uint32_t idxNext,
-                                                           const gtsam::NonlinearFactorGraph &currentSmootherFactors)
-    {
-        std::set<uint32_t> allowed(block.begin(), block.end());
-        allowed.insert(idxNext);
-        const std::set<uint32_t> released(block.begin(), block.end());
-        gtsam::KeySet allowedKeys;
-        for (const uint32_t k : allowed)
-            allowedKeys.insert(X(k));
-        std::vector<ClusterId> whole;
-        for (const auto &[clusterId, clusterPoints] : clusters_)
-        {
-            // only clusters with a point in the released block
-            bool inBlock = false, inside = true;
-            for (const auto &[kf, _] : clusterPoints)
-            {
-                inBlock |= released.count(kf) > 0;
-                inside &= allowed.count(kf) > 0;
-            }
-            if (!inBlock || !inside || !hasClusterFactorIdx(clusterId))
-                continue;
-            const auto &ptr = currentSmootherFactors[clusterFactorIdxMap_.at(clusterId)];
-            const auto factor = boost::dynamic_pointer_cast<PointToPlaneFactor>(ptr);
-            if (!factor || factor->clusterId_ != clusterId)
-                continue;
-            // any other key (e.g. a calibration key) would be fixed by the marginalization, so it disqualifies
-            bool keysInside = true;
-            for (const gtsam::Key key : factor->keys())
-                if (!allowedKeys.count(key))
-                    keysInside = false;
-            if (keysInside)
-                whole.push_back(clusterId);
-        }
-        for (const ClusterId clusterId : whole)
-        {
-            eraseCluster(clusterId); // the factor stays in the smoother, iSAM2 marginalizes it with the block
-            pendingKeyframeFactorStats_.wholeReleased.insert(clusterId);
-        }
-        LOG(INFO, "block release: " << whole.size() << " clusters go whole into the marginal of keyframes "
-                                    << block.front() << ".." << block.back());
-        return whole.size();
-    }
-#endif
-
     void FeatureManager::addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx,
                                            const double &planeThickness)
     {

@@ -75,14 +75,11 @@ namespace mapping
             /// `clusters.csv`.
             /// @details Call it before the update. Fills `snapshot` with the keyframes that the update marginalizes,
             /// the LiDAR factors on them and the estimate. Steps are in the definition.
-            /// @param blockSize Block release size, see `Smoother::isMarginalized`.
             void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,
                                          const States &states, const Smoother &smoother, uint32_t idxKeyframe,
-                                         uint32_t slidingWindowSize, uint32_t blockSize);
+                                         uint32_t slidingWindowSize);
 
             /// @brief Call after the smoother update. Sets `lidar_fac_marg_*`, `rebuild_*`.
-            /// @details A factor of a cluster that `FeatureManager::releaseClustersInsideBlock` released whole counts
-            /// in `lidar_fac_marg_whole`, not in `_pruned` / `_lost`.
             /// @details Needs the `snapshot` of `snapshotMarginalization`. Phases are in the definition.
             /// Do not call it for a `row.lost_tracking` keyframe, it has no update.
             void collectMarginalization(KeyframeTelemetry &row, const MarginalizationSnapshot &snapshot,

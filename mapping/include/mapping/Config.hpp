@@ -213,10 +213,6 @@ namespace mapping
         double init_time_window = 2.0;  // [sec.]
         size_t solver_iterations = 2;
         double isam2_relinearize_threshold = 0.01; // frobenius norm for relinearization on state variables
-        /// benchmark build only: marginalize keyframes in contiguous blocks of this size ("block release"),
-        /// by re-stamping the `X`/`V`/`B` keys of each completed block to its newest keyframe.
-        /// 0 or 1: off (one keyframe per update). Must not exceed `sliding_window_size`.
-        size_t block_release_size = 0;
     };
 
     inline void declare_config(BackendConfig &config)
@@ -228,9 +224,7 @@ namespace mapping
         field(config.init_time_window, "init_time_window", "s");
         field(config.solver_iterations, "solver_iterations");
         field(config.isam2_relinearize_threshold, "isam2_relinearize_threshold");
-        field(config.block_release_size, "block_release_size", "keyframes");
         check(config.sliding_window_size, GT, 0, "sliding_window_size");
-        check(config.block_release_size, LE, config.sliding_window_size, "block_release_size");
         check(config.init_time_window, GT, 0.0, "init_time_window");
         check(config.solver_iterations, GT, 0, "solver_iterations");
         check(config.isam2_relinearize_threshold, GT, 0.0, "isam2_relinearize_threshold");

@@ -284,13 +284,13 @@ namespace mapping
             /// later. The function does nothing else when no keyframe is marginalized.
             void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,
                                          const States &states, const Smoother &smoother, uint32_t idxKeyframe,
-                                         uint32_t slidingWindowSize, uint32_t blockSize)
+                                         uint32_t slidingWindowSize)
             {
                 snapshot = {};
                 // 1. find the marginalized keyframes, ascending
                 const gtsam::Values &estimate = states.getSmootherEstimate();
                 for (const auto &[k, _] : states.getKeyframeImuPoses())
-                    if (Smoother::isMarginalized(k, idxKeyframe, slidingWindowSize, blockSize) && estimate.exists(X(k)))
+                    if (k + slidingWindowSize < idxKeyframe && estimate.exists(X(k)))
                         snapshot.keyframes.push_back(k);
                 if (snapshot.keyframes.empty())
                     return;
@@ -364,7 +364,6 @@ namespace mapping
             {
                 row.lidar_fac_marg_pruned = 0;
                 row.lidar_fac_marg_lost = 0;
-                row.lidar_fac_marg_whole = 0;
                 if (snapshot.keyframes.empty())
                     return;
                 const gtsam::KeySet margKeys = navStateKeys(snapshot.keyframes);
@@ -381,11 +380,6 @@ namespace mapping
                     if (removed.count(factor.index))
                     {
                         rebuiltClusters.insert(factor.clusterId);
-                        continue;
-                    }
-                    if (featureManager.lastKeyframeFactorStats().wholeReleased.count(factor.clusterId))
-                    {
-                        (*row.lidar_fac_marg_whole)++;
                         continue;
                     }
                     const auto itState = featureManager.clusterStates_.find(factor.clusterId);
