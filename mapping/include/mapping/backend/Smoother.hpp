@@ -19,6 +19,7 @@
 #include <tbb/task_arena.h>
 
 #include <iostream>
+#include <optional>
 
 namespace mapping
 {
@@ -83,6 +84,10 @@ namespace mapping
 
         /// @brief The factor indices that the last `updateAndOptimizeGraph` call had to remove (benchmark build only).
         const gtsam::FactorIndices &getLastFactorsToRemove() const { return lastFactorsToRemove_; }
+
+        /// @brief The keyframe of the last `updateAndOptimizeGraph` call (benchmark build only).
+        /// @details Empty before the first call and after `reset`. Tells if the copies above belong to a keyframe.
+        const std::optional<uint32_t> &getLastUpdateKeyframe() const { return lastUpdateKeyframe_; }
 #endif
 
     private:
@@ -109,6 +114,7 @@ namespace mapping
         /// @brief Arguments of the last `updateAndOptimizeGraph` call, for the telemetry.
         gtsam::NonlinearFactorGraph lastNewFactors_;
         gtsam::FactorIndices lastFactorsToRemove_;
+        std::optional<uint32_t> lastUpdateKeyframe_;
 #endif
     };
 } // namespace mapping

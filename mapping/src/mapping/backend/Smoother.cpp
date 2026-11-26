@@ -25,6 +25,11 @@ namespace mapping
         initialValues_.clear();
         initialSmootherIndices_.clear();
         bootstrapped_ = false;
+#ifdef MAPPING_BENCHMARKING
+        lastNewFactors_ = {};
+        lastFactorsToRemove_.clear();
+        lastUpdateKeyframe_.reset();
+#endif
         temporalCalibrationEnabled_ = config.extrinsics.temporal_calibration_enabled;
         extrinsicCalibrationEnabled_ = config.extrinsics.extrinsic_calibration_enabled;
 
@@ -80,6 +85,7 @@ namespace mapping
                                           const gtsam::FactorIndices &factorsToRemove)
     {
 #ifdef MAPPING_BENCHMARKING
+        lastUpdateKeyframe_ = idxKeyframe;
         lastNewFactors_ = newAndUpdatedFactors;
         lastFactorsToRemove_ = factorsToRemove;
 #endif

@@ -12,7 +12,6 @@
 
 #include <Eigen/Core>
 #include <gtsam/geometry/Pose3.h>
-#include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
 #include <cstdint>
 #include <map>

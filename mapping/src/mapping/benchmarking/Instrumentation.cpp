@@ -266,6 +266,7 @@ namespace mapping
                 row.pts_submap = states.getKeyframeSubmaps().at(idxKeyframe)->points_.size();
             }
 
+            /// @brief Records the LiDAR factors on the marginalized keyframes and the estimate before the update.
             /// @details Runs in the `KeyframeProbe` constructor, before the update changes the smoother.
             /// It finds the `PointToPlaneFactor` LiDAR clusters that connect to the keyframes that the update
             /// marginalizes, and records what `collectMarginalization` needs after the update:
@@ -338,6 +339,7 @@ namespace mapping
                 const gtsam::FactorIndices &factorsToRemove = smoother.getLastFactorsToRemove();
                 const std::set<gtsam::FactorIndex> removed(factorsToRemove.begin(), factorsToRemove.end());
                 const ClusterRowsMap &rebuildBaseline = snapshot.rebuildBaseline;
+                // 2. evaluation values: the estimate before the update, for the old and the rebuilt rows
                 const gtsam::Values &values = snapshot.values;
                 // 1. factor accounting, clusters whose removed factor touched a marginalized key: their rebuilt factor
                 // (without the marginalized keyframes) carries the information of the other points of the cluster
@@ -355,8 +357,8 @@ namespace mapping
                     else
                         (*row.lidar_fac_marg_lost)++;
                 }
-                // 2./3. rebuild comparison, evaluated at `values` (2.): rows of each rebuilt factor vs. its removed
-                // factor, on their common pose keys total, `Tracked` (plane refit at this keyframe) and shifted (`Idle`
+                // 3. rebuild comparison per cluster: rows of each rebuilt factor vs. its removed factor, on their
+                // common pose keys: total, `Tracked` (plane refit at this keyframe) and shifted (`Idle`
                 // after `createAndUpdateFactors`, shifted without a refit); any other state counts in the total only
                 struct Group
                 {
