@@ -33,7 +33,6 @@
 ///   pose of the current keyframe (magnitude of smoother correction)
 /// - `vel_norm` `[m/s]`, `ba_norm`, `bg_norm`: optimized velocity, accelerometer and gyroscope bias norms
 /// - `pts_submap`: points in the keyframe submap after the voxel filter
-/// - `voxel_size`: adaptive voxel size when the keyframe is created (`States::getVoxelSize()`)
 /// - `clusters_valid`: `numValidClusters` of `LidarFrontend::trackScanPointsToClusters` at the current keyframe,
 ///   `nan` when it returned false (see `LidarFrontend::keyframeNumValidClusters`)
 /// - `thickness`: newest plane thickness history entry of the `Tracked` clusters with a point in the current
@@ -49,11 +48,77 @@
 ///   Pick the "rejected" threshold in the evaluation, it depends on the kernel and its scale.
 /// - `lidar_var` `[m^4]`: variance of the noise model (without the robust kernel) per `PointToPlaneFactor`
 ///   in the smoother
-/// - `err_marg_sum`: summed error of all `LinearContainerFactor` (marginalization) in the smoother.
-///   Combines the built-in iSAM2 fixed-lag marginalization factors and the custom marginalization factors
-///   that the system adds (e.g. `PointToPlaneFactor::createMarginalizationFactor`)
 /// - `cov_rot_trace`, `cov_trans_trace`: trace of the rotation and translation blocks of the marginal covariance
 ///   of `X(kf)`
+///
+/// LiDAR factor accounting of the smoother update at this keyframe. The counts satisfy
+/// `lidar_fac_after = lidar_fac_before - lidar_fac_removed + lidar_fac_readded + lidar_fac_new
+///  - lidar_fac_marg_pruned - lidar_fac_marg_lost`.
+/// - `lidar_fac_before`, `lidar_fac_after`: `PointToPlaneFactor` in the smoother before the marginalization of this
+///   keyframe and after the smoother update
+/// - `lidar_fac_removed`: factors that `createAndUpdateFactors` passes to the smoother for removal
+/// - `lidar_fac_readded`: factors that `createAndUpdateFactors` rebuilds for a cluster with a removed factor
+///   (`Tracked` with a live factor, `ShiftedIdle`)
+/// - `lidar_fac_new`: factors that `createAndUpdateFactors` creates for a cluster without a live factor
+/// - `lidar_fac_marg_pruned`, `lidar_fac_marg_lost`: factors on a marginalized keyframe that are not removed by
+///   `createAndUpdateFactors`, so the iSAM2 marginalization absorbs them with all their keys.
+///   `_pruned`: the cluster is `Pruned` (fewer than 3 points left). `_lost`: the cluster is still alive, but has no
+///   factor after the update (e.g. `ShiftedIdle` overwritten with `Idle` by a failed track).
+/// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
+///   `ShiftedIdle`
+///
+/// Fixed variables of iSAM2 after the smoother update, recorded at every keyframe:
+/// - `n_fixed_kf`: number of keyframes in the sliding window whose pose key `X(k)` is in
+///   `ISAM2::getFixedVariables()` after the update. iSAM2 never relinearizes these
+///   variables again until they are marginalized, so a stale linearization point stays in the smoother.
+///   Expected: 1 (`X(k+1)` of the IMU factor).
+/// - `n_window_kf`: number of keyframes in the sliding window after the update (tells if `n_fixed_kf` is the whole
+///   window)
+/// - `fixed_kf_first`, `fixed_kf_last`: smallest and largest keyframe index `k` whose `X(k)` is in
+///   `ISAM2::getFixedVariables()`, `nan` when none is fixed
+/// - `n_fixed_vb`: number of window keyframes whose velocity key `V(k)` or bias key `B(k)` is fixed
+///
+/// Marginalization, `nan` at keyframes without a marginalization. If one update marginalizes more than one keyframe
+/// (e.g. after a gap), each value covers all of them together:
+/// - `marg_n`: custom marginalization factors that `removeKeyframeFromClusters` creates
+///   (`PointToPlaneFactor::createMarginalizationFactor`, unary on the marginalized pose)
+/// - `marg_info_rot`, `marg_info_trans`: smallest eigenvalue of the rotation and translation blocks of the summed
+///   whitened information `sum(H^T H)` of these factors (incl. the robust kernel weight). With more than one
+///   marginalized keyframe, the blocks of the different poses are added into one matrix.
+/// - `marg_w`: robust kernel weight of the source `PointToPlaneFactor` of each custom marginalization factor
+/// - `marg_kf`: the oldest keyframe that the smoother marginalizes in this update
+/// - Rebuild comparison: does the rebuild of a cluster factor without the marginalized keyframe weaken the rows that
+///   stay on the other poses? For each cluster whose factor on a marginalized keyframe is removed and rebuilt in this
+///   update: the old factor is linearized before `removeKeyframeFromClusters`, the rebuilt factor (read after the
+///   smoother update) at the same values: the smoother estimate before the update, plus the IMU-propagated pose of
+///   the new keyframe. The whitened row block of pose `X(j)` is
+///   `A_j = sqrt(w) / sigma * J_j` (`w` robust kernel weight, `sigma` noise sigma, `J_j` unwhitened Jacobian).
+///   Only the pose keys in both factors count (not the marginalized keyframes, not the new keyframe).
+///   Clusters with a kernel weight of 0 are skipped.
+///   - `rebuild_n`: compared clusters
+///   - `rebuild_info_ratio`: `sum ||A'_j||^2 / sum ||A_j||^2` over all compared clusters and their common poses
+///     (after / before). Below 1: the rebuilt factors carry less information on the remaining poses.
+///   - `rebuild_jac_ratio`: per cluster `||J'|| / ||J||` on the common poses (plane refit, residual `r_j`, `1/N`)
+///   - Split by cluster state at the smoother update (after `createAndUpdateFactors`). Both groups get a plane refit
+///     in `LidarFrontend::trackScanPointsToClusters` after the marginalized point is removed. `Tracked`: the track
+///     succeeded, the plane is refit with the point of the new keyframe. `Idle` ("shifted"): the track failed, the
+///     plane is refit from the remaining points only (`updateClusterParameters` without a new point), and
+///     `createAndUpdateFactors` sets `ShiftedIdle` back to `Idle`. A cluster in any other state counts in the totals
+///     only.
+///     - `rebuild_n_tracked`, `rebuild_n_shifted`: compared clusters of the group
+///     - `rebuild_info_ratio_tracked`, `rebuild_info_ratio_shifted`: `rebuild_info_ratio` of the group, `nan` if the
+///       group is empty
+///     - `rebuild_jac_ratio_tracked`, `rebuild_jac_ratio_shifted`: `rebuild_jac_ratio` of the group
+///   - `rebuild_n_collapsed`: compared clusters with `||J'|| / ||J|| < 1e-6` (collapsed)
+///   - `rebuild_collapsed_pts`: per collapsed cluster the number of pose keys `X(j)` of the rebuilt factor
+///     (= points, one per keyframe)
+///   - `rebuild_marg_share`: share of the cluster information that sits on the marginalized keyframe (the part that
+///     goes into the unary factor). `sum_c w/sigma^2 ||J_c,k||^2 / sum_c w/sigma^2 (||J_c,k||^2 + sum_j ||J_c,j||^2)`
+///     over the compared clusters `c` (old factor), `k` the marginalized pose keys, `j` the common poses of the ratios.
+///     `nan` if the denominator is 0.
+///   - `rebuild_sigma_ratio`: per cluster `sigma / sigma'` (noise model, plane thickness history)
+///   - `rebuild_w_ratio`: per cluster `sqrt(w' / w)` (robust kernel)
+///   The product of the three per-cluster factors is the per-cluster row ratio `||A'|| / ||A||`.
 #define KF_TELEMETRY_FIELDS(X)                                                                                         \
     X(Index, kf)                                                                                                       \
     X(Time, t)                                                                                                         \
@@ -67,7 +132,6 @@
     X(Real, ba_norm)                                                                                                   \
     X(Real, bg_norm)                                                                                                   \
     X(Index, pts_submap)                                                                                               \
-    X(Real, voxel_size)                                                                                                \
     X(Index, clusters_valid)                                                                                           \
     X(Stats, thickness)                                                                                                \
     X(Real, eig_rot_min)                                                                                               \
@@ -76,9 +140,41 @@
     X(Stats, err_lidar)                                                                                                \
     X(Stats, w_lidar)                                                                                                  \
     X(Stats, lidar_var)                                                                                                \
-    X(Real, err_marg_sum)                                                                                              \
     X(Real, cov_rot_trace)                                                                                             \
-    X(Real, cov_trans_trace)
+    X(Real, cov_trans_trace)                                                                                           \
+    X(Index, lidar_fac_before)                                                                                         \
+    X(Index, lidar_fac_after)                                                                                          \
+    X(Index, lidar_fac_removed)                                                                                        \
+    X(Index, lidar_fac_readded)                                                                                        \
+    X(Index, lidar_fac_new)                                                                                            \
+    X(Index, lidar_fac_marg_pruned)                                                                                    \
+    X(Index, lidar_fac_marg_lost)                                                                                      \
+    X(Index, clusters_pruned)                                                                                          \
+    X(Index, clusters_shifted_idle)                                                                                    \
+    X(Index, n_fixed_kf)                                                                                               \
+    X(Index, n_window_kf)                                                                                              \
+    X(Real, fixed_kf_first)                                                                                            \
+    X(Real, fixed_kf_last)                                                                                             \
+    X(Index, n_fixed_vb)                                                                                               \
+    X(Index, marg_n)                                                                                                   \
+    X(Real, marg_info_rot)                                                                                             \
+    X(Real, marg_info_trans)                                                                                           \
+    X(Stats, marg_w)                                                                                                   \
+    X(Index, marg_kf)                                                                                                  \
+    X(Index, rebuild_n)                                                                                                \
+    X(Index, rebuild_n_tracked)                                                                                        \
+    X(Index, rebuild_n_shifted)                                                                                        \
+    X(Real, rebuild_info_ratio)                                                                                        \
+    X(Real, rebuild_info_ratio_tracked)                                                                                \
+    X(Real, rebuild_info_ratio_shifted)                                                                                \
+    X(Stats, rebuild_jac_ratio)                                                                                        \
+    X(Stats, rebuild_jac_ratio_tracked)                                                                                \
+    X(Stats, rebuild_jac_ratio_shifted)                                                                                \
+    X(Stats, rebuild_sigma_ratio)                                                                                      \
+    X(Stats, rebuild_w_ratio)                                                                                          \
+    X(Index, rebuild_n_collapsed)                                                                                      \
+    X(Stats, rebuild_collapsed_pts)                                                                                    \
+    X(Real, rebuild_marg_share)
 
 namespace mapping
 {

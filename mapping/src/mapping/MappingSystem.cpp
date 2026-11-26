@@ -326,11 +326,6 @@ namespace mapping
         const bool isTracking =
             lidarFrontend_.trackScanPointsToClusters(idxKeyframe, states_, featureManager_, config_);
 
-        // guard pruning to avoid premature removal before sliding window fills up
-        if (idxKeyframe >= static_cast<uint32_t>(config_.backend.sliding_window_size))
-            // modifies featureManager_: erases clusters marked as Pruned
-            featureManager_.pruneClusters(idxKeyframe);
-
         if (!isTracking)
         {
             LOG_STAMPED(ERROR, states_.tLastScan_, "lost tracking at keyframe " << idxKeyframe);
@@ -350,6 +345,12 @@ namespace mapping
         // modifies featureManager_: creates/updates/removes LiDAR factors, clears internal factor buffers
         auto [featureFactors, factorsToRemove] =
             featureManager_.createAndUpdateFactors(states_, smoother_.getFactors());
+
+        // guard pruning to avoid premature removal before sliding window fills up.
+        // NOTE: must run after createAndUpdateFactors, which queues the factor removal of Pruned clusters.
+        if (idxKeyframe >= static_cast<uint32_t>(config_.backend.sliding_window_size))
+            // modifies featureManager_: erases clusters marked as Pruned
+            featureManager_.pruneClusters(idxKeyframe);
 
         if (registrationPrior) // add registration prior if it has a value
             featureFactors.add(*registrationPrior);

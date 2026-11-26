@@ -13,20 +13,51 @@ namespace mapping
 {
     namespace benchmarking
     {
+        namespace
+        {
+            /// @brief Run a probe step, log and continue if it throws.
+            /// @return Whether the step finished without a throw.
+            template <typename Fn> bool runStep(const char *step, uint64_t idxKeyframe, Fn &&fn) noexcept
+            {
+                try
+                {
+                    fn();
+                    return true;
+                }
+                catch (const std::exception &e)
+                {
+                    LOG(WARN, "keyframe " << idxKeyframe << ": telemetry " << step << " failed: " << e.what());
+                    return false;
+                }
+                catch (...)
+                {
+                    LOG(WARN, "keyframe " << idxKeyframe << ": telemetry " << step << " failed");
+                    return false;
+                }
+            }
+        } // namespace
+
         KeyframeProbe::KeyframeProbe(MappingSystem &system, uint32_t idxKeyframe) noexcept : system_(system)
         {
             row_.kf = idxKeyframe;
-            try
+            runStep(
+                "snapshot", idxKeyframe, [&]
+                { instrumentation::snapshot(row_, imuPropagated_, system_.states_, system_.smoother_, idxKeyframe); });
+            // nothing between the keyframe creation and the marginalization changes the smoother or the keyframes
+            const bool snapshotOk =
+                runStep("marginalization snapshot", idxKeyframe,
+                        [&]
+                        {
+                            instrumentation::snapshotMarginalization(
+                                row_, marginalization_, system_.states_, system_.smoother_, idxKeyframe,
+                                static_cast<uint32_t>(system_.config_.backend.sliding_window_size));
+                        });
+            if (!snapshotOk)
             {
-                instrumentation::snapshot(row_, imuPropagated_, system_.states_, idxKeyframe);
-            }
-            catch (const std::exception &e)
-            {
-                LOG(WARN, "keyframe " << idxKeyframe << ": telemetry snapshot failed: " << e.what());
-            }
-            catch (...)
-            {
-                LOG(WARN, "keyframe " << idxKeyframe << ": telemetry snapshot failed");
+                // a half-filled snapshot must not reach the collect step: all marginalization columns stay nan
+                marginalization_ = {};
+                row_.marg_kf.reset();
+                marginalizationValid_ = false;
             }
         }
 
@@ -37,6 +68,17 @@ namespace mapping
             const auto &numValidClusters = system_.lidarFrontend_.keyframeNumValidClusters;
             if (const auto it = numValidClusters.find(*row_.kf); it != numValidClusters.end())
                 row_.clusters_valid = it->second;
+            // The smoother copies of the added and removed factors belong to this keyframe only when the update of
+            // this keyframe ran. Lost tracking and an exception in `track()` before the update leave the copies of
+            // the previous keyframe, so the collect step is skipped and the marginalization columns stay nan.
+            // The collect step is also skipped when the snapshot step failed.
+            const auto &lastUpdate = system_.smoother_.getLastUpdateKeyframe();
+            if (!row_.lost_tracking && lastUpdate && *lastUpdate == *row_.kf && marginalizationValid_)
+                runStep("marginalization", *row_.kf,
+                        [&] {
+                            instrumentation::collectMarginalization(row_, marginalization_, system_.featureManager_,
+                                                                    system_.smoother_);
+                        });
             instrumentation::collect(row_, imuPropagated_, states, system_.featureManager_, system_.smoother_);
             try
             {

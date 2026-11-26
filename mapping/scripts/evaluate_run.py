@@ -319,7 +319,7 @@ def plot_overview(df: pd.DataFrame, path: Path, title: str, threshold: float) ->
     ax.set_title("geometry (degeneracy)")
 
     ax = axes[4]
-    for col in ["err_imu_mean", "err_lidar_mean", "err_lidar_max", "w_lidar_mean", "w_lidar_median", "err_marg_sum",
+    for col in ["err_imu_mean", "err_lidar_mean", "err_lidar_max", "w_lidar_mean", "w_lidar_median",
                 "cov_rot_trace", "cov_trans_trace"]:
         ax.plot(t, df[col], label=col)
     ax.set_yscale("log")

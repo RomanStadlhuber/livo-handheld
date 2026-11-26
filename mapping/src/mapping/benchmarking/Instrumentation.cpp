@@ -4,14 +4,20 @@
 #include <mapping/factors/PointToPlaneFactor.hpp>
 #include <mapping/logging.hpp>
 
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/linear/JacobianFactor.h>
+#include <gtsam/linear/NoiseModel.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
-#include <gtsam/nonlinear/LinearContainerFactor.h>
 
 #include <Eigen/Eigenvalues>
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <iterator>
+#include <limits>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -41,6 +47,75 @@ namespace mapping
                     {
                         LOG(WARN, "keyframe " << idxKeyframe << ": " << group << " telemetry failed");
                     }
+                }
+
+                using Matrix6 = Eigen::Matrix<double, 6, 6>;
+
+                /// @brief Smallest eigenvalue of the rotation and translation blocks of a pose information matrix.
+                void setMinEigenvalues(const Matrix6 &information, double &rot, double &trans)
+                {
+                    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigRot(information.topLeftCorner<3, 3>(),
+                                                                                Eigen::EigenvaluesOnly),
+                        eigTrans(information.bottomRightCorner<3, 3>(), Eigen::EigenvaluesOnly);
+                    rot = eigRot.eigenvalues().minCoeff();
+                    trans = eigTrans.eigenvalues().minCoeff();
+                }
+
+                /// @brief A rebuilt cluster with `||J'|| / ||J||` below this value counts as collapsed.
+                constexpr double kCollapsedJacRatio = 1e-6;
+
+                std::size_t countLidarFactors(const gtsam::NonlinearFactorGraph &factors)
+                {
+                    std::size_t n = 0;
+                    for (const gtsam::NonlinearFactor::shared_ptr &factor : factors)
+                        if (boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
+                            n++;
+                    return n;
+                }
+
+                /// @brief For a given set of keyframe indices, returns the keys `X(k)`, `V(k)` and `B(k)` that make up
+                /// the `gtsam::NavState` of keyframes `k`.
+                gtsam::KeySet navStateKeys(const std::vector<uint32_t> &keyframes)
+                {
+                    gtsam::KeySet keys;
+                    for (const uint32_t k : keyframes)
+                        keys.insert({X(k), V(k), B(k)});
+                    return keys;
+                }
+
+                /// @brief Indicates whether a given `gtsam::NonlinearFactor` connects to any parameter key in `keys`.
+                bool touchesAny(const gtsam::NonlinearFactor &factor, const gtsam::KeySet &keys)
+                {
+                    for (const gtsam::Key key : factor.keys())
+                        if (keys.count(key))
+                            return true;
+                    return false;
+                }
+
+                /// @brief Rows of a `PointToPlaneFactor` at `values`. `linearize` whitens the Jacobian as
+                /// `A = sqrt(w) / sigma * J`, so `J` is recovered from `A` with the noise sigma and the kernel weight.
+                /// Empty if the noise model is not Gaussian or the kernel weight is 0.
+                std::optional<ClusterRows> clusterRows(const PointToPlaneFactor &factor, const gtsam::Values &values)
+                {
+                    gtsam::SharedNoiseModel noise = factor.noiseModel();
+                    if (const auto robust = boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(noise))
+                        noise = robust->noise();
+                    const auto gaussian = boost::dynamic_pointer_cast<gtsam::noiseModel::Gaussian>(noise);
+                    if (!gaussian)
+                        return std::nullopt;
+                    ClusterRows rows;
+                    rows.sigma = gaussian->sigmas()(0);
+                    rows.weight = factor.evaluateErrorDiagnostic(values).weight;
+                    if (!(rows.sigma > 0.0) || !(rows.weight > 0.0))
+                        return std::nullopt;
+                    const auto jacobian = boost::dynamic_pointer_cast<gtsam::JacobianFactor>(factor.linearize(values));
+                    if (!jacobian)
+                        return std::nullopt;
+                    const double unwhiten = rows.sigma / std::sqrt(rows.weight);
+                    for (auto it = jacobian->begin(); it != jacobian->end(); ++it)
+                        if (gtsam::Symbol(*it).chr() == 'x')
+                            rows.jacobians[*it] = jacobian->getA(it) * unwhiten;
+                    return rows;
                 }
 
                 void collectImu(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states)
@@ -83,18 +158,14 @@ namespace mapping
                         information += J.transpose() * J / featureManager.factorVariance(clusterId);
                     }
                     row.thickness = makeStats(std::move(thickness));
-                    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigRot(information.topLeftCorner<3, 3>(),
-                                                                                Eigen::EigenvaluesOnly),
-                        eigTrans(information.bottomRightCorner<3, 3>(), Eigen::EigenvaluesOnly);
-                    row.eig_rot_min = eigRot.eigenvalues().minCoeff();
-                    row.eig_trans_min = eigTrans.eigenvalues().minCoeff();
+                    setMinEigenvalues(information, row.eig_rot_min, row.eig_trans_min);
                 }
 
-                void collectBackend(KeyframeTelemetry &row, const States &states, const Smoother &smoother)
+                void collectBackend(KeyframeTelemetry &row, const States &states, const FeatureManager &featureManager,
+                                    const Smoother &smoother)
                 {
                     const gtsam::Values &estimate = states.getSmootherEstimate();
                     std::vector<double> errImu, errLidar, wLidar, varLidar;
-                    double errMargSum = 0.0;
                     std::size_t numFailed = 0;
                     for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getFactors())
                     {
@@ -117,8 +188,6 @@ namespace mapping
                                         boost::dynamic_pointer_cast<gtsam::noiseModel::Gaussian>(noise))
                                     varLidar.push_back(std::pow(gaussian->sigmas()(0), 2));
                             }
-                            else if (boost::dynamic_pointer_cast<gtsam::LinearContainerFactor>(factor))
-                                errMargSum += factor->error(estimate);
                         }
                         catch (const std::exception &)
                         {
@@ -131,16 +200,53 @@ namespace mapping
                     row.err_lidar = makeStats(std::move(errLidar));
                     row.w_lidar = makeStats(std::move(wLidar));
                     row.lidar_var = makeStats(std::move(varLidar));
-                    row.err_marg_sum = errMargSum;
+                    row.lidar_fac_after = countLidarFactors(smoother.getFactors());
+                    std::size_t numFixed = 0, numWindow = 0, numFixedVb = 0;
+                    double fixedFirst = std::numeric_limits<double>::quiet_NaN();
+                    double fixedLast = fixedFirst;
+                    const gtsam::KeySet &fixedKeys = smoother.getFixedVariables();
+                    for (const auto &[k, _] : states.getKeyframeImuPoses())
+                    {
+                        numWindow++;
+                        if (fixedKeys.exists(X(k)))
+                        {
+                            numFixed++;
+                            if (std::isnan(fixedFirst))
+                                fixedFirst = static_cast<double>(k); // map is ordered by k
+                            fixedLast = static_cast<double>(k);
+                        }
+                        if (fixedKeys.exists(V(k)) || fixedKeys.exists(B(k)))
+                            numFixedVb++;
+                    }
+                    row.n_fixed_kf = numFixed;
+                    row.n_window_kf = numWindow;
+                    row.fixed_kf_first = fixedFirst;
+                    row.fixed_kf_last = fixedLast;
+                    row.n_fixed_vb = numFixedVb;
                     const gtsam::Matrix cov = smoother.marginalCovariance(X(static_cast<uint32_t>(*row.kf)));
                     row.cov_rot_trace = cov.topLeftCorner<3, 3>().trace();
                     row.cov_trans_trace = cov.bottomRightCorner<3, 3>().trace();
+
+                    // stats of removeKeyframeFromClusters / createAndUpdateFactors for this keyframe
+                    const FeatureManager::KeyframeFactorStats &stats = featureManager.lastKeyframeFactorStats();
+                    row.lidar_fac_removed = stats.numFactorsRemoved;
+                    row.lidar_fac_readded = stats.numFactorsUpdated;
+                    row.lidar_fac_new = stats.numFactorsAdded;
+                    row.clusters_pruned = stats.numPruned;
+                    row.clusters_shifted_idle = stats.numShiftedIdle;
+                    if (!row.marg_kf)
+                        return; // no marginalization in this update, the marginalization columns stay nan
+                    row.marg_n = stats.numMargFactors;
+                    row.marg_w = makeStats(stats.margWeights);
+                    if (stats.numMargFactors > 0)
+                        setMinEigenvalues(stats.margInformation, row.marg_info_rot, row.marg_info_trans);
                 }
             } // namespace
 
             void snapshot(KeyframeTelemetry &row, gtsam::Pose3 &imuPropagated, const States &states,
-                          uint32_t idxKeyframe)
+                          const Smoother &smoother, uint32_t idxKeyframe)
             {
+                row.lidar_fac_before = countLidarFactors(smoother.getFactors());
                 row.kf = idxKeyframe;
                 const auto &timestamps = states.getKeyframeTimestamps();
                 const auto &imuPoses = states.getKeyframeImuPoses();
@@ -158,7 +264,184 @@ namespace mapping
                     row.trigger_dt = row.t - timestamps.at(itPrev->first);
                 }
                 row.pts_submap = states.getKeyframeSubmaps().at(idxKeyframe)->points_.size();
-                row.voxel_size = states.getVoxelSize();
+            }
+
+            /// @brief Records the LiDAR factors on the marginalized keyframes and the estimate before the update.
+            /// @details Runs in the `KeyframeProbe` constructor, before the update changes the smoother.
+            /// It finds the `PointToPlaneFactor` LiDAR clusters that connect to the keyframes that the update
+            /// marginalizes, and records what `collectMarginalization` needs after the update:
+            /// 1. the marginalized keyframes: `X(j)` in the estimate and `j + slidingWindowSize < idxKeyframe`
+            /// 2. `marg_kf`: the first (oldest) marginalized keyframe, `front()` of the list
+            /// 3. the estimate before the update, plus the IMU-propagated pose of the new keyframe
+            /// 4. per `PointToPlaneFactor` that touches a marginalized `NavState`: its index and cluster, and its rows
+            ///    in the `ClusterRowsMap`, the baseline of the `rebuild_*` columns
+            ///
+            /// The factor search is more general than needed. A `PointToPlaneFactor` only connects to the poses
+            /// `X(k)`, but the search checks `X`, `V` and `B`. It stays general, so it also works for visual factors
+            /// later. The function does nothing else when no keyframe is marginalized.
+            void snapshotMarginalization(KeyframeTelemetry &row, MarginalizationSnapshot &snapshot,
+                                         const States &states, const Smoother &smoother, uint32_t idxKeyframe,
+                                         uint32_t slidingWindowSize)
+            {
+                snapshot = {};
+                // 1. find the marginalized keyframes, ascending
+                const gtsam::Values &estimate = states.getSmootherEstimate();
+                for (const auto &[k, _] : states.getKeyframeImuPoses())
+                    if (k + slidingWindowSize < idxKeyframe && estimate.exists(X(k)))
+                        snapshot.keyframes.push_back(k);
+                if (snapshot.keyframes.empty())
+                    return;
+                // 2. the first keyframe is the oldest one, normally the only one
+                row.marg_kf = snapshot.keyframes.front();
+                // all keys that a factor can connect to, `X`, `V` and `B` of each marginalized keyframe
+                const gtsam::KeySet margKeys = navStateKeys(snapshot.keyframes);
+                // 3. keep the estimate before the update, the new keyframe is not in it yet
+                snapshot.values = estimate;
+                if (!snapshot.values.exists(X(idxKeyframe)))
+                    snapshot.values.insert(X(idxKeyframe), *states.getKeyframeImuPoses().at(idxKeyframe));
+                // 4. go over all smoother factors that connect to a marginalized `NavState`, at least in part
+                const gtsam::NonlinearFactorGraph &smootherFactors = smoother.getFactors();
+                for (gtsam::FactorIndex i = 0; i < smootherFactors.size(); i++)
+                {
+                    const gtsam::NonlinearFactor::shared_ptr &factor = smootherFactors[i];
+                    if (!factor || !touchesAny(*factor, margKeys))
+                        continue;
+                    // a LiDAR cluster: record it and its rows before the rebuild
+                    if (const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor))
+                    {
+                        snapshot.factors.push_back({i, ptp->clusterId_});
+                        if (std::optional<ClusterRows> rows = clusterRows(*ptp, snapshot.values))
+                            snapshot.rebuildBaseline[ptp->clusterId_] = std::move(*rows);
+                    }
+                }
+            }
+
+            /// @brief Computes `lidar_fac_marg_pruned`, `lidar_fac_marg_lost` and the `rebuild_*` columns.
+            /// @details Runs in the `KeyframeProbe` destructor, after the smoother update. It reads the state from
+            /// before the update from `snapshot`, and the factors that the update added and removed from `smoother`.
+            /// 1. factor accounting: a factor on a marginalized keyframe that the update removes marks its cluster as
+            ///    rebuilt. Any other such factor goes into the iSAM2 marginalization, and counts as `pruned` (the
+            ///    cluster is gone or `Pruned`) or `lost` (the cluster is alive, but has no factor afterwards)
+            /// 2. evaluation values: the estimate before the update from `snapshot`, for the old and the rebuilt rows
+            /// 3. rebuild comparison per cluster: the rows of the rebuilt factor against the rows of the removed one,
+            ///    on their common pose keys, sorted into total, `Tracked` and shifted (`Idle`) groups
+            /// 4. reduction: the per-cluster values become the `rebuild_*` columns
+            ///
+            /// Both columns are 0 when no keyframe is marginalized, and the `rebuild_*` columns stay unset.
+            void collectMarginalization(KeyframeTelemetry &row, const MarginalizationSnapshot &snapshot,
+                                        const FeatureManager &featureManager, const Smoother &smoother)
+            {
+                row.lidar_fac_marg_pruned = 0;
+                row.lidar_fac_marg_lost = 0;
+                if (snapshot.keyframes.empty())
+                    return;
+                const gtsam::KeySet margKeys = navStateKeys(snapshot.keyframes);
+                const gtsam::FactorIndices &factorsToRemove = smoother.getLastFactorsToRemove();
+                const std::set<gtsam::FactorIndex> removed(factorsToRemove.begin(), factorsToRemove.end());
+                const ClusterRowsMap &rebuildBaseline = snapshot.rebuildBaseline;
+                // 2. evaluation values: the estimate before the update, for the old and the rebuilt rows
+                const gtsam::Values &values = snapshot.values;
+                // 1. factor accounting, clusters whose removed factor touched a marginalized key: their rebuilt factor
+                // (without the marginalized keyframes) carries the information of the other points of the cluster
+                std::set<uint32_t> rebuiltClusters;
+                for (const MargFactor &factor : snapshot.factors)
+                {
+                    if (removed.count(factor.index))
+                    {
+                        rebuiltClusters.insert(factor.clusterId);
+                        continue;
+                    }
+                    const auto itState = featureManager.clusterStates_.find(factor.clusterId);
+                    if (itState == featureManager.clusterStates_.end() || itState->second == ClusterState::Pruned)
+                        (*row.lidar_fac_marg_pruned)++;
+                    else
+                        (*row.lidar_fac_marg_lost)++;
+                }
+                // 3. rebuild comparison per cluster: rows of each rebuilt factor vs. its removed factor, on their
+                // common pose keys: total, `Tracked` (plane refit at this keyframe) and shifted (`Idle`
+                // after `createAndUpdateFactors`, shifted without a refit); any other state counts in the total only
+                struct Group
+                {
+                    double massBefore = 0.0, massAfter = 0.0;
+                    std::vector<double> jacRatio;
+                };
+                Group total, tracked, shifted;
+                std::vector<double> sigmaRatio, weightRatio, collapsedPts;
+                double margMass = 0.0, margBlanketMass = 0.0;
+                for (const gtsam::NonlinearFactor::shared_ptr &factor : smoother.getLastNewFactors())
+                {
+                    if (!factor)
+                        continue;
+                    const auto ptp = boost::dynamic_pointer_cast<PointToPlaneFactor>(factor);
+                    if (!ptp || !rebuiltClusters.count(ptp->clusterId_))
+                        continue;
+                    const auto itBefore = rebuildBaseline.find(ptp->clusterId_);
+                    if (itBefore == rebuildBaseline.end())
+                        continue;
+                    const std::optional<ClusterRows> after = clusterRows(*ptp, values);
+                    if (!after)
+                        continue;
+                    const ClusterRows &before = itBefore->second;
+                    double jBefore = 0.0, jAfter = 0.0; // squared norms on the common pose keys
+                    double jMarg = 0.0;                 // squared norm on the marginalized pose keys
+                    for (const auto &[key, J] : before.jacobians)
+                    {
+                        const auto itAfter = after->jacobians.find(key);
+                        if (margKeys.count(key))
+                        {
+                            jMarg += J.squaredNorm();
+                            continue;
+                        }
+                        if (itAfter == after->jacobians.end())
+                            continue;
+                        jBefore += J.squaredNorm();
+                        jAfter += itAfter->second.squaredNorm();
+                    }
+                    if (!(jBefore > 0.0))
+                        continue;
+                    const double infoBefore = before.weight / (before.sigma * before.sigma);
+                    const double massBefore = infoBefore * jBefore;
+                    const double massAfter = after->weight / (after->sigma * after->sigma) * jAfter;
+                    const double jacRatio = std::sqrt(jAfter / jBefore);
+                    margMass += infoBefore * jMarg;
+                    margBlanketMass += infoBefore * (jMarg + jBefore);
+                    const auto addTo = [&](Group &group)
+                    {
+                        group.massBefore += massBefore;
+                        group.massAfter += massAfter;
+                        group.jacRatio.push_back(jacRatio);
+                    };
+                    addTo(total);
+                    if (const auto itState = featureManager.clusterStates_.find(ptp->clusterId_);
+                        itState != featureManager.clusterStates_.end())
+                    {
+                        if (itState->second == ClusterState::Tracked)
+                            addTo(tracked);
+                        else if (itState->second == ClusterState::Idle)
+                            addTo(shifted);
+                    }
+                    if (jacRatio < kCollapsedJacRatio)
+                        collapsedPts.push_back(static_cast<double>(after->jacobians.size()));
+                    sigmaRatio.push_back(before.sigma / after->sigma);
+                    weightRatio.push_back(std::sqrt(after->weight / before.weight));
+                }
+                // 4. reduction into the columns
+                const auto infoRatio = [](const Group &group)
+                { return group.massBefore > 0.0 ? group.massAfter / group.massBefore : field::NaN; };
+                row.rebuild_n = total.jacRatio.size();
+                row.rebuild_n_tracked = tracked.jacRatio.size();
+                row.rebuild_n_shifted = shifted.jacRatio.size();
+                row.rebuild_info_ratio = infoRatio(total);
+                row.rebuild_info_ratio_tracked = infoRatio(tracked);
+                row.rebuild_info_ratio_shifted = infoRatio(shifted);
+                row.rebuild_jac_ratio = makeStats(std::move(total.jacRatio));
+                row.rebuild_jac_ratio_tracked = makeStats(std::move(tracked.jacRatio));
+                row.rebuild_jac_ratio_shifted = makeStats(std::move(shifted.jacRatio));
+                row.rebuild_sigma_ratio = makeStats(std::move(sigmaRatio));
+                row.rebuild_w_ratio = makeStats(std::move(weightRatio));
+                row.rebuild_n_collapsed = collapsedPts.size();
+                row.rebuild_collapsed_pts = makeStats(std::move(collapsedPts));
+                row.rebuild_marg_share = margBlanketMass > 0.0 ? margMass / margBlanketMass : field::NaN;
             }
 
             void collect(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states,
@@ -171,7 +454,7 @@ namespace mapping
                 if (row.lost_tracking)
                     return; // no smoother update for this keyframe, IMU and backend columns stay nan
                 collectGroup("IMU", *row.kf, [&] { collectImu(row, imuPropagated, states); });
-                collectGroup("backend", *row.kf, [&] { collectBackend(row, states, smoother); });
+                collectGroup("backend", *row.kf, [&] { collectBackend(row, states, featureManager, smoother); });
             }
         } // namespace instrumentation
     } // namespace benchmarking

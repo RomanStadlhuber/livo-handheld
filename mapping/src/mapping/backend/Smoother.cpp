@@ -25,6 +25,11 @@ namespace mapping
         initialValues_.clear();
         initialSmootherIndices_.clear();
         bootstrapped_ = false;
+#ifdef MAPPING_BENCHMARKING
+        lastNewFactors_ = {};
+        lastFactorsToRemove_.clear();
+        lastUpdateKeyframe_.reset();
+#endif
         temporalCalibrationEnabled_ = config.extrinsics.temporal_calibration_enabled;
         extrinsicCalibrationEnabled_ = config.extrinsics.extrinsic_calibration_enabled;
 
@@ -79,6 +84,11 @@ namespace mapping
                                           gtsam::NonlinearFactorGraph newAndUpdatedFactors,
                                           const gtsam::FactorIndices &factorsToRemove)
     {
+#ifdef MAPPING_BENCHMARKING
+        lastUpdateKeyframe_ = idxKeyframe;
+        lastNewFactors_ = newAndUpdatedFactors;
+        lastFactorsToRemove_ = factorsToRemove;
+#endif
         // need to manually add preintegraion factor
         newAndUpdatedFactors.add(preintegrationFactor);
         // variables that join the graph with the new keyframe

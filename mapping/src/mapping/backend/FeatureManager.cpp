@@ -57,6 +57,10 @@ namespace mapping
         factorsToRemove_.clear();
         dtKey_ = boost::none;
         extrinsicKey_ = boost::none;
+#ifdef MAPPING_BENCHMARKING
+        lastKeyframeFactorStats_ = {};
+        pendingKeyframeFactorStats_ = {};
+#endif
     }
 
     void FeatureManager::setCalibrationKeys(boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey)
@@ -174,6 +178,13 @@ namespace mapping
                                 factor->createMarginalizationFactor(markovBlanket, X(idxKeyframe));
                             newSmootherFactors_.add(marginalizationFactor);
                             numMarginalized++;
+#ifdef MAPPING_BENCHMARKING
+                            pendingKeyframeFactorStats_.numMargFactors++;
+                            pendingKeyframeFactorStats_.margInformation +=
+                                marginalizationFactor->factor()->information();
+                            pendingKeyframeFactorStats_.margWeights.push_back(
+                                factor->evaluateErrorDiagnostic(markovBlanket).weight);
+#endif
                         }
                     }
                 }
@@ -183,12 +194,21 @@ namespace mapping
                 {
                     // NOTE: Do NOT call factor->remove() here, since the smoother won't re-key factors
                     clusterStates_[clusterId] = ClusterState::Pruned;
+#ifdef MAPPING_BENCHMARKING
+                    pendingKeyframeFactorStats_.numPruned++;
+#endif
                 }
-                else if (clusterStates_[clusterId] == ClusterState::Idle)
+                else if (clusterStates_[clusterId] == ClusterState::Idle ||
+                         clusterStates_[clusterId] == ClusterState::Tracked)
                 {
                     // shift cluster associations, means that the entire factor needs to be replaced
-                    // to reflect the removed keyframe association
+                    // to reflect the removed keyframe association. A Tracked cluster is shifted as well: a failed
+                    // track would otherwise set it Idle and leave the factor on the marginalized keyframe alive.
+                    // A successful track sets it back to Tracked, which rebuilds the factor too.
                     clusterStates_[clusterId] = ClusterState::ShiftedIdle;
+#ifdef MAPPING_BENCHMARKING
+                    pendingKeyframeFactorStats_.numShiftedIdle++;
+#endif
                 }
             }
         }
@@ -474,6 +494,12 @@ namespace mapping
         }
         LOG(INFO, "adding " << numFactorsAdded << " LiDAR factors, updating " << numFactorsUpdated << " removing "
                             << numFactorsRemoved);
+#ifdef MAPPING_BENCHMARKING
+        pendingKeyframeFactorStats_.numFactorsAdded = numFactorsAdded;
+        pendingKeyframeFactorStats_.numFactorsUpdated = numFactorsUpdated;
+        pendingKeyframeFactorStats_.numFactorsRemoved = numFactorsRemoved;
+        lastKeyframeFactorStats_ = std::exchange(pendingKeyframeFactorStats_, {});
+#endif
 
         // return values of the fields while simultaneously clearing them.
         return {std::exchange(newSmootherFactors_, {}), std::exchange(factorsToRemove_, {})};

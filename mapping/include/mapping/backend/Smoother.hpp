@@ -19,6 +19,7 @@
 #include <tbb/task_arena.h>
 
 #include <iostream>
+#include <optional>
 
 namespace mapping
 {
@@ -73,6 +74,20 @@ namespace mapping
 #ifdef MAPPING_BENCHMARKING
         /// @brief Marginal covariance of a variable in the current graph (benchmark build only, for telemetry).
         gtsam::Matrix marginalCovariance(const gtsam::Key key) const { return smoother_.marginalCovariance(key); }
+
+        /// @brief A relay to `ISAM2::getFixedVariables()`: the keys that iSAM2 never relinearizes again.
+        const gtsam::KeySet &getFixedVariables() const { return smoother_.getISAM2().getFixedVariables(); }
+
+        /// @brief The LiDAR factors that the last `updateAndOptimizeGraph` call received (benchmark build only).
+        /// @details A copy of the `newAndUpdatedFactors` argument, before the IMU factor and the priors join it.
+        const gtsam::NonlinearFactorGraph &getLastNewFactors() const { return lastNewFactors_; }
+
+        /// @brief The factor indices that the last `updateAndOptimizeGraph` call had to remove (benchmark build only).
+        const gtsam::FactorIndices &getLastFactorsToRemove() const { return lastFactorsToRemove_; }
+
+        /// @brief The keyframe of the last `updateAndOptimizeGraph` call (benchmark build only).
+        /// @details Empty before the first call and after `reset`. Tells if the copies above belong to a keyframe.
+        const std::optional<uint32_t> &getLastUpdateKeyframe() const { return lastUpdateKeyframe_; }
 #endif
 
     private:
@@ -94,6 +109,13 @@ namespace mapping
 
         // TBB arena for all GTSAM parallel work; normal priority, sized to complement the BA arena
         std::unique_ptr<tbb::task_arena> frontendArena_;
+
+#ifdef MAPPING_BENCHMARKING
+        /// @brief Arguments of the last `updateAndOptimizeGraph` call, for the telemetry.
+        gtsam::NonlinearFactorGraph lastNewFactors_;
+        gtsam::FactorIndices lastFactorsToRemove_;
+        std::optional<uint32_t> lastUpdateKeyframe_;
+#endif
     };
 } // namespace mapping
 
