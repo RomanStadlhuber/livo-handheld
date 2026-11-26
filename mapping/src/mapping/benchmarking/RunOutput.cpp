@@ -145,15 +145,11 @@ namespace mapping
             appendError(error, "failed to write '" + (root / "telemetry.csv").string() + "'");
             ok = false;
         }
-        for (const auto &[name, write] :
-             {std::pair<const char *, bool (benchmarking::TelemetryRecorder::*)(const std::string &) const>{
-                  "anchors.csv", &benchmarking::TelemetryRecorder::writeAnchorsCsv},
-              {"clusters.csv", &benchmarking::TelemetryRecorder::writeClustersCsv}})
-            if (!(telemetry.*write)((root / name).string()))
-            {
-                appendError(error, "failed to write '" + (root / name).string() + "'");
-                ok = false;
-            }
+        if (!telemetry.writeClustersCsv((root / "clusters.csv").string()))
+        {
+            appendError(error, "failed to write '" + (root / "clusters.csv").string() + "'");
+            ok = false;
+        }
         if (!writeConfigYaml(root / "config.yaml", config))
         {
             appendError(error, "failed to write '" + (root / "config.yaml").string() + "'");

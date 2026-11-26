@@ -57,13 +57,6 @@ namespace mapping
             }
         } // namespace
 
-        bool TelemetryRecorder::writeAnchorsCsv(const std::string &path) const
-        {
-            return writeDetailCsv(
-                path, rows_, appendAnchorsCsvHeader,
-                [](const KeyframeTelemetry &kf) -> const auto & { return kf.anchors; }, appendAnchorsCsvRow);
-        }
-
         bool TelemetryRecorder::writeClustersCsv(const std::string &path) const
         {
             return writeDetailCsv(

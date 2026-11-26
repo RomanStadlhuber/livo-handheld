@@ -45,8 +45,6 @@ namespace mapping
     void FeatureManager::reset()
     {
         clusters_.clear();
-        clusterAnchors_.clear();
-        clusterAnchorKeyframes_.clear();
         clusterPlaneThicknessHistory_.clear();
         clusterPlaneThickness_.clear();
         clusterSigmas_.clear();
@@ -133,8 +131,6 @@ namespace mapping
     void FeatureManager::eraseCluster(const ClusterId &clusterId)
     {
         clusters_.erase(clusterId);
-        clusterAnchors_.erase(clusterId);
-        clusterAnchorKeyframes_.erase(clusterId);
         clusterStates_.erase(clusterId);
         clusterCenters_.erase(clusterId);
         clusterNormals_.erase(clusterId);
@@ -208,8 +204,7 @@ namespace mapping
         return associatedClusters;
     }
 
-    void FeatureManager::removeKeyframeFromClusters(const States &states, const uint32_t &idxKeyframe,
-                                                    const gtsam::Values &markovBlanket,
+    void FeatureManager::removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket,
                                                     const gtsam::NonlinearFactorGraph &currentSmootherFactors)
     {
         std::size_t numMarginalized = 0;
@@ -218,21 +213,8 @@ namespace mapping
             auto itPoint = clusterPoints.find(idxKeyframe);
             if (itPoint != clusterPoints.end())
             {
-                // --- anchor: keep the point as a constant world point (no unary factor) ---
-                if (anchorMarginalization_)
-                {
-                    std::vector<Eigen::Vector3d> &anchors = clusterAnchors_[clusterId];
-                    std::vector<uint32_t> &anchorKeyframes = clusterAnchorKeyframes_[clusterId];
-                    anchors.push_back(states.getKeyframeSubmaps().at(idxKeyframe)->points_[itPoint->second]);
-                    anchorKeyframes.push_back(idxKeyframe);
-                    if (maxAnchors_ > 0 && anchors.size() > maxAnchors_) // drop the oldest anchor
-                    {
-                        anchors.erase(anchors.begin());
-                        anchorKeyframes.erase(anchorKeyframes.begin());
-                    }
-                }
                 // --- marginalization ---
-                if (!anchorMarginalization_ && hasClusterFactorIdx(clusterId))
+                if (hasClusterFactorIdx(clusterId))
                 {
                     const auto &factorPtr = currentSmootherFactors[clusterFactorIdxMap_.at(clusterId)];
                     if (factorPtr)
@@ -311,9 +293,6 @@ namespace mapping
         {
             clusterPoints.push_back(states.getKeyframeSubmaps().at(idxSubmap)->points_[idxPoint]);
         }
-        // anchors of marginalized keyframes count in the plane fit
-        const auto &anchors = anchorsOf(clusterId);
-        clusterPoints.insert(clusterPoints.end(), anchors.begin(), anchors.end());
         const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] =
             planeFitCovariance(clusterPoints, config.lidar_frontend.planarity_check.planarity,
                                config.lidar_frontend.planarity_check.linearity);
@@ -448,7 +427,7 @@ namespace mapping
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto factor = boost::make_shared<PointToPlaneFactor>(
                         keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
-                        clusterId, dtKey_, extrinsicKey_, keyframeTwists, anchorsOf(clusterId));
+                        clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                     newSmootherFactors_.add(factor);
                     numFactorsAdded++;
                 }
@@ -473,7 +452,7 @@ namespace mapping
                     auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                     const auto newFactor = boost::make_shared<PointToPlaneFactor>(
                         keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
-                        clusterId, dtKey_, extrinsicKey_, keyframeTwists, anchorsOf(clusterId));
+                        clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                     newSmootherFactors_.add(newFactor);
                     numFactorsUpdated++;
                 }
@@ -531,7 +510,7 @@ namespace mapping
                 auto robustNoise = gtsam::noiseModel::Robust::Create(kernel_, noiseModel);
                 const auto newFactor = boost::make_shared<PointToPlaneFactor>(
                     keys, states.getImuToLidarExtrinsic(), lidar_points, clusterNormal, clusterCenter, robustNoise,
-                    clusterId, dtKey_, extrinsicKey_, keyframeTwists, anchorsOf(clusterId));
+                    clusterId, dtKey_, extrinsicKey_, keyframeTwists);
                 newSmootherFactors_.add(newFactor);
                 numFactorsUpdated++;
                 clusterStates_[clusterId] = ClusterState::Idle; // after shifting, cluster goes back to idle state

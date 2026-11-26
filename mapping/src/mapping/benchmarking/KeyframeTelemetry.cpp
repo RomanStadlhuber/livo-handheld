@@ -94,24 +94,6 @@ namespace mapping
             out.back() = '\n'; // replace the trailing separator
         }
 
-        void appendAnchorsCsvHeader(std::string &out)
-        {
-            out += "kf,cluster_id,anchor_age,dist_live_plane,dist_used_plane,n_live,n_anchors,sigma\n";
-        }
-
-        void appendAnchorsCsvRow(std::string &out, const AnchorRow &row)
-        {
-            ((((out += std::to_string(row.kf)) += ',') += std::to_string(row.clusterId)) += ',') +=
-                std::to_string(row.age);
-            out += ',';
-            appendReal(out, row.distLivePlane);
-            out += ',';
-            appendReal(out, row.distUsedPlane);
-            ((((out += ',') += std::to_string(row.nLive)) += ',') += std::to_string(row.nAnchors)) += ',';
-            appendReal(out, row.sigma);
-            out += '\n';
-        }
-
         void appendClustersCsvHeader(std::string &out) { out += "kf,cluster_id,keyframes,info,weight,touches_marg\n"; }
 
         void appendClustersCsvRow(std::string &out, const ClusterSpanRow &row)

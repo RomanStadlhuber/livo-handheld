@@ -54,11 +54,7 @@ namespace mapping
         /// @param idxKeyframe Index of the keyframe to be marginalized.
         /// @param markovBlanket Smoother estimate of the poses `X(idxKeyframe..)` and calibration variables.
         /// @param currentSmootherFactors The current factor graph of the smoother.
-        /// With `anchorMarginalization_` the point of the keyframe stays in the cluster as a constant world point
-        /// ("anchor", `clusterAnchors_`) and no unary factor is created.
-        /// @param states Used to read the world position of the marginalized point (anchor).
-        void removeKeyframeFromClusters(const States &states, const uint32_t &idxKeyframe,
-                                        const gtsam::Values &markovBlanket,
+        void removeKeyframeFromClusters(const uint32_t &idxKeyframe, const gtsam::Values &markovBlanket,
                                         const gtsam::NonlinearFactorGraph &currentSmootherFactors);
         /// @brief Add a new point to a cluster when it is successfully tracked against it.
         void addPointToCluster(const ClusterId &clusterId, const SubmapIdxPointIdx &pointIdx,
@@ -119,18 +115,6 @@ namespace mapping
          */
 
         std::map<ClusterId, std::map<uint32_t, std::size_t>> clusters_;
-        /// @brief Constant world points of marginalized keyframes per cluster ("anchors"), only filled when
-        /// `anchorMarginalization_` is set. They enter the plane fit and the factor, but not the KNN query,
-        /// the gating test or the thickness history.
-        std::map<ClusterId, std::vector<Eigen::Vector3d>> clusterAnchors_;
-        /// @brief Keyframe that created each anchor, same order and size as `clusterAnchors_`.
-        std::map<ClusterId, std::vector<uint32_t>> clusterAnchorKeyframes_;
-        /// @brief Experimental: keep marginalized points as anchors instead of a unary factor
-        /// (`backend.marginalization_anchor`).
-        bool anchorMarginalization_{false};
-        /// @brief Maximum number of anchors per cluster (`lidar_frontend.clustering.max_points`), the oldest anchor is
-        /// dropped first. 0: no cap.
-        std::size_t maxAnchors_{0};
         /// @brief The thickness of each added cluster track, mean squared point-to-plane distance [m^2]
         std::map<ClusterId, std::vector<double>> clusterPlaneThicknessHistory_;
         /// @brief Mean of the squared thickness history [m^4], used for validation and modelling noise characteristics.
@@ -154,13 +138,6 @@ namespace mapping
     public:
         /// @brief Build the robust kernel of the LiDAR factors from the config.
         void setLidarKernel(const LidarKernelConfig &config);
-        /// @brief Anchors of a cluster, empty if there are none.
-        const std::vector<Eigen::Vector3d> &anchorsOf(const ClusterId &clusterId) const
-        {
-            static const std::vector<Eigen::Vector3d> none;
-            const auto it = clusterAnchors_.find(clusterId);
-            return it == clusterAnchors_.end() ? none : it->second;
-        }
         /// @brief Set optional calibration keys for temporal and extrinsic calibration.
         void setCalibrationKeys(boost::optional<gtsam::Key> dtKey, boost::optional<gtsam::Key> extrinsicKey);
         // Sensor + pose noise floor added to plane-fit variance.

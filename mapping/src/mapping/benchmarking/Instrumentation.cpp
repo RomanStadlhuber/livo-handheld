@@ -2,7 +2,6 @@
 /// @ingroup benchmarking
 #include <mapping/benchmarking/Instrumentation.hpp>
 #include <mapping/factors/PointToPlaneFactor.hpp>
-#include <mapping/helpers.hpp>
 #include <mapping/logging.hpp>
 
 #include <gtsam/inference/Symbol.h>
@@ -117,61 +116,6 @@ namespace mapping
                         if (gtsam::Symbol(*it).chr() == 'x')
                             rows.jacobians[*it] = jacobian->getA(it) * unwhiten;
                     return rows;
-                }
-
-                /// @brief Anchor columns and the rows of `anchors.csv`, see `collect`.
-                void collectAnchors(KeyframeTelemetry &row, const States &states, const FeatureManager &featureManager)
-                {
-                    const uint32_t kf = static_cast<uint32_t>(*row.kf);
-                    const auto &submaps = states.getKeyframeSubmaps();
-                    std::vector<double> distLive, normalAngle;
-                    for (const auto &[clusterId, anchors] : featureManager.clusterAnchors_)
-                    {
-                        // a cluster without a plane thickness has no noise model (no factor yet), skip it
-                        if (anchors.empty() || !featureManager.clusters_.count(clusterId) ||
-                            !featureManager.clusterPlaneThickness_.count(clusterId))
-                            continue;
-                        const std::vector<uint32_t> &anchorKfs = featureManager.clusterAnchorKeyframes_.at(clusterId);
-                        std::vector<Eigen::Vector3d> live;
-                        for (const auto &[idxSubmap, idxPoint] : featureManager.clusters_.at(clusterId))
-                            live.push_back(submaps.at(idxSubmap)->points_.at(idxPoint));
-                        const Eigen::Vector3d &usedNormal = *featureManager.clusterNormals_.at(clusterId);
-                        const Eigen::Vector3d &usedCenter = *featureManager.clusterCenters_.at(clusterId);
-                        std::optional<std::pair<Eigen::Vector3d, Eigen::Vector3d>> livePlane; // normal, center
-                        if (live.size() >= 3)
-                        {
-                            // degeneracy check only (no planarity test): collinear live points have no plane,
-                            // their columns stay nan
-                            const auto [valid, normal, center, mat, thickness] =
-                                planeFitCovariance(live, /*planarityThreshold=*/1.0, /*linearityThreshold=*/0.05);
-                            if (valid)
-                            {
-                                livePlane = std::make_pair(normal, center);
-                                const double cosAngle = std::min(1.0, std::abs(normal.dot(usedNormal)));
-                                normalAngle.push_back(std::acos(cosAngle) * 180.0 / M_PI);
-                            }
-                        }
-                        const double sigma = std::pow(featureManager.factorVariance(clusterId), 0.25);
-                        for (std::size_t i = 0; i < anchors.size(); i++)
-                        {
-                            AnchorRow anchor;
-                            anchor.kf = kf;
-                            anchor.clusterId = clusterId;
-                            anchor.age = kf - anchorKfs.at(i);
-                            anchor.distUsedPlane = std::abs(usedNormal.dot(anchors[i] - usedCenter));
-                            if (livePlane)
-                            {
-                                anchor.distLivePlane = std::abs(livePlane->first.dot(anchors[i] - livePlane->second));
-                                distLive.push_back(anchor.distLivePlane / sigma);
-                            }
-                            anchor.nLive = static_cast<uint32_t>(live.size());
-                            anchor.nAnchors = static_cast<uint32_t>(anchors.size());
-                            anchor.sigma = sigma;
-                            row.anchors.push_back(anchor);
-                        }
-                    }
-                    row.anchor_dist_live = makeStats(std::move(distLive));
-                    row.anchor_normal_angle = makeStats(std::move(normalAngle));
                 }
 
                 void collectImu(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states)
@@ -291,11 +235,6 @@ namespace mapping
                     row.lidar_fac_new = stats.numFactorsAdded;
                     row.clusters_pruned = stats.numPruned;
                     row.clusters_shifted_idle = stats.numShiftedIdle;
-                    std::vector<double> anchorCounts;
-                    for (const auto &[clusterId, anchors] : featureManager.clusterAnchors_)
-                        if (!anchors.empty())
-                            anchorCounts.push_back(static_cast<double>(anchors.size()));
-                    row.anchor_pts = makeStats(std::move(anchorCounts));
                     if (!row.marg_kf)
                         return; // no marginalization in this update, the marginalization columns stay nan
                     row.marg_n = stats.numMargFactors;
@@ -549,7 +488,6 @@ namespace mapping
                     return;
                 collectGroup("frontend/geometry", *row.kf,
                              [&] { collectFrontendAndGeometry(row, states, featureManager); });
-                collectGroup("anchors", *row.kf, [&] { collectAnchors(row, states, featureManager); });
                 if (row.lost_tracking)
                     return; // no smoother update for this keyframe, IMU and backend columns stay nan
                 collectGroup("IMU", *row.kf, [&] { collectImu(row, imuPropagated, states); });

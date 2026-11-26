@@ -103,10 +103,6 @@ namespace mapping
             /// Information matrix for `eig_*_min`: sum over `Tracked` clusters with a point in this keyframe of
             /// `J^T J / s`, `J = [(p x n)^T, n^T]`, `p` the point and `n` the cluster normal in the keyframe IMU frame,
             /// `s = FeatureManager::factorVariance`. Rotation block first, as in `gtsam::Pose3`.
-            ///
-            /// Anchors (`anchor_dist_live`, `anchor_normal_angle`, rows of `anchors.csv`): per cluster with anchors,
-            /// the live points (world frame, after the update) are fit with `planeFitCovariance`, and each anchor is
-            /// measured against that plane and against the plane of the factor (`clusterCenters_`/`clusterNormals_`).
             void collect(KeyframeTelemetry &row, const gtsam::Pose3 &imuPropagated, const States &states,
                          const FeatureManager &featureManager, const Smoother &smoother) noexcept;
         } // namespace instrumentation

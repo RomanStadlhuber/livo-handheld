@@ -66,13 +66,6 @@
 ///   factor after the update (e.g. `ShiftedIdle` overwritten with `Idle` by a failed track).
 /// - `clusters_pruned`, `clusters_shifted_idle`: clusters that `removeKeyframeFromClusters` sets to `Pruned` /
 ///   `ShiftedIdle`
-/// - `anchor_pts` (`Stats`): number of anchors (constant world points of marginalized keyframes,
-///   `backend.marginalization_anchor`) per cluster, over the clusters with at least one anchor, at the end of the
-///   keyframe. Empty (`n` = 0) when the switch is off.
-/// - `anchor_dist_live` (`Stats`): per anchor `|dist_live_plane| / sigma`, see `anchors.csv`
-///   (`AnchorRow`). Empty when the switch is off.
-/// - `anchor_normal_angle` (`Stats`) `[deg]`: per cluster with anchors and at least 3 live points, the angle between
-///   the normal of the factor plane and the normal of a plane fit from the live points only
 /// - `lidar_fac_marg_whole`: factors on a marginalized keyframe that go whole into the iSAM2 marginalization by design
 ///   (block release, `backend.block_release_size`). They do not count in `_pruned` / `_lost`.
 /// - `t_update_ms` `[ms]`: wall time of `Smoother::updateAndOptimizeGraph` (all iSAM2 updates and the estimate)
@@ -167,9 +160,6 @@
     X(Real, fixed_kf_first)                                                                                            \
     X(Real, fixed_kf_last)                                                                                             \
     X(Index, n_fixed_vb)                                                                                               \
-    X(Stats, anchor_pts)                                                                                               \
-    X(Stats, anchor_dist_live)                                                                                         \
-    X(Stats, anchor_normal_angle)                                                                                      \
     X(Real, t_update_ms)                                                                                               \
     X(Index, marg_n)                                                                                                   \
     X(Real, marg_info_rot)                                                                                             \
@@ -253,28 +243,6 @@ namespace mapping
 #define KF_TELEMETRY_MEMBER(Type, name) field::Type::value_type name = field::Type::init();
 
         /// @ingroup benchmarking
-        /// @brief One row of `anchors.csv`: one anchor of a cluster after the smoother update of keyframe `kf`.
-        /// @details Distances are absolute point-to-plane distances `[m]` of the anchor (world point, frozen at its
-        /// creation). `sigma` `[m]` is `factorVariance^(1/4)`, the point distance scale of the cluster (the factor
-        /// residual is a mean squared distance `[m^2]` with variance `[m^4]`, same form as the gating test).
-        struct AnchorRow
-        {
-            uint32_t kf = 0, clusterId = 0;
-            /// @brief `kf` minus the keyframe that created the anchor.
-            uint32_t age = 0;
-            /// @brief Distance to a plane fit from the live points only (after the update), `nan` with fewer than 3
-            /// live points or a degenerate fit.
-            double distLivePlane = field::NaN;
-            /// @brief Distance to the plane of the factor (live points and anchors) as used in this update.
-            /// @details The factor shares this plane (`clusterCenters_`/`clusterNormals_`) and does not refit it during
-            /// the update. `createAndUpdateFactors` fits it before the update, so it lags the live points by one
-            /// update.
-            double distUsedPlane = field::NaN;
-            uint32_t nLive = 0, nAnchors = 0;
-            double sigma = field::NaN;
-        };
-
-        /// @ingroup benchmarking
         /// @brief One row of `clusters.csv`: one `PointToPlaneFactor` in the smoother right before the update of
         /// keyframe `kf`, only at keyframes that marginalize. For the span analysis of block release.
         struct ClusterSpanRow
@@ -292,11 +260,10 @@ namespace mapping
 
         /// @ingroup benchmarking
         /// @brief One row of `telemetry.csv`, members generated from `KF_TELEMETRY_FIELDS`.
-        /// @details Also carries the rows of the per-keyframe detail files `anchors.csv` and `clusters.csv`.
+        /// @details Also carries the rows of the per-keyframe detail file `clusters.csv`.
         struct KeyframeTelemetry
         {
             KF_TELEMETRY_FIELDS(KF_TELEMETRY_MEMBER)
-            std::vector<AnchorRow> anchors;
             std::vector<ClusterSpanRow> clusterSpans;
         };
 
@@ -314,11 +281,6 @@ namespace mapping
         /// @brief Append one CSV row (incl. newline).
         /// @param bagStart Absolute bag time of the first message, added to `Time` fields.
         void appendCsvRow(std::string &out, const KeyframeTelemetry &row, double bagStart);
-
-        /// @ingroup benchmarking
-        /// @brief Header and rows of `anchors.csv` (incl. newline).
-        void appendAnchorsCsvHeader(std::string &out);
-        void appendAnchorsCsvRow(std::string &out, const AnchorRow &row);
 
         /// @ingroup benchmarking
         /// @brief Header and rows of `clusters.csv` (incl. newline). `keyframes` is one space-separated column.

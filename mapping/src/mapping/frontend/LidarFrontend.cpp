@@ -182,9 +182,6 @@ namespace mapping
                 const auto &[idxSubmap, idxPoint] = pointIdxPair;
                 clusterPoints.push_back(keyframeSubmaps[idxSubmap]->points_[idxPoint]);
             }
-            // anchors of marginalized keyframes count in the plane fit
-            const auto &anchors = featureManager.anchorsOf(clusterId);
-            clusterPoints.insert(clusterPoints.end(), anchors.begin(), anchors.end());
             const auto [planeValid, planeNormal, clusterCenter, clusterPointsMat, planeThickness] =
                 planeFitCovariance(clusterPoints, config.lidar_frontend.planarity_check.planarity,
                                    config.lidar_frontend.planarity_check.linearity);

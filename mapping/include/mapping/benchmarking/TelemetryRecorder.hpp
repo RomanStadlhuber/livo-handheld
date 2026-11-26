@@ -29,9 +29,8 @@ namespace mapping
             /// @return false if the file could not be written.
             bool writeCsv(const std::string &path, double bagStart) const;
 
-            /// @brief Write the detail rows of all keyframes: `anchors.csv` and `clusters.csv`.
+            /// @brief Write the detail rows of all keyframes: `clusters.csv`.
             /// @return false if a file could not be written.
-            bool writeAnchorsCsv(const std::string &path) const;
             bool writeClustersCsv(const std::string &path) const;
 
             /// @brief Number of recorded rows.

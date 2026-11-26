@@ -323,7 +323,6 @@ ros2 run mapping mapper --bag <bag_dir> --config <config.yaml> --output-dir <rep
 
 - `trajectory.tum`: keyframe poses (IMU frame) with absolute bag timestamps, readable by `evo`
 - `telemetry.csv`: one row per keyframe that `track()` creates, also for keyframes that lose tracking, see below
-- `anchors.csv`: one row per anchor per keyframe (only with `backend.marginalization_anchor`), see `AnchorRow`
 - `clusters.csv`: one row per LiDAR cluster factor in the smoother before each update that marginalizes, see `ClusterSpanRow`
 - `config.yaml`: the `MappingConfig` used by the run, serialized after loading. It holds the real values incl. defaults for missing keys, not the user file
 - `run.yaml`: git commit and dirty flag, build type, inputs, timing and result counters, exit code
@@ -402,8 +401,6 @@ A run directory written from the container belongs to `root`. Give it to your us
 ```bash
 # span distribution and block-release simulation (shed / end at boundary) from clusters.csv
 mapping/scripts/.venv/bin/python mapping/scripts/block_release_analysis.py spans benchmark_runs/<name> --out <dir>
-# anchor distance to the live-point plane and to the factor plane, vs. anchor age and vs. keyframe
-mapping/scripts/.venv/bin/python mapping/scripts/block_release_analysis.py anchors benchmark_runs/<a> [<b> ...] --out anchors.png
 # smoother update time per keyframe (t_update_ms): median, p95, max
 mapping/scripts/.venv/bin/python mapping/scripts/block_release_analysis.py timing benchmark_runs/<a> [<b> ...]
 ```

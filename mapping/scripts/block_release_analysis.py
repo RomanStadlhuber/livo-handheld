@@ -4,7 +4,6 @@
 Subcommands, each reads one or more run directories (benchmark build, bag mode with `--output-dir`):
 
 - `spans RUN`: cluster span distribution and block-release simulation from `clusters.csv`
-- `anchors RUN [RUN ...] --out PNG`: anchor drift plots from `anchors.csv`
 - `timing RUN [RUN ...]`: smoother update time per keyframe from `telemetry.csv` (`t_update_ms`)
 
 `spans`
@@ -157,37 +156,6 @@ def cmd_spans(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_anchors(args: argparse.Namespace) -> int:
-    fig, (ax_age, ax_kf) = plt.subplots(1, 2, figsize=(12, 4.5))
-    for run in args.runs:
-        df = pd.read_csv(run / "anchors.csv")
-        if df.empty:
-            print(f"{run}: anchors.csv has no rows (anchors off?)")
-            continue
-        df["live_sigma"] = df["dist_live_plane"] / df["sigma"]
-        df["used_sigma"] = df["dist_used_plane"] / df["sigma"]
-        by_age = df.groupby("anchor_age")[["live_sigma", "used_sigma"]].median()
-        by_kf = df.groupby("kf")[["live_sigma", "used_sigma"]].median()
-        (line,) = ax_age.plot(by_age.index, by_age["live_sigma"], label=f"{run.name}: live plane")
-        ax_age.plot(by_age.index, by_age["used_sigma"], ls="--", color=line.get_color(), label=f"{run.name}: factor")
-        ax_kf.plot(by_kf.index, by_kf["live_sigma"], color=line.get_color(), label=f"{run.name}: live plane")
-        ax_kf.plot(by_kf.index, by_kf["used_sigma"], ls="--", color=line.get_color(), label=f"{run.name}: factor")
-        print(
-            f"{run}: {len(df)} rows, median dist_live/sigma {df['live_sigma'].median():.3g}, "
-            f"median dist_used/sigma {df['used_sigma'].median():.3g}"
-        )
-    for ax, xlabel in ((ax_age, "anchor age [keyframes]"), (ax_kf, "keyframe")):
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("median distance / sigma")
-        ax.set_yscale("log")
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8)
-    fig.tight_layout()
-    fig.savefig(args.out, dpi=120)
-    print(f"wrote {args.out}")
-    return 0
-
-
 def cmd_timing(args: argparse.Namespace) -> int:
     for run in args.runs:
         df = pd.read_csv(run / "telemetry.csv")
@@ -207,10 +175,6 @@ def main() -> int:
     p_spans.add_argument("--block-sizes", type=int, nargs="+", default=BLOCK_SIZES)
     p_spans.add_argument("--out", type=Path, help="write spans.csv, block_sim.csv and spans.png here")
     p_spans.set_defaults(func=cmd_spans)
-    p_anchors = sub.add_parser("anchors", help="anchor distance to the live / factor plane")
-    p_anchors.add_argument("runs", type=Path, nargs="+")
-    p_anchors.add_argument("--out", type=Path, required=True, help="output PNG")
-    p_anchors.set_defaults(func=cmd_anchors)
     p_timing = sub.add_parser("timing", help="smoother update time per keyframe")
     p_timing.add_argument("runs", type=Path, nargs="+")
     p_timing.set_defaults(func=cmd_timing)
